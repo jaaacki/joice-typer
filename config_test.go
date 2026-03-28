@@ -176,6 +176,38 @@ func TestValidate_ValidTypeModes(t *testing.T) {
 	}
 }
 
+func TestValidate_InvalidLanguage(t *testing.T) {
+	tests := []struct {
+		lang    string
+		wantErr bool
+	}{
+		{"", false},
+		{"en", false},
+		{"zh", false},
+		{"yue", false},
+		{"EN", true},          // uppercase
+		{"en-US", true},       // has hyphen
+		{"12", true},          // numbers
+		{"abcde", true},       // too long
+		{"javascript", true},  // way too long
+	}
+	for _, tt := range tests {
+		cfg := Config{
+			TriggerKey: []string{"fn", "shift"},
+			ModelSize:  "small",
+			SampleRate: 16000,
+			Language:   tt.lang,
+		}
+		err := cfg.Validate()
+		if tt.wantErr && err == nil {
+			t.Errorf("expected error for language %q, got nil", tt.lang)
+		}
+		if !tt.wantErr && err != nil {
+			t.Errorf("expected no error for language %q, got: %v", tt.lang, err)
+		}
+	}
+}
+
 func TestLoadConfig_DefaultTypeMode(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.yaml")

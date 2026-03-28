@@ -24,6 +24,7 @@ type App struct {
 	recording      bool
 	streamInterval time.Duration
 	streamer       *Streamer
+	wg             sync.WaitGroup
 }
 
 // NewApp creates an App with all components pre-constructed.
@@ -145,6 +146,7 @@ func (a *App) handleReleaseStream() {
 	a.streamer = nil
 
 	if streamer != nil && len(audio) > 0 {
+		a.wg.Add(1)
 		go a.finalizeStream(streamer, audio)
 	} else {
 		a.emitState(StateReady)
@@ -152,6 +154,8 @@ func (a *App) handleReleaseStream() {
 }
 
 func (a *App) finalizeStream(streamer *Streamer, audio []float32) {
+	defer a.wg.Done()
+
 	if !atomic.CompareAndSwapInt32(&a.busy, 0, 1) {
 		a.logger.Warn("finalization already in progress",
 			"operation", "finalizeStream")
@@ -197,10 +201,13 @@ func (a *App) handleReleaseClipboard() {
 	}
 
 	// Process transcription async so event loop stays responsive
+	a.wg.Add(1)
 	go a.transcribeAndPaste(audio)
 }
 
 func (a *App) transcribeAndPaste(audio []float32) {
+	defer a.wg.Done()
+
 	if !atomic.CompareAndSwapInt32(&a.busy, 0, 1) {
 		a.logger.Warn("transcription already in progress, dropping audio",
 			"operation", "transcribeAndPaste")
@@ -237,8 +244,10 @@ func (a *App) transcribeAndPaste(audio []float32) {
 }
 
 // Shutdown gracefully closes all components.
+// Waits for in-flight background goroutines before freeing resources.
 func (a *App) Shutdown() {
-	a.logger.Info("shutting down", "operation", "Shutdown")
+	a.logger.Info("shutting down, waiting for in-flight work", "operation", "Shutdown")
+	a.wg.Wait()
 
 	if err := a.recorder.Close(); err != nil {
 		a.logger.Error("failed to close recorder",

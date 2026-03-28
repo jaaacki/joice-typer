@@ -10,6 +10,8 @@ import "C"
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"log/slog"
@@ -17,20 +19,37 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 	"unsafe"
 )
 
+// modelSpec defines expected properties for each whisper model size.
+type modelSpec struct {
+	minBytes int64
+	sha256   string // empty = accept any; pin after verified download
+}
+
+// Minimum sizes are generous lower bounds — well below actual model sizes
+// to avoid rejecting legitimate models while catching truncated downloads.
+var modelManifest = map[string]modelSpec{
+	"tiny":   {minBytes: 30 * 1024 * 1024},  // actual ~75MB
+	"base":   {minBytes: 70 * 1024 * 1024},  // actual ~142MB
+	"small":  {minBytes: 200 * 1024 * 1024}, // actual ~466MB
+	"medium": {minBytes: 700 * 1024 * 1024}, // actual ~1.5GB
+}
+
 type whisperTranscriber struct {
+	mu     sync.Mutex
 	ctx    *C.struct_whisper_context
 	lang   string
 	logger *slog.Logger
 }
 
-func NewTranscriber(modelPath string, language string, logger *slog.Logger) (Transcriber, error) {
+func NewTranscriber(modelPath string, modelSize string, language string, logger *slog.Logger) (Transcriber, error) {
 	l := logger.With("component", "transcriber")
 
-	if err := ensureModel(modelPath, l); err != nil {
+	if err := ensureModel(modelPath, modelSize, l); err != nil {
 		return nil, fmt.Errorf("transcriber.NewTranscriber: %w", err)
 	}
 
@@ -42,7 +61,23 @@ func NewTranscriber(modelPath string, language string, logger *slog.Logger) (Tra
 	cparams := C.whisper_context_default_params()
 	ctx := C.whisper_init_from_file_with_params(cPath, cparams)
 	if ctx == nil {
-		return nil, fmt.Errorf("transcriber.NewTranscriber: failed to load model from %s", modelPath)
+		// Quarantine bad model so future startups re-download instead of failing forever
+		badPath := modelPath + ".bad"
+		if renameErr := os.Rename(modelPath, badPath); renameErr == nil {
+			l.Warn("quarantined corrupt model", "operation", "NewTranscriber",
+				"bad_path", filepath.Base(badPath))
+		}
+		return nil, fmt.Errorf("transcriber.NewTranscriber: model corrupt or incompatible")
+	}
+
+	// Validate language against whisper's own language list
+	if language != "" {
+		cLang := C.CString(language)
+		defer C.free(unsafe.Pointer(cLang))
+		if C.whisper_lang_id(cLang) < 0 {
+			C.whisper_free(ctx)
+			return nil, fmt.Errorf("transcriber.NewTranscriber: unsupported language %q", language)
+		}
 	}
 
 	l.Info("model loaded", "operation", "NewTranscriber")
@@ -52,6 +87,13 @@ func NewTranscriber(modelPath string, language string, logger *slog.Logger) (Tra
 func (t *whisperTranscriber) Transcribe(audio []float32) (string, error) {
 	if len(audio) == 0 {
 		return "", fmt.Errorf("transcriber.Transcribe: empty audio buffer")
+	}
+
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	if t.ctx == nil {
+		return "", fmt.Errorf("transcriber.Transcribe: transcriber is closed")
 	}
 
 	t.logger.Info("transcribing", "operation", "Transcribe", "samples", len(audio))
@@ -77,8 +119,11 @@ func (t *whisperTranscriber) Transcribe(audio []float32) (string, error) {
 	nSegments := int(C.whisper_full_n_segments(t.ctx))
 	var segments []string
 	for i := 0; i < nSegments; i++ {
-		text := C.GoString(C.whisper_full_get_segment_text(t.ctx, C.int(i)))
-		segments = append(segments, text)
+		cText := C.whisper_full_get_segment_text(t.ctx, C.int(i))
+		if cText == nil {
+			continue // skip nil segments instead of crashing
+		}
+		segments = append(segments, C.GoString(cText))
 	}
 
 	text := strings.TrimSpace(strings.Join(segments, ""))
@@ -88,6 +133,9 @@ func (t *whisperTranscriber) Transcribe(audio []float32) (string, error) {
 }
 
 func (t *whisperTranscriber) Close() error {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
 	t.logger.Info("closing", "operation", "Close")
 	if t.ctx != nil {
 		C.whisper_free(t.ctx)
@@ -100,20 +148,23 @@ func (t *whisperTranscriber) Close() error {
 type DownloadProgressFunc func(progress float64, bytesDownloaded, bytesTotal int64)
 
 // ensureModel checks if the model file exists and downloads it if not.
-func ensureModel(modelPath string, logger *slog.Logger) error {
+func ensureModel(modelPath string, modelSize string, logger *slog.Logger) error {
 	info, err := os.Stat(modelPath)
 	if err == nil {
-		// File exists — validate minimum size (whisper small model is ~460MB)
-		const minModelBytes = 100 * 1024 * 1024 // 100MB minimum for any whisper model
-		if info.Size() < minModelBytes {
+		// File exists — validate against per-model minimum size
+		minBytes := int64(0)
+		if spec, ok := modelManifest[modelSize]; ok {
+			minBytes = spec.minBytes
+		}
+		if minBytes > 0 && info.Size() < minBytes {
 			logger.Warn("model file appears truncated, re-downloading",
 				"operation", "ensureModel",
-				"path", modelPath,
 				"size", info.Size(),
-				"min_expected", minModelBytes,
+				"min_expected", minBytes,
+				"model_size", modelSize,
 			)
-			if err := os.Remove(modelPath); err != nil {
-				return fmt.Errorf("transcriber.ensureModel: remove corrupt model: %w", err)
+			if removeErr := os.Remove(modelPath); removeErr != nil {
+				return fmt.Errorf("transcriber.ensureModel: remove truncated model: %w", removeErr)
 			}
 			// Fall through to download
 		} else {
@@ -124,7 +175,7 @@ func ensureModel(modelPath string, logger *slog.Logger) error {
 	}
 
 	var lastPct int
-	return downloadModelWithProgress(modelPath, func(progress float64, downloaded, total int64) {
+	return downloadModelWithProgress(modelPath, modelSize, func(progress float64, downloaded, total int64) {
 		pct := int(progress * 100)
 		if pct/10 > lastPct/10 {
 			logger.Info("downloading model", "operation", "ensureModel",
@@ -137,12 +188,12 @@ func ensureModel(modelPath string, logger *slog.Logger) error {
 // downloadModelWithProgress downloads a whisper model to modelPath, calling
 // onProgress with download progress. The caller is responsible for existence
 // checks — this function always downloads.
-func downloadModelWithProgress(modelPath string, onProgress DownloadProgressFunc, logger *slog.Logger) error {
+func downloadModelWithProgress(modelPath string, modelSize string, onProgress DownloadProgressFunc, logger *slog.Logger) error {
 	modelFile := filepath.Base(modelPath)
 	url := "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/" + modelFile
 
 	logger.Warn("downloading model from network",
-		"operation", "downloadModelWithProgress", "url", url, "dest", modelPath)
+		"operation", "downloadModelWithProgress", "model_size", modelSize)
 
 	dir := filepath.Dir(modelPath)
 	if err := os.MkdirAll(dir, 0755); err != nil {
@@ -157,24 +208,33 @@ func downloadModelWithProgress(modelPath string, onProgress DownloadProgressFunc
 		return fmt.Errorf("transcriber.downloadModelWithProgress: create request: %w", err)
 	}
 
-	client := &http.Client{Timeout: 10 * time.Minute}
+	transport := &http.Transport{
+		TLSHandshakeTimeout:   10 * time.Second,
+		ResponseHeaderTimeout: 30 * time.Second,
+	}
+	client := &http.Client{
+		Transport: transport,
+		Timeout:   10 * time.Minute,
+	}
 	resp, err := client.Do(req)
 	if err != nil {
-		return fmt.Errorf("transcriber.downloadModelWithProgress: download: %w", err)
+		return fmt.Errorf("transcriber.downloadModelWithProgress: download failed: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("transcriber.downloadModelWithProgress: status %d", resp.StatusCode)
+		return fmt.Errorf("transcriber.downloadModelWithProgress: HTTP %d", resp.StatusCode)
 	}
 
-	// Reject HTML error pages from proxies
+	// Reject non-binary content types: HTML error pages, JSON errors, proxied junk
 	ct := resp.Header.Get("Content-Type")
-	if strings.Contains(ct, "text/html") {
-		return fmt.Errorf("transcriber.downloadModelWithProgress: got HTML instead of model")
+	if strings.HasPrefix(ct, "text/") || strings.Contains(ct, "application/json") {
+		return fmt.Errorf("transcriber.downloadModelWithProgress: unexpected content type %q", ct)
 	}
 
 	tmpPath := modelPath + ".tmp"
+	os.Remove(tmpPath) // clean up any stale temp from a previous failed download
+
 	f, err := os.Create(tmpPath)
 	if err != nil {
 		return fmt.Errorf("transcriber.downloadModelWithProgress: create file: %w", err)
@@ -184,36 +244,65 @@ func downloadModelWithProgress(modelPath string, onProgress DownloadProgressFunc
 	const maxDownloadBytes = 2 * 1024 * 1024 * 1024
 	limitedBody := io.LimitReader(resp.Body, maxDownloadBytes)
 
+	// Hash during download for integrity verification
+	hashWriter := sha256.New()
+	teedBody := io.TeeReader(limitedBody, hashWriter)
+
 	pr := &callbackProgressReader{
-		reader:     limitedBody,
+		reader:     teedBody,
 		total:      resp.ContentLength,
 		onProgress: onProgress,
 	}
 
 	written, copyErr := io.Copy(f, pr)
+	if syncErr := f.Sync(); syncErr != nil && copyErr == nil {
+		copyErr = syncErr
+	}
 	closeErr := f.Close()
+
 	if copyErr != nil {
-		if removeErr := os.Remove(tmpPath); removeErr != nil {
-			logger.Error("failed to remove temp file",
-				"operation", "downloadModelWithProgress", "error", removeErr)
-		}
+		os.Remove(tmpPath)
 		return fmt.Errorf("transcriber.downloadModelWithProgress: write: %w", copyErr)
 	}
 	if closeErr != nil {
-		if removeErr := os.Remove(tmpPath); removeErr != nil {
-			logger.Error("failed to remove temp file",
-				"operation", "downloadModelWithProgress", "error", removeErr)
-		}
+		os.Remove(tmpPath)
 		return fmt.Errorf("transcriber.downloadModelWithProgress: close: %w", closeErr)
+	}
+
+	// Validate Content-Length match (detects truncation)
+	if resp.ContentLength > 0 && written != resp.ContentLength {
+		os.Remove(tmpPath)
+		return fmt.Errorf("transcriber.downloadModelWithProgress: truncated: got %d bytes, expected %d", written, resp.ContentLength)
+	}
+
+	// Detect hitting the 2GB safety cap (oversized stream or upstream lies about length)
+	if written >= maxDownloadBytes {
+		os.Remove(tmpPath)
+		return fmt.Errorf("transcriber.downloadModelWithProgress: exceeded %d byte limit", maxDownloadBytes)
+	}
+
+	// Validate against per-model minimum size
+	if spec, ok := modelManifest[modelSize]; ok && written < spec.minBytes {
+		os.Remove(tmpPath)
+		return fmt.Errorf("transcriber.downloadModelWithProgress: too small (%d bytes, minimum %d for %s)", written, spec.minBytes, modelSize)
+	}
+
+	hash := hex.EncodeToString(hashWriter.Sum(nil))
+
+	// Verify SHA-256 if pinned in manifest
+	if spec, ok := modelManifest[modelSize]; ok && spec.sha256 != "" {
+		if hash != spec.sha256 {
+			os.Remove(tmpPath)
+			return fmt.Errorf("transcriber.downloadModelWithProgress: sha256 mismatch: got %s, expected %s", hash, spec.sha256)
+		}
 	}
 
 	if err := os.Rename(tmpPath, modelPath); err != nil {
 		return fmt.Errorf("transcriber.downloadModelWithProgress: rename: %w", err)
 	}
 
-	// TODO(v2): Add SHA256 checksum verification of downloaded model file.
-
-	logger.Info("model downloaded", "operation", "downloadModelWithProgress", "bytes", written)
+	logger.Info("model downloaded", "operation", "downloadModelWithProgress",
+		"bytes", written, "sha256", hash)
 	return nil
 }
 

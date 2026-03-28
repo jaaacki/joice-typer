@@ -216,6 +216,17 @@ void updateSetupDownloadComplete(void) {
     });
 }
 
+void updateSetupDownloadFailed(const char *errorMsg) {
+    NSString *msg = [NSString stringWithUTF8String:errorMsg];
+    dispatch_async(dispatch_get_main_queue(), ^{
+        sStep3Indicator.stringValue = @"\u274C";
+        sProgressBar.doubleValue = 0;
+        sProgressLabel.stringValue = msg;
+        sStep3Status.stringValue = @"Download failed \u2014 restart to retry";
+        sStep3Status.textColor = [NSColor systemRedColor];
+    });
+}
+
 void updateSetupReady(void) {
     dispatch_async(dispatch_get_main_queue(), ^{
         sStep4Indicator.stringValue = @"\u2705";

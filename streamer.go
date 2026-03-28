@@ -132,7 +132,13 @@ func (s *Streamer) Stop() {
 	s.mu.Unlock()
 
 	close(s.stopCh)
-	<-s.done
+
+	select {
+	case <-s.done:
+	case <-time.After(5 * time.Second):
+		s.logger.Error("streamer stop timed out", "operation", "Stop")
+	}
+
 	s.logger.Info("streaming stopped", "operation", "Stop")
 }
 

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log/slog"
 	"sync"
+	"time"
 
 	"github.com/gordonklaus/portaudio"
 )
@@ -170,6 +171,25 @@ func (r *portaudioRecorder) readLoop() {
 	}
 }
 
+func (r *portaudioRecorder) Snapshot() []float32 {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	total := 0
+	for _, chunk := range r.chunks {
+		total += len(chunk)
+	}
+	if total == 0 {
+		return nil
+	}
+
+	audio := make([]float32, 0, total)
+	for _, chunk := range r.chunks {
+		audio = append(audio, chunk...)
+	}
+	return audio
+}
+
 func (r *portaudioRecorder) Stop() ([]float32, error) {
 	r.mu.Lock()
 	if !r.recording {
@@ -177,20 +197,25 @@ func (r *portaudioRecorder) Stop() ([]float32, error) {
 		return nil, fmt.Errorf("recorder.Stop: not recording")
 	}
 	r.recording = false
+	chunks := r.chunks
+	r.chunks = nil
+	stream := r.stream // grab ref under lock before readLoop can nil it
 	r.mu.Unlock()
 
 	r.logger.Debug("stopping", "operation", "Stop")
 
-	// Grab audio immediately — don't wait for readLoop to exit.
-	// readLoop cleans up the stream in its own defer.
-	r.mu.Lock()
-	chunks := r.chunks
-	r.chunks = nil
-	r.mu.Unlock()
+	// Signal PortAudio to stop — readLoop will exit when Read returns error
+	if stream != nil {
+		if err := stream.Stop(); err != nil {
+			r.logger.Error("failed to stop stream", "operation", "Stop", "error", err)
+		}
+	}
 
-	// Signal PortAudio to stop (readLoop will exit when Read returns error)
-	if err := r.stream.Stop(); err != nil {
-		r.logger.Error("failed to stop stream", "operation", "Stop", "error", err)
+	// Wait for readLoop to finish and clean up the stream
+	select {
+	case <-r.done:
+	case <-time.After(2 * time.Second):
+		r.logger.Error("readLoop stop timed out", "operation", "Stop")
 	}
 
 	total := 0

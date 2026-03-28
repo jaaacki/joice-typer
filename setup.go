@@ -63,21 +63,33 @@ func RunSetupWizard(logger *slog.Logger) (string, error) {
 
 	// Step 3: Model download in background goroutine
 	go func() {
-		modelPath, pathErr := DefaultModelPath("small")
+		const setupModelSize = "small"
+		modelPath, pathErr := DefaultModelPath(setupModelSize)
 		if pathErr != nil {
 			l.Error("failed to resolve model path", "operation", "RunSetupWizard", "error", pathErr)
+			cErr := C.CString(pathErr.Error())
+			C.updateSetupDownloadFailed(cErr)
+			C.free(unsafe.Pointer(cErr))
 			return
 		}
-		if info, statErr := os.Stat(modelPath); statErr == nil && info.Size() > 100*1024*1024 {
+		// Check if model already exists and meets minimum size
+		minBytes := int64(0)
+		if spec, ok := modelManifest[setupModelSize]; ok {
+			minBytes = spec.minBytes
+		}
+		if info, statErr := os.Stat(modelPath); statErr == nil && info.Size() >= minBytes {
 			C.updateSetupDownloadComplete()
 			C.updateSetupReady()
 			return
 		}
-		dlErr := downloadModelWithProgress(modelPath, func(progress float64, downloaded, total int64) {
+		dlErr := downloadModelWithProgress(modelPath, setupModelSize, func(progress float64, downloaded, total int64) {
 			C.updateSetupDownloadProgress(C.double(progress), C.longlong(downloaded), C.longlong(total))
 		}, l)
 		if dlErr != nil {
 			l.Error("model download failed", "operation", "RunSetupWizard", "error", dlErr)
+			cErr := C.CString(dlErr.Error())
+			C.updateSetupDownloadFailed(cErr)
+			C.free(unsafe.Pointer(cErr))
 			return
 		}
 		C.updateSetupDownloadComplete()

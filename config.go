@@ -88,6 +88,16 @@ func (c Config) Validate() error {
 	if c.TypeMode != "" && !validTypeModes[c.TypeMode] {
 		return fmt.Errorf("config.Validate: invalid type_mode %q (must be clipboard or stream)", c.TypeMode)
 	}
+	if c.Language != "" {
+		if len(c.Language) > 4 {
+			return fmt.Errorf("config.Validate: language code too long %q", c.Language)
+		}
+		for _, r := range c.Language {
+			if r < 'a' || r > 'z' {
+				return fmt.Errorf("config.Validate: language must be lowercase letters, got %q", c.Language)
+			}
+		}
+	}
 	return nil
 }
 
