@@ -27,7 +27,6 @@ import (
 // modelSpec defines expected properties for each whisper model size.
 type modelSpec struct {
 	minBytes int64
-	sha256   string // empty = accept any; pin after verified download
 }
 
 // Minimum sizes are generous lower bounds — well below actual model sizes
@@ -147,31 +146,68 @@ func (t *whisperTranscriber) Close() error {
 // DownloadProgressFunc is called during model download with progress info.
 type DownloadProgressFunc func(progress float64, bytesDownloaded, bytesTotal int64)
 
+// validateCachedModel checks if a cached model file is valid.
+// Returns true if the model is ready to use. Removes or quarantines bad models.
+func validateCachedModel(modelPath string, modelSize string, logger *slog.Logger) bool {
+	info, err := os.Stat(modelPath)
+	if err != nil {
+		return false // file doesn't exist
+	}
+
+	// Size validation
+	if spec, ok := modelManifest[modelSize]; ok {
+		if info.Size() < spec.minBytes {
+			logger.Warn("model file appears truncated",
+				"operation", "validateCachedModel",
+				"size", info.Size(), "min_expected", spec.minBytes, "model_size", modelSize)
+			os.Remove(modelPath)
+			return false
+		}
+	}
+
+	// Hash validation — if a hash file exists from a previous download, verify
+	hashPath := modelPath + ".sha256"
+	savedHash, readErr := os.ReadFile(hashPath)
+	if readErr == nil {
+		f, openErr := os.Open(modelPath)
+		if openErr != nil {
+			logger.Error("cannot open model for hash verification",
+				"operation", "validateCachedModel", "error", openErr)
+			return false
+		}
+		h := sha256.New()
+		if _, copyErr := io.Copy(h, f); copyErr != nil {
+			f.Close()
+			logger.Error("failed to hash model",
+				"operation", "validateCachedModel", "error", copyErr)
+			return false
+		}
+		f.Close()
+		currentHash := hex.EncodeToString(h.Sum(nil))
+		expected := strings.TrimSpace(string(savedHash))
+		if currentHash != expected {
+			logger.Warn("model hash mismatch, quarantining",
+				"operation", "validateCachedModel",
+				"expected", expected, "got", currentHash)
+			badPath := modelPath + ".bad"
+			os.Rename(modelPath, badPath)
+			os.Remove(hashPath)
+			return false
+		}
+		logger.Info("model verified", "operation", "validateCachedModel",
+			"sha256", currentHash)
+	} else {
+		logger.Info("model found (no hash file, will hash on next download)",
+			"operation", "validateCachedModel", "size", info.Size())
+	}
+
+	return true
+}
+
 // ensureModel checks if the model file exists and downloads it if not.
 func ensureModel(modelPath string, modelSize string, logger *slog.Logger) error {
-	info, err := os.Stat(modelPath)
-	if err == nil {
-		// File exists — validate against per-model minimum size
-		minBytes := int64(0)
-		if spec, ok := modelManifest[modelSize]; ok {
-			minBytes = spec.minBytes
-		}
-		if minBytes > 0 && info.Size() < minBytes {
-			logger.Warn("model file appears truncated, re-downloading",
-				"operation", "ensureModel",
-				"size", info.Size(),
-				"min_expected", minBytes,
-				"model_size", modelSize,
-			)
-			if removeErr := os.Remove(modelPath); removeErr != nil {
-				return fmt.Errorf("transcriber.ensureModel: remove truncated model: %w", removeErr)
-			}
-			// Fall through to download
-		} else {
-			logger.Info("model found", "operation", "ensureModel",
-				"path", modelPath, "size", info.Size())
-			return nil
-		}
+	if validateCachedModel(modelPath, modelSize, logger) {
+		return nil
 	}
 
 	var lastPct int
@@ -289,16 +325,15 @@ func downloadModelWithProgress(modelPath string, modelSize string, onProgress Do
 
 	hash := hex.EncodeToString(hashWriter.Sum(nil))
 
-	// Verify SHA-256 if pinned in manifest
-	if spec, ok := modelManifest[modelSize]; ok && spec.sha256 != "" {
-		if hash != spec.sha256 {
-			os.Remove(tmpPath)
-			return fmt.Errorf("transcriber.downloadModelWithProgress: sha256 mismatch: got %s, expected %s", hash, spec.sha256)
-		}
-	}
-
 	if err := os.Rename(tmpPath, modelPath); err != nil {
 		return fmt.Errorf("transcriber.downloadModelWithProgress: rename: %w", err)
+	}
+
+	// Store hash for load-time verification on future startups
+	hashPath := modelPath + ".sha256"
+	if writeErr := os.WriteFile(hashPath, []byte(hash), 0644); writeErr != nil {
+		logger.Error("failed to write hash file",
+			"operation", "downloadModelWithProgress", "error", writeErr)
 	}
 
 	logger.Info("model downloaded", "operation", "downloadModelWithProgress",

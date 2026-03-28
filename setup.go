@@ -72,12 +72,8 @@ func RunSetupWizard(logger *slog.Logger) (string, error) {
 			C.free(unsafe.Pointer(cErr))
 			return
 		}
-		// Check if model already exists and meets minimum size
-		minBytes := int64(0)
-		if spec, ok := modelManifest[setupModelSize]; ok {
-			minBytes = spec.minBytes
-		}
-		if info, statErr := os.Stat(modelPath); statErr == nil && info.Size() >= minBytes {
+		// Validate cached model using the same path as main startup
+		if validateCachedModel(modelPath, setupModelSize, l) {
 			C.updateSetupDownloadComplete()
 			C.updateSetupReady()
 			return

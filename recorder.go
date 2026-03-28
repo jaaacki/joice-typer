@@ -18,6 +18,7 @@ type portaudioRecorder struct {
 	mu           sync.Mutex
 	recording    bool
 	done         chan struct{}
+	sessionID    uint64
 	logger       *slog.Logger
 	maxSamples   int
 	totalSamples int
@@ -79,13 +80,25 @@ func (r *portaudioRecorder) Start() error {
 		return fmt.Errorf("recorder.Start: already recording")
 	}
 
+	// Ensure previous readLoop has fully exited before starting new session.
+	// If Stop timed out, the zombie readLoop still holds the old stream.
+	// Refuse to start until it's done to prevent ownership conflicts.
+	if r.done != nil {
+		select {
+		case <-r.done:
+			// Previous session cleaned up
+		default:
+			return fmt.Errorf("recorder.Start: previous recording session still active")
+		}
+	}
+
 	r.logger.Debug("starting", "operation", "Start",
 		"sample_rate", r.sampleRate, "device", r.deviceName)
 
 	r.chunks = nil
 	r.totalSamples = 0
 	r.recording = true
-	r.done = make(chan struct{})
+	r.sessionID++
 	r.buffer = make([]float32, 1024)
 
 	var stream *portaudio.Stream
@@ -126,36 +139,37 @@ func (r *portaudioRecorder) Start() error {
 		return fmt.Errorf("recorder.Start: start stream: %w", err)
 	}
 
-	go r.readLoop()
+	// Pass session state by value — readLoop owns its own stream, buffer,
+	// and done channel. A zombie readLoop from a timed-out Stop cannot
+	// interfere with a future session's resources.
+	done := make(chan struct{})
+	r.done = done
+	go r.readLoop(stream, r.buffer, done, r.sessionID)
 
 	r.logger.Debug("recording started", "operation", "Start")
 	return nil
 }
 
-func (r *portaudioRecorder) readLoop() {
+// readLoop reads audio chunks from the stream until stopped.
+// Owns the stream reference passed by value — closes it on exit.
+// Uses sessionID to detect if it has been superseded by a new session.
+func (r *portaudioRecorder) readLoop(stream *portaudio.Stream, buffer []float32, done chan struct{}, sessionID uint64) {
 	defer func() {
-		// readLoop owns stream cleanup — Stop() must never close the stream
-		// because readLoop may still be blocked in stream.Read()
-		r.mu.Lock()
-		if r.stream != nil {
-			r.stream.Close()
-			r.stream = nil
-		}
-		r.mu.Unlock()
-		close(r.done)
+		stream.Close()
+		close(done)
 	}()
 	for {
-		if err := r.stream.Read(); err != nil {
-			// stream.Read returns error when stream is stopped — this is expected
+		if err := stream.Read(); err != nil {
+			// stream.Read returns error when stream is stopped — expected
 			return
 		}
 		r.mu.Lock()
-		if !r.recording {
+		if !r.recording || r.sessionID != sessionID {
 			r.mu.Unlock()
 			return
 		}
-		chunk := make([]float32, len(r.buffer))
-		copy(chunk, r.buffer)
+		chunk := make([]float32, len(buffer))
+		copy(chunk, buffer)
 		r.chunks = append(r.chunks, chunk)
 		r.totalSamples += len(chunk)
 		if r.totalSamples >= r.maxSamples {
@@ -199,7 +213,8 @@ func (r *portaudioRecorder) Stop() ([]float32, error) {
 	r.recording = false
 	chunks := r.chunks
 	r.chunks = nil
-	stream := r.stream // grab ref under lock before readLoop can nil it
+	stream := r.stream // grab ref under lock before readLoop can close it
+	done := r.done
 	r.mu.Unlock()
 
 	r.logger.Debug("stopping", "operation", "Stop")
@@ -211,9 +226,9 @@ func (r *portaudioRecorder) Stop() ([]float32, error) {
 		}
 	}
 
-	// Wait for readLoop to finish and clean up the stream
+	// Wait for readLoop to finish and close the stream it owns
 	select {
-	case <-r.done:
+	case <-done:
 	case <-time.After(2 * time.Second):
 		r.logger.Error("readLoop stop timed out", "operation", "Stop")
 	}
@@ -239,6 +254,6 @@ func (r *portaudioRecorder) Stop() ([]float32, error) {
 func (r *portaudioRecorder) Close() error {
 	r.logger.Info("closing", "operation", "Close")
 	// Stream cleanup is handled by readLoop's defer.
-	// If readLoop never started or already exited, stream is already nil.
+	// Each readLoop owns its stream by value and closes it on exit.
 	return nil
 }
