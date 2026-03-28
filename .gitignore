@@ -1,0 +1,29 @@
+# Binary
+voicetype
+
+# Build artifacts
+*.o
+*.a
+*.dylib
+
+# whisper.cpp build directory
+third_party/whisper.cpp/build/
+
+# Model files
+*.bin
+
+# macOS
+.DS_Store
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# Go
+vendor/
+
+# Python legacy
+.venv/
+__pycache__/
+*.pyc
