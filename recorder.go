@@ -80,15 +80,14 @@ func (r *portaudioRecorder) Start() error {
 		return fmt.Errorf("recorder.Start: already recording")
 	}
 
-	// Ensure previous readLoop has fully exited before starting new session.
-	// If Stop timed out, the zombie readLoop still holds the old stream.
-	// Refuse to start until it's done to prevent ownership conflicts.
+	// Best-effort wait for previous readLoop. Session isolation (sessionID +
+	// per-session stream/buffer) prevents interference even if still running.
 	if r.done != nil {
 		select {
 		case <-r.done:
-			// Previous session cleaned up
 		default:
-			return fmt.Errorf("recorder.Start: previous recording session still active")
+			r.logger.Warn("previous readLoop still active, proceeding with new session",
+				"operation", "Start")
 		}
 	}
 
@@ -213,24 +212,18 @@ func (r *portaudioRecorder) Stop() ([]float32, error) {
 	r.recording = false
 	chunks := r.chunks
 	r.chunks = nil
-	stream := r.stream // grab ref under lock before readLoop can close it
 	done := r.done
 	r.mu.Unlock()
 
 	r.logger.Debug("stopping", "operation", "Stop")
 
-	// Signal PortAudio to stop — readLoop will exit when Read returns error
-	if stream != nil {
-		if err := stream.Stop(); err != nil {
-			r.logger.Error("failed to stop stream", "operation", "Stop", "error", err)
-		}
-	}
-
-	// Wait for readLoop to finish and close the stream it owns
+	// Don't call stream.Stop() — it deadlocks with stream.Read() in PortAudio.
+	// readLoop checks r.recording after each Read() (~64ms buffer cycle) and exits.
+	// readLoop's defer calls stream.Close() which implicitly stops and releases.
 	select {
 	case <-done:
-	case <-time.After(2 * time.Second):
-		r.logger.Error("readLoop stop timed out", "operation", "Stop")
+	case <-time.After(500 * time.Millisecond):
+		r.logger.Warn("readLoop slow to exit", "operation", "Stop")
 	}
 
 	total := 0

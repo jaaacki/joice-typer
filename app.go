@@ -128,7 +128,7 @@ func (a *App) handleReleaseStream() {
 		a.streamer.Stop()
 	}
 
-	audio, err := a.recorder.Stop()
+	_, err := a.recorder.Stop()
 	a.recording = false
 	if err != nil {
 		a.logger.Error("failed to stop recording",
@@ -140,43 +140,7 @@ func (a *App) handleReleaseStream() {
 	}
 
 	a.sound.PlayStop()
-	a.emitState(StateTranscribing)
-
-	streamer := a.streamer
 	a.streamer = nil
-
-	if streamer != nil && len(audio) > 0 {
-		a.wg.Add(1)
-		go a.finalizeStream(streamer, audio)
-	} else {
-		a.emitState(StateReady)
-	}
-}
-
-func (a *App) finalizeStream(streamer *Streamer, audio []float32) {
-	defer a.wg.Done()
-
-	if !atomic.CompareAndSwapInt32(&a.busy, 0, 1) {
-		a.logger.Warn("finalization already in progress",
-			"operation", "finalizeStream")
-		return
-	}
-	defer atomic.StoreInt32(&a.busy, 0)
-
-	finalText, err := streamer.Finalize(audio)
-	if err != nil {
-		a.logger.Error("finalize failed",
-			"operation", "finalizeStream",
-			"error", err,
-			"partial_text", streamer.LastText())
-		a.sound.PlayError()
-		a.emitState(StateReady)
-		return
-	}
-
-	a.logger.Info("stream complete",
-		"operation", "finalizeStream",
-		"text_length", len(finalText))
 	a.emitState(StateReady)
 }
 

@@ -20,6 +20,7 @@ static inline int typeRune(unsigned int codepoint) {
 
 	CGEventRef down = CGEventCreateKeyboardEvent(NULL, 0, true);
 	if (down == NULL) return 1;
+	CGEventSetFlags(down, 0); // clear modifiers so held Fn/Shift don't leak
 	CGEventKeyboardSetUnicodeString(down, charCount, chars);
 	CGEventPost(kCGHIDEventTap, down);
 
@@ -28,6 +29,7 @@ static inline int typeRune(unsigned int codepoint) {
 		CFRelease(down);
 		return 2;
 	}
+	CGEventSetFlags(up, 0);
 	CGEventKeyboardSetUnicodeString(up, charCount, chars);
 	CGEventPost(kCGHIDEventTap, up);
 
@@ -39,11 +41,13 @@ static inline int typeRune(unsigned int codepoint) {
 static inline int typeBackspace(void) {
 	CGEventRef down = CGEventCreateKeyboardEvent(NULL, 0x33, true);
 	if (down == NULL) return 1;
+	CGEventSetFlags(down, 0); // clear modifiers
 	CGEventRef up = CGEventCreateKeyboardEvent(NULL, 0x33, false);
 	if (up == NULL) {
 		CFRelease(down);
 		return 2;
 	}
+	CGEventSetFlags(up, 0);
 	CGEventPost(kCGHIDEventTap, down);
 	CGEventPost(kCGHIDEventTap, up);
 	CFRelease(down);

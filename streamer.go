@@ -1,30 +1,10 @@
 package main
 
 import (
-	"fmt"
 	"log/slog"
 	"sync"
 	"time"
-	"unicode/utf8"
 )
-
-// commonPrefixLen returns the byte length of the longest common rune prefix between a and b.
-// Compares rune-by-rune to avoid splitting multi-byte UTF-8 codepoints.
-func commonPrefixLen(a, b string) int {
-	byteOffset := 0
-	for byteOffset < len(a) && byteOffset < len(b) {
-		ra, sza := utf8.DecodeRuneInString(a[byteOffset:])
-		rb, szb := utf8.DecodeRuneInString(b[byteOffset:])
-		if ra != rb || sza != szb {
-			break
-		}
-		if ra == utf8.RuneError && sza == 1 {
-			break // invalid UTF-8
-		}
-		byteOffset += sza
-	}
-	return byteOffset
-}
 
 // Streamer runs a periodic transcription loop during recording,
 // streaming partial results to the cursor via a Typer.
@@ -104,16 +84,21 @@ func (s *Streamer) tick() {
 		return
 	}
 
-	// Diff: find common prefix, backspace old suffix, type new suffix
-	prefixLen := commonPrefixLen(s.lastText, text)
-	newSuffix := text[prefixLen:]
-	oldRunes := []rune(s.lastText[prefixLen:])
+	// Whisper owns the cursor: clear previous output, type full new text.
+	// Whisper naturally self-corrects as it gets more audio context.
+	oldRunes := len([]rune(s.lastText))
 
 	s.logger.Debug("streaming update", "operation", "tick",
-		"prev_len", len(s.lastText), "new_len", len(text),
-		"backspace", len(oldRunes), "type_len", len(newSuffix))
+		"clear", oldRunes, "type", len(text))
 
-	if err := s.typer.ReplaceAll(len(oldRunes), newSuffix); err != nil {
+	if oldRunes > 0 {
+		if err := s.typer.Backspace(oldRunes); err != nil {
+			s.logger.Error("streaming backspace failed", "operation", "tick", "error", err)
+			return
+		}
+	}
+
+	if err := s.typer.Type(text); err != nil {
 		s.logger.Error("streaming type failed", "operation", "tick", "error", err)
 		return
 	}
@@ -121,7 +106,7 @@ func (s *Streamer) tick() {
 	s.lastText = text
 }
 
-// Stop stops the streaming loop. Call Finalize after this.
+// Stop stops the streaming loop.
 func (s *Streamer) Stop() {
 	s.mu.Lock()
 	if !s.running {
@@ -149,31 +134,3 @@ func (s *Streamer) LastText() string {
 	return s.lastText
 }
 
-// Finalize runs a final transcription on the complete audio and applies corrections.
-// Returns the final text.
-func (s *Streamer) Finalize(audio []float32) (string, error) {
-	if len(audio) == 0 {
-		return s.LastText(), nil
-	}
-
-	finalText, err := s.transcriber.Transcribe(audio)
-	if err != nil {
-		return "", fmt.Errorf("streamer.Finalize: %w", err)
-	}
-
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	if finalText != s.lastText {
-		prefixLen := commonPrefixLen(s.lastText, finalText)
-		oldRunes := []rune(s.lastText[prefixLen:])
-		newSuffix := finalText[prefixLen:]
-
-		if err := s.typer.ReplaceAll(len(oldRunes), newSuffix); err != nil {
-			return "", fmt.Errorf("streamer.Finalize: %w", err)
-		}
-	}
-
-	s.logger.Info("finalized", "operation", "Finalize", "text_length", len(finalText))
-	return finalText, nil
-}

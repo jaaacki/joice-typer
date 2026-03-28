@@ -220,6 +220,7 @@ func runTerminalMode(configPath string) {
 		"trigger_key", cfg.TriggerKey,
 		"language", cfg.Language,
 		"sample_rate", cfg.SampleRate,
+		"type_mode", cfg.TypeMode,
 	)
 
 	// --- Init PortAudio ---
