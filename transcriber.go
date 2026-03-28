@@ -25,17 +25,18 @@ import (
 )
 
 // modelSpec defines expected properties for each whisper model size.
+// SHA-256 hashes are pinned from the Git LFS OIDs on huggingface.co/ggerganov/whisper.cpp.
+// These are the trusted root — not derived from downloaded content.
 type modelSpec struct {
-	minBytes int64
+	sha256   string // pinned content hash (Git LFS OID)
+	exactLen int64  // expected file size in bytes
 }
 
-// Minimum sizes are generous lower bounds — well below actual model sizes
-// to avoid rejecting legitimate models while catching truncated downloads.
 var modelManifest = map[string]modelSpec{
-	"tiny":   {minBytes: 30 * 1024 * 1024},  // actual ~75MB
-	"base":   {minBytes: 70 * 1024 * 1024},  // actual ~142MB
-	"small":  {minBytes: 200 * 1024 * 1024}, // actual ~466MB
-	"medium": {minBytes: 700 * 1024 * 1024}, // actual ~1.5GB
+	"tiny":   {sha256: "be07e048e1e599ad46341c8d2a135645097a538221678b7acdd1b1919c6e1b21", exactLen: 77691713},
+	"base":   {sha256: "60ed5bc3dd14eea856493d334349b405782ddcaf0028d4b5df4088345fba2efe", exactLen: 147951465},
+	"small":  {sha256: "1be3a9b2063867b937e64e2ec7483364a79917e157fa98c5d94b5c1fffea987b", exactLen: 487601967},
+	"medium": {sha256: "6c14d5adee5f86394037b4e4e8b59f1673b6cee10e3cf0b11bbdbee79c156208", exactLen: 1533763059},
 }
 
 type whisperTranscriber struct {
@@ -147,60 +148,81 @@ func (t *whisperTranscriber) Close() error {
 type DownloadProgressFunc func(progress float64, bytesDownloaded, bytesTotal int64)
 
 // validateCachedModel checks if a cached model file is valid.
-// Returns true if the model is ready to use. Removes or quarantines bad models.
+// The pinned SHA-256 in modelManifest is the trusted root.
+// A .sha256 sidecar file caches the result to avoid re-hashing on every startup.
+// Returns true if the model is ready to use. Quarantines bad models.
 func validateCachedModel(modelPath string, modelSize string, logger *slog.Logger) bool {
+	spec, hasSpec := modelManifest[modelSize]
 	info, err := os.Stat(modelPath)
 	if err != nil {
 		return false // file doesn't exist
 	}
 
-	// Size validation
-	if spec, ok := modelManifest[modelSize]; ok {
-		if info.Size() < spec.minBytes {
-			logger.Warn("model file appears truncated",
-				"operation", "validateCachedModel",
-				"size", info.Size(), "min_expected", spec.minBytes, "model_size", modelSize)
-			os.Remove(modelPath)
-			return false
-		}
+	// Exact size validation against manifest
+	if hasSpec && info.Size() != spec.exactLen {
+		logger.Warn("model file size mismatch",
+			"operation", "validateCachedModel",
+			"size", info.Size(), "expected", spec.exactLen, "model_size", modelSize)
+		os.Remove(modelPath)
+		return false
 	}
 
-	// Hash validation — if a hash file exists from a previous download, verify
+	if !hasSpec {
+		// Unknown model size — no manifest entry, cannot verify
+		logger.Warn("no manifest entry for model size, cannot verify",
+			"operation", "validateCachedModel", "model_size", modelSize)
+		return false
+	}
+
+	// Fast path: if sidecar hash matches the pinned manifest hash, skip re-hashing.
+	// The sidecar is a cache, not an authority — the manifest is the trusted root.
 	hashPath := modelPath + ".sha256"
-	savedHash, readErr := os.ReadFile(hashPath)
-	if readErr == nil {
-		f, openErr := os.Open(modelPath)
-		if openErr != nil {
-			logger.Error("cannot open model for hash verification",
-				"operation", "validateCachedModel", "error", openErr)
-			return false
+	if savedHash, readErr := os.ReadFile(hashPath); readErr == nil {
+		if strings.TrimSpace(string(savedHash)) == spec.sha256 {
+			logger.Info("model verified (cached hash matches manifest)",
+				"operation", "validateCachedModel", "sha256", spec.sha256)
+			return true
 		}
-		h := sha256.New()
-		if _, copyErr := io.Copy(h, f); copyErr != nil {
-			f.Close()
-			logger.Error("failed to hash model",
-				"operation", "validateCachedModel", "error", copyErr)
-			return false
-		}
-		f.Close()
-		currentHash := hex.EncodeToString(h.Sum(nil))
-		expected := strings.TrimSpace(string(savedHash))
-		if currentHash != expected {
-			logger.Warn("model hash mismatch, quarantining",
-				"operation", "validateCachedModel",
-				"expected", expected, "got", currentHash)
-			badPath := modelPath + ".bad"
-			os.Rename(modelPath, badPath)
-			os.Remove(hashPath)
-			return false
-		}
-		logger.Info("model verified", "operation", "validateCachedModel",
-			"sha256", currentHash)
-	} else {
-		logger.Info("model found (no hash file, will hash on next download)",
-			"operation", "validateCachedModel", "size", info.Size())
+		// Sidecar disagrees with manifest — fall through to full hash
+		logger.Warn("cached hash does not match manifest, re-verifying",
+			"operation", "validateCachedModel")
 	}
 
+	// Slow path: compute hash from file content, verify against pinned manifest
+	f, openErr := os.Open(modelPath)
+	if openErr != nil {
+		logger.Error("cannot open model for hash verification",
+			"operation", "validateCachedModel", "error", openErr)
+		return false
+	}
+	h := sha256.New()
+	if _, copyErr := io.Copy(h, f); copyErr != nil {
+		f.Close()
+		logger.Error("failed to hash model",
+			"operation", "validateCachedModel", "error", copyErr)
+		return false
+	}
+	f.Close()
+	currentHash := hex.EncodeToString(h.Sum(nil))
+
+	if currentHash != spec.sha256 {
+		logger.Warn("model hash does not match pinned manifest, quarantining",
+			"operation", "validateCachedModel",
+			"pinned", spec.sha256, "got", currentHash)
+		badPath := modelPath + ".bad"
+		os.Rename(modelPath, badPath)
+		os.Remove(hashPath)
+		return false
+	}
+
+	// Hash matches manifest — cache it for future fast-path
+	if writeErr := os.WriteFile(hashPath, []byte(currentHash), 0644); writeErr != nil {
+		logger.Error("failed to write hash cache file",
+			"operation", "validateCachedModel", "error", writeErr)
+	}
+
+	logger.Info("model verified (full hash against manifest)",
+		"operation", "validateCachedModel", "sha256", currentHash)
 	return true
 }
 
@@ -317,26 +339,32 @@ func downloadModelWithProgress(modelPath string, modelSize string, onProgress Do
 		return fmt.Errorf("transcriber.downloadModelWithProgress: exceeded %d byte limit", maxDownloadBytes)
 	}
 
-	// Validate against per-model minimum size
-	if spec, ok := modelManifest[modelSize]; ok && written < spec.minBytes {
-		os.Remove(tmpPath)
-		return fmt.Errorf("transcriber.downloadModelWithProgress: too small (%d bytes, minimum %d for %s)", written, spec.minBytes, modelSize)
-	}
-
 	hash := hex.EncodeToString(hashWriter.Sum(nil))
+
+	// Verify downloaded content against pinned manifest (trusted root)
+	if spec, ok := modelManifest[modelSize]; ok {
+		if written != spec.exactLen {
+			os.Remove(tmpPath)
+			return fmt.Errorf("transcriber.downloadModelWithProgress: size mismatch: got %d bytes, expected %d", written, spec.exactLen)
+		}
+		if hash != spec.sha256 {
+			os.Remove(tmpPath)
+			return fmt.Errorf("transcriber.downloadModelWithProgress: sha256 mismatch: got %s, expected %s", hash, spec.sha256)
+		}
+	}
 
 	if err := os.Rename(tmpPath, modelPath); err != nil {
 		return fmt.Errorf("transcriber.downloadModelWithProgress: rename: %w", err)
 	}
 
-	// Store hash for load-time verification on future startups
+	// Cache hash for fast-path verification on future startups
 	hashPath := modelPath + ".sha256"
 	if writeErr := os.WriteFile(hashPath, []byte(hash), 0644); writeErr != nil {
-		logger.Error("failed to write hash file",
+		logger.Error("failed to write hash cache",
 			"operation", "downloadModelWithProgress", "error", writeErr)
 	}
 
-	logger.Info("model downloaded", "operation", "downloadModelWithProgress",
+	logger.Info("model downloaded and verified", "operation", "downloadModelWithProgress",
 		"bytes", written, "sha256", hash)
 	return nil
 }
