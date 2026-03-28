@@ -61,6 +61,7 @@ whisper.cpp lives in `third_party/whisper.cpp/` as a git submodule.
 
 - **v1** (done): Core push-to-talk, configurable trigger key
 - **v1.5** (done): .app bundle, menu bar icon, setup wizard
-- **v2** (current): Streaming type mode with live self-correcting transcription
-- **v2.5**: Custom dictionary, settings UI for mic/hotkey/type mode
-- **v3**: Menu bar UI (Wails) for full settings management
+- **v2** (done): Streaming type mode (experimental, default off)
+- **v2.5** (current): Settings UI for mic/hotkey selection
+- **v3**: Custom dictionary (whisper prompt + post-processing replacement)
+- **v4**: Menu bar UI (Wails) for full settings management
