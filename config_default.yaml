@@ -1,0 +1,8 @@
+# VoiceType configuration
+trigger_key:
+  - fn
+  - shift
+model_size: small
+language: ""
+sample_rate: 16000
+sound_feedback: true

@@ -1,0 +1,146 @@
+package main
+
+import (
+	"os"
+	"path/filepath"
+	"testing"
+)
+
+func TestLoadConfig_CreatesDefault(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+
+	cfg, err := LoadConfig(path)
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+
+	// Verify defaults
+	if len(cfg.TriggerKey) != 2 || cfg.TriggerKey[0] != "fn" || cfg.TriggerKey[1] != "shift" {
+		t.Errorf("expected trigger_key [fn shift], got %v", cfg.TriggerKey)
+	}
+	if cfg.ModelSize != "small" {
+		t.Errorf("expected model_size small, got %s", cfg.ModelSize)
+	}
+	if cfg.Language != "" {
+		t.Errorf("expected empty language, got %s", cfg.Language)
+	}
+	if cfg.SampleRate != 16000 {
+		t.Errorf("expected sample_rate 16000, got %d", cfg.SampleRate)
+	}
+	if !cfg.SoundFeedback {
+		t.Error("expected sound_feedback true")
+	}
+
+	// Verify file was created
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		t.Fatalf("config file not created at %s", path)
+	}
+}
+
+func TestLoadConfig_ReadsExisting(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+
+	content := []byte(`trigger_key:
+  - ctrl
+  - space
+model_size: tiny
+language: "en"
+sample_rate: 16000
+sound_feedback: false
+`)
+	if err := os.WriteFile(path, content, 0644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	cfg, err := LoadConfig(path)
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+
+	if len(cfg.TriggerKey) != 2 || cfg.TriggerKey[0] != "ctrl" || cfg.TriggerKey[1] != "space" {
+		t.Errorf("expected trigger_key [ctrl space], got %v", cfg.TriggerKey)
+	}
+	if cfg.ModelSize != "tiny" {
+		t.Errorf("expected model_size tiny, got %s", cfg.ModelSize)
+	}
+	if cfg.Language != "en" {
+		t.Errorf("expected language en, got %s", cfg.Language)
+	}
+	if cfg.SoundFeedback {
+		t.Error("expected sound_feedback false")
+	}
+}
+
+func TestValidate_Valid(t *testing.T) {
+	cfg := Config{
+		TriggerKey:    []string{"fn", "shift"},
+		ModelSize:     "small",
+		SampleRate:    16000,
+		SoundFeedback: true,
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("expected valid config, got error: %v", err)
+	}
+}
+
+func TestValidate_EmptyTriggerKey(t *testing.T) {
+	cfg := Config{
+		TriggerKey: []string{},
+		ModelSize:  "small",
+		SampleRate: 16000,
+	}
+	err := cfg.Validate()
+	if err == nil {
+		t.Fatal("expected error for empty trigger_key")
+	}
+	if !containsSubstring(err.Error(), "trigger_key") {
+		t.Errorf("error should mention trigger_key, got: %v", err)
+	}
+}
+
+func TestValidate_UnknownKey(t *testing.T) {
+	cfg := Config{
+		TriggerKey: []string{"fn", "banana"},
+		ModelSize:  "small",
+		SampleRate: 16000,
+	}
+	err := cfg.Validate()
+	if err == nil {
+		t.Fatal("expected error for unknown key")
+	}
+	if !containsSubstring(err.Error(), "banana") {
+		t.Errorf("error should mention the bad key, got: %v", err)
+	}
+}
+
+func TestValidate_InvalidModelSize(t *testing.T) {
+	cfg := Config{
+		TriggerKey: []string{"fn", "shift"},
+		ModelSize:  "enormous",
+		SampleRate: 16000,
+	}
+	err := cfg.Validate()
+	if err == nil {
+		t.Fatal("expected error for invalid model_size")
+	}
+	if !containsSubstring(err.Error(), "model_size") {
+		t.Errorf("error should mention model_size, got: %v", err)
+	}
+}
+
+func TestValidate_InvalidSampleRate(t *testing.T) {
+	cfg := Config{
+		TriggerKey: []string{"fn", "shift"},
+		ModelSize:  "small",
+		SampleRate: 0,
+	}
+	err := cfg.Validate()
+	if err == nil {
+		t.Fatal("expected error for zero sample_rate")
+	}
+	if !containsSubstring(err.Error(), "sample_rate") {
+		t.Errorf("error should mention sample_rate, got: %v", err)
+	}
+}
