@@ -1,0 +1,96 @@
+<h2>JoiceTyper — Menu Bar States</h2>
+<p class="subtitle">How the menu bar icon looks in each state, and what the dropdown shows on click.</p>
+
+<div class="cards">
+  <div class="card" data-choice="loading">
+    <div class="card-image" style="background:#2a2a3e;padding:16px;">
+      <!-- Fake macOS menu bar -->
+      <div style="display:flex;align-items:center;justify-content:flex-end;gap:12px;background:#1a1a1a;padding:4px 16px;border-radius:6px;font-size:13px;color:#888;font-family:-apple-system,SF Pro,Helvetica,sans-serif;">
+        <span>Wed 28 Mar</span>
+        <span style="opacity:0.5;">Wi-Fi</span>
+        <svg width="18" height="18" viewBox="0 0 18 18" style="margin:0 2px;">
+          <rect x="2" y="1" width="14" height="12" rx="3" fill="none" stroke="#888" stroke-width="1.2"/>
+          <path d="M6 13 L5 17 L9 13" fill="#888"/>
+          <text x="9" y="10.5" text-anchor="middle" fill="#888" font-family="-apple-system" font-size="8" font-weight="700">J</text>
+        </svg>
+      </div>
+      <!-- Dropdown -->
+      <div style="float:right;margin-top:4px;background:#2d2d3d;border:1px solid #444;border-radius:8px;padding:6px 0;min-width:200px;font-family:-apple-system,SF Pro,Helvetica,sans-serif;">
+        <div style="padding:6px 16px;font-size:13px;color:#666;">Loading model...</div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>Loading</h3>
+      <p>Grey icon. Model is initializing. Not usable yet.</p>
+    </div>
+  </div>
+
+  <div class="card" data-choice="ready">
+    <div class="card-image" style="background:#2a2a3e;padding:16px;">
+      <div style="display:flex;align-items:center;justify-content:flex-end;gap:12px;background:#1a1a1a;padding:4px 16px;border-radius:6px;font-size:13px;color:#888;font-family:-apple-system,SF Pro,Helvetica,sans-serif;">
+        <span>Wed 28 Mar</span>
+        <span style="opacity:0.5;">Wi-Fi</span>
+        <svg width="18" height="18" viewBox="0 0 18 18" style="margin:0 2px;">
+          <rect x="2" y="1" width="14" height="12" rx="3" fill="none" stroke="#4ade80" stroke-width="1.2"/>
+          <path d="M6 13 L5 17 L9 13" fill="#4ade80"/>
+          <text x="9" y="10.5" text-anchor="middle" fill="#4ade80" font-family="-apple-system" font-size="8" font-weight="700">J</text>
+        </svg>
+      </div>
+      <div style="float:right;margin-top:4px;background:#2d2d3d;border:1px solid #444;border-radius:8px;padding:6px 0;min-width:220px;font-family:-apple-system,SF Pro,Helvetica,sans-serif;">
+        <div style="padding:6px 16px;font-size:13px;color:#ccc;">✅ Ready — Fn+Shift to dictate</div>
+        <div style="border-top:1px solid #444;margin:4px 0;"></div>
+        <div style="padding:6px 16px;font-size:13px;color:#ccc;">Quit JoiceTyper</div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>Ready</h3>
+      <p>Green icon. Listening for hotkey. Click shows status + Quit.</p>
+    </div>
+  </div>
+
+  <div class="card" data-choice="recording">
+    <div class="card-image" style="background:#2a2a3e;padding:16px;">
+      <div style="display:flex;align-items:center;justify-content:flex-end;gap:12px;background:#1a1a1a;padding:4px 16px;border-radius:6px;font-size:13px;color:#888;font-family:-apple-system,SF Pro,Helvetica,sans-serif;">
+        <span>Wed 28 Mar</span>
+        <span style="opacity:0.5;">Wi-Fi</span>
+        <svg width="18" height="18" viewBox="0 0 18 18" style="margin:0 2px;">
+          <rect x="2" y="1" width="14" height="12" rx="3" fill="none" stroke="#ef4444" stroke-width="1.2"/>
+          <path d="M6 13 L5 17 L9 13" fill="#ef4444"/>
+          <text x="9" y="10.5" text-anchor="middle" fill="#ef4444" font-family="-apple-system" font-size="8" font-weight="700">J</text>
+        </svg>
+      </div>
+      <div style="float:right;margin-top:4px;background:#2d2d3d;border:1px solid #444;border-radius:8px;padding:6px 0;min-width:220px;font-family:-apple-system,SF Pro,Helvetica,sans-serif;">
+        <div style="padding:6px 16px;font-size:13px;color:#ef4444;">🔴 Recording...</div>
+        <div style="border-top:1px solid #444;margin:4px 0;"></div>
+        <div style="padding:6px 16px;font-size:13px;color:#ccc;">Quit JoiceTyper</div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>Recording</h3>
+      <p>Red icon. Hotkey held, capturing audio.</p>
+    </div>
+  </div>
+
+  <div class="card" data-choice="transcribing">
+    <div class="card-image" style="background:#2a2a3e;padding:16px;">
+      <div style="display:flex;align-items:center;justify-content:flex-end;gap:12px;background:#1a1a1a;padding:4px 16px;border-radius:6px;font-size:13px;color:#888;font-family:-apple-system,SF Pro,Helvetica,sans-serif;">
+        <span>Wed 28 Mar</span>
+        <span style="opacity:0.5;">Wi-Fi</span>
+        <svg width="18" height="18" viewBox="0 0 18 18" style="margin:0 2px;">
+          <rect x="2" y="1" width="14" height="12" rx="3" fill="none" stroke="#60a5fa" stroke-width="1.2"/>
+          <path d="M6 13 L5 17 L9 13" fill="#60a5fa"/>
+          <text x="9" y="10.5" text-anchor="middle" fill="#60a5fa" font-family="-apple-system" font-size="8" font-weight="700">J</text>
+        </svg>
+      </div>
+      <div style="float:right;margin-top:4px;background:#2d2d3d;border:1px solid #444;border-radius:8px;padding:6px 0;min-width:220px;font-family:-apple-system,SF Pro,Helvetica,sans-serif;">
+        <div style="padding:6px 16px;font-size:13px;color:#60a5fa;">🔵 Transcribing...</div>
+        <div style="border-top:1px solid #444;margin:4px 0;"></div>
+        <div style="padding:6px 16px;font-size:13px;color:#ccc;">Quit JoiceTyper</div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>Transcribing</h3>
+      <p>Blue icon. Whisper is processing audio.</p>
+    </div>
+  </div>
+</div>

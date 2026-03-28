@@ -96,6 +96,9 @@ func (t *whisperTranscriber) Close() error {
 	return nil
 }
 
+// DownloadProgressFunc is called during model download with progress info.
+type DownloadProgressFunc func(progress float64, bytesDownloaded, bytesTotal int64)
+
 // ensureModel checks if the model file exists and downloads it if not.
 func ensureModel(modelPath string, logger *slog.Logger) error {
 	info, err := os.Stat(modelPath)
@@ -120,19 +123,30 @@ func ensureModel(modelPath string, logger *slog.Logger) error {
 		}
 	}
 
-	// Extract model name from path (e.g., "ggml-small.bin" from the full path)
+	var lastPct int
+	return downloadModelWithProgress(modelPath, func(progress float64, downloaded, total int64) {
+		pct := int(progress * 100)
+		if pct/10 > lastPct/10 {
+			logger.Info("downloading model", "operation", "ensureModel",
+				"progress_pct", pct, "bytes_written", downloaded, "bytes_total", total)
+			lastPct = pct
+		}
+	}, logger)
+}
+
+// downloadModelWithProgress downloads a whisper model to modelPath, calling
+// onProgress with download progress. The caller is responsible for existence
+// checks — this function always downloads.
+func downloadModelWithProgress(modelPath string, onProgress DownloadProgressFunc, logger *slog.Logger) error {
 	modelFile := filepath.Base(modelPath)
 	url := "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/" + modelFile
 
-	logger.Warn("model not found, downloading from network",
-		"operation", "ensureModel",
-		"url", url,
-		"dest", modelPath,
-	)
+	logger.Warn("downloading model from network",
+		"operation", "downloadModelWithProgress", "url", url, "dest", modelPath)
 
 	dir := filepath.Dir(modelPath)
 	if err := os.MkdirAll(dir, 0755); err != nil {
-		return fmt.Errorf("transcriber.ensureModel: create dir: %w", err)
+		return fmt.Errorf("transcriber.downloadModelWithProgress: create dir: %w", err)
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
@@ -140,89 +154,81 @@ func ensureModel(modelPath string, logger *slog.Logger) error {
 
 	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
-		return fmt.Errorf("transcriber.ensureModel: create request: %w", err)
+		return fmt.Errorf("transcriber.downloadModelWithProgress: create request: %w", err)
 	}
 
 	client := &http.Client{Timeout: 10 * time.Minute}
 	resp, err := client.Do(req)
 	if err != nil {
-		return fmt.Errorf("transcriber.ensureModel: download: %w", err)
+		return fmt.Errorf("transcriber.downloadModelWithProgress: download: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("transcriber.ensureModel: download returned status %d", resp.StatusCode)
+		return fmt.Errorf("transcriber.downloadModelWithProgress: status %d", resp.StatusCode)
 	}
 
 	// Reject HTML error pages from proxies
 	ct := resp.Header.Get("Content-Type")
 	if strings.Contains(ct, "text/html") {
-		return fmt.Errorf("transcriber.ensureModel: download returned HTML instead of model (possible proxy error)")
+		return fmt.Errorf("transcriber.downloadModelWithProgress: got HTML instead of model")
+	}
+
+	tmpPath := modelPath + ".tmp"
+	f, err := os.Create(tmpPath)
+	if err != nil {
+		return fmt.Errorf("transcriber.downloadModelWithProgress: create file: %w", err)
 	}
 
 	// Cap download at 2GB to prevent abuse
 	const maxDownloadBytes = 2 * 1024 * 1024 * 1024
 	limitedBody := io.LimitReader(resp.Body, maxDownloadBytes)
 
-	tmpPath := modelPath + ".tmp"
-	f, err := os.Create(tmpPath)
-	if err != nil {
-		return fmt.Errorf("transcriber.ensureModel: create file: %w", err)
-	}
-
-	pr := &progressWriter{
-		reader: limitedBody,
-		total:  resp.ContentLength,
-		logger: logger,
+	pr := &callbackProgressReader{
+		reader:     limitedBody,
+		total:      resp.ContentLength,
+		onProgress: onProgress,
 	}
 
 	written, copyErr := io.Copy(f, pr)
 	closeErr := f.Close()
 	if copyErr != nil {
 		if removeErr := os.Remove(tmpPath); removeErr != nil {
-			logger.Error("failed to remove temp file", "operation", "ensureModel", "error", removeErr)
+			logger.Error("failed to remove temp file",
+				"operation", "downloadModelWithProgress", "error", removeErr)
 		}
-		return fmt.Errorf("transcriber.ensureModel: write: %w", copyErr)
+		return fmt.Errorf("transcriber.downloadModelWithProgress: write: %w", copyErr)
 	}
 	if closeErr != nil {
 		if removeErr := os.Remove(tmpPath); removeErr != nil {
-			logger.Error("failed to remove temp file", "operation", "ensureModel", "error", removeErr)
+			logger.Error("failed to remove temp file",
+				"operation", "downloadModelWithProgress", "error", removeErr)
 		}
-		return fmt.Errorf("transcriber.ensureModel: close file: %w", closeErr)
+		return fmt.Errorf("transcriber.downloadModelWithProgress: close: %w", closeErr)
 	}
 
 	if err := os.Rename(tmpPath, modelPath); err != nil {
-		return fmt.Errorf("transcriber.ensureModel: rename: %w", err)
+		return fmt.Errorf("transcriber.downloadModelWithProgress: rename: %w", err)
 	}
 
 	// TODO(v2): Add SHA256 checksum verification of downloaded model file.
 
-	logger.Info("model downloaded", "operation", "ensureModel", "bytes", written)
+	logger.Info("model downloaded", "operation", "downloadModelWithProgress", "bytes", written)
 	return nil
 }
 
-type progressWriter struct {
-	reader  io.Reader
-	total   int64
-	written int64
-	logger  *slog.Logger
-	lastPct int
+type callbackProgressReader struct {
+	reader     io.Reader
+	total      int64
+	written    int64
+	onProgress DownloadProgressFunc
 }
 
-func (pw *progressWriter) Read(p []byte) (int, error) {
-	n, err := pw.reader.Read(p)
-	pw.written += int64(n)
-	if pw.total > 0 {
-		pct := int(pw.written * 100 / pw.total)
-		if pct/10 > pw.lastPct/10 {
-			pw.logger.Info("downloading model",
-				"operation", "ensureModel",
-				"progress_pct", pct,
-				"bytes_written", pw.written,
-				"bytes_total", pw.total,
-			)
-			pw.lastPct = pct
-		}
+func (r *callbackProgressReader) Read(p []byte) (int, error) {
+	n, err := r.reader.Read(p)
+	r.written += int64(n)
+	if r.total > 0 && r.onProgress != nil {
+		r.onProgress(float64(r.written)/float64(r.total), r.written, r.total)
 	}
 	return n, err
 }

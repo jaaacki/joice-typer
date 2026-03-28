@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"runtime"
+	"strings"
 	"sync"
 	"syscall"
 )
@@ -14,18 +16,11 @@ func main() {
 	// The main goroutine must stay on the main OS thread for macOS CFRunLoop.
 	runtime.LockOSThread()
 
-	// --- Resolve default config path (may fail if $HOME is unset) ---
-	defaultCfgPath, err := DefaultConfigPath()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "fatal: %v\n", err)
-		os.Exit(1)
-	}
-
+	defaultCfgPath, _ := DefaultConfigPath()
 	configPath := flag.String("config", defaultCfgPath, "path to config file")
 	listDevices := flag.Bool("list-devices", false, "list available audio input devices and exit")
 	flag.Parse()
 
-	// --- List devices mode ---
 	if *listDevices {
 		if err := InitAudio(); err != nil {
 			fmt.Fprintf(os.Stderr, "fatal: %v\n", err)
@@ -40,8 +35,49 @@ func main() {
 		return
 	}
 
+	if isAppMode() {
+		runAppMode()
+	} else {
+		runTerminalMode(*configPath)
+	}
+}
+
+// isAppMode returns true when running inside a macOS .app bundle.
+func isAppMode() bool {
+	exe, err := os.Executable()
+	if err != nil {
+		return false
+	}
+	return strings.Contains(exe, ".app/Contents/MacOS")
+}
+
+// suppressStderr redirects file descriptor 2 to a log file so whisper.cpp
+// stderr noise does not appear in app mode.
+func suppressStderr(logDir string) {
+	logPath := filepath.Join(logDir, "whisper-stderr.log")
+	f, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	if err != nil {
+		return // best effort
+	}
+	syscall.Dup2(int(f.Fd()), 2)
+}
+
+// runAppMode is the entry point when running inside a .app bundle.
+func runAppMode() {
+	// TODO: Will be implemented when setup wizard and status bar are integrated.
+	// For now, fall back to terminal mode.
+	cfgPath, err := DefaultConfigPath()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "fatal: %v\n", err)
+		os.Exit(1)
+	}
+	runTerminalMode(cfgPath)
+}
+
+// runTerminalMode is the entry point for CLI invocations.
+func runTerminalMode(configPath string) {
 	// --- Load config ---
-	cfg, err := LoadConfig(*configPath)
+	cfg, err := LoadConfig(configPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "fatal: %v\n", err)
 		os.Exit(1)
@@ -63,8 +99,8 @@ func main() {
 	defer logCleanup()
 
 	logger.Info("starting voicetype",
-		"component", "main", "operation", "main",
-		"config_path", *configPath,
+		"component", "main", "operation", "runTerminalMode",
+		"config_path", configPath,
 		"model_size", cfg.ModelSize,
 		"trigger_key", cfg.TriggerKey,
 		"language", cfg.Language,
@@ -74,13 +110,13 @@ func main() {
 	// --- Init PortAudio ---
 	if err := InitAudio(); err != nil {
 		logger.Error("failed to initialize audio",
-			"component", "main", "operation", "main", "error", err)
+			"component", "main", "operation", "runTerminalMode", "error", err)
 		os.Exit(1)
 	}
 	defer func() {
 		if err := TerminateAudio(); err != nil {
 			logger.Error("failed to terminate audio",
-				"component", "main", "operation", "main", "error", err)
+				"component", "main", "operation", "runTerminalMode", "error", err)
 		}
 	}()
 
@@ -88,7 +124,7 @@ func main() {
 	modelPath, err := DefaultModelPath(cfg.ModelSize)
 	if err != nil {
 		logger.Error("failed to resolve model path",
-			"component", "main", "operation", "main", "error", err)
+			"component", "main", "operation", "runTerminalMode", "error", err)
 		os.Exit(1)
 	}
 
@@ -96,7 +132,7 @@ func main() {
 	transcriber, err := NewTranscriber(modelPath, cfg.Language, logger)
 	if err != nil {
 		logger.Error("failed to initialize transcriber",
-			"component", "main", "operation", "main", "error", err)
+			"component", "main", "operation", "runTerminalMode", "error", err)
 		os.Exit(1)
 	}
 
@@ -142,13 +178,13 @@ func main() {
 	// --- Ready ---
 	sound.PlayReady()
 	logger.Info("ready -- hold trigger key to record, release to transcribe",
-		"component", "main", "operation", "main",
+		"component", "main", "operation", "runTerminalMode",
 		"trigger_key", cfg.TriggerKey)
 
 	// --- Start hotkey listener on main thread (blocks) ---
 	if err := hotkey.Start(events); err != nil {
 		logger.Error("hotkey listener failed",
-			"component", "main", "operation", "main", "error", err)
+			"component", "main", "operation", "runTerminalMode", "error", err)
 		os.Exit(1)
 	}
 
@@ -162,5 +198,5 @@ func main() {
 	wg.Wait()
 
 	logger.Info("voicetype stopped",
-		"component", "main", "operation", "main")
+		"component", "main", "operation", "runTerminalMode")
 }

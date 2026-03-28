@@ -8,12 +8,13 @@ import (
 // App is the orchestrator that wires hotkey events to the
 // record -> transcribe -> paste pipeline.
 type App struct {
-	recorder    Recorder
-	transcriber Transcriber
-	paster      Paster
-	sound       *Sound
-	logger      *slog.Logger
-	busy        int32 // atomic flag: 1 = transcribing
+	recorder      Recorder
+	transcriber   Transcriber
+	paster        Paster
+	sound         *Sound
+	logger        *slog.Logger
+	busy          int32 // atomic flag: 1 = transcribing
+	onStateChange func(AppState)
 }
 
 // NewApp creates an App with all components pre-constructed.
@@ -25,11 +26,12 @@ func NewApp(
 	logger *slog.Logger,
 ) *App {
 	return &App{
-		recorder:    recorder,
-		transcriber: transcriber,
-		paster:      paster,
-		sound:       sound,
-		logger:      logger.With("component", "app"),
+		recorder:      recorder,
+		transcriber:   transcriber,
+		paster:        paster,
+		sound:         sound,
+		logger:        logger.With("component", "app"),
+		onStateChange: func(AppState) {}, // no-op default
 	}
 }
 
@@ -49,6 +51,11 @@ func (a *App) Run(events <-chan HotkeyEvent) {
 	a.logger.Info("event loop stopped", "operation", "Run")
 }
 
+// SetStateCallback sets a function called on every state transition.
+func (a *App) SetStateCallback(fn func(AppState)) {
+	a.onStateChange = fn
+}
+
 func (a *App) handlePress() {
 	if atomic.LoadInt32(&a.busy) == 1 {
 		a.logger.Warn("still transcribing, ignoring press",
@@ -56,31 +63,36 @@ func (a *App) handlePress() {
 		a.sound.PlayError()
 		return
 	}
-	a.logger.Info(">>> RECORDING", "operation", "handlePress")
+	a.logger.Debug("trigger pressed", "operation", "handlePress")
 	a.sound.PlayStart()
+	a.onStateChange(StateRecording)
 
 	if err := a.recorder.Start(); err != nil {
 		a.logger.Error("failed to start recording",
 			"operation", "handlePress", "error", err)
 		a.sound.PlayError()
+		a.onStateChange(StateReady)
 	}
 }
 
 func (a *App) handleRelease() {
-	a.logger.Info(">>> RELEASED — stopping recorder", "operation", "handleRelease")
+	a.logger.Debug("trigger released", "operation", "handleRelease")
 
 	audio, err := a.recorder.Stop()
 	if err != nil {
 		a.logger.Error("failed to stop recording",
 			"operation", "handleRelease", "error", err)
 		a.sound.PlayError()
+		a.onStateChange(StateReady)
 		return
 	}
 
 	a.sound.PlayStop()
+	a.onStateChange(StateTranscribing)
 
 	if len(audio) == 0 {
 		a.logger.Warn("no audio captured", "operation", "handleRelease")
+		a.onStateChange(StateReady)
 		return
 	}
 
@@ -101,11 +113,13 @@ func (a *App) transcribeAndPaste(audio []float32) {
 		a.logger.Error("transcription failed",
 			"operation", "transcribeAndPaste", "error", err)
 		a.sound.PlayError()
+		a.onStateChange(StateReady)
 		return
 	}
 
 	if text == "" {
 		a.logger.Warn("no speech detected", "operation", "transcribeAndPaste")
+		a.onStateChange(StateReady)
 		return
 	}
 
@@ -113,11 +127,13 @@ func (a *App) transcribeAndPaste(audio []float32) {
 		a.logger.Error("paste failed",
 			"operation", "transcribeAndPaste", "error", err)
 		a.sound.PlayError()
+		a.onStateChange(StateReady)
 		return
 	}
 
 	a.logger.Info("text pasted", "operation", "transcribeAndPaste",
 		"text_length", len(text))
+	a.onStateChange(StateReady)
 }
 
 // Shutdown gracefully closes all components.

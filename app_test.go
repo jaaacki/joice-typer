@@ -84,6 +84,14 @@ func TestApp_HappyPath(t *testing.T) {
 
 	app := NewApp(rec, trans, paste, snd, logger)
 
+	var states []AppState
+	var statesMu sync.Mutex
+	app.SetStateCallback(func(s AppState) {
+		statesMu.Lock()
+		states = append(states, s)
+		statesMu.Unlock()
+	})
+
 	events := make(chan HotkeyEvent, 10)
 	done := make(chan struct{})
 
@@ -125,6 +133,13 @@ func TestApp_HappyPath(t *testing.T) {
 	if got != "hello world" {
 		t.Errorf("expected pasted text 'hello world', got %q", got)
 	}
+
+	// Verify state transitions: should start with Recording and end with Ready
+	statesMu.Lock()
+	if len(states) < 2 || states[0] != StateRecording || states[len(states)-1] != StateReady {
+		t.Errorf("expected states [Recording...Ready], got %v", states)
+	}
+	statesMu.Unlock()
 }
 
 func TestApp_TranscriptionError_ContinuesListening(t *testing.T) {

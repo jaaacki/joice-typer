@@ -1,0 +1,70 @@
+<h2>JoiceTyper — First-Run Setup Wizard</h2>
+<p class="subtitle">This is what the native macOS window would look like. All steps visible, progress moves top to bottom.</p>
+
+<div class="mockup">
+  <div class="mockup-header">JoiceTyper Setup</div>
+  <div class="mockup-body" style="padding:32px;background:#1e1e2e;font-family:-apple-system,SF Pro,Helvetica,sans-serif;color:#e0e0e0;">
+
+    <div style="text-align:center;margin-bottom:28px;">
+      <svg width="48" height="48" viewBox="0 0 18 18" style="margin-bottom:8px;">
+        <rect x="2" y="1" width="14" height="12" rx="3" fill="none" stroke="#4ade80" stroke-width="1.4"/>
+        <path d="M6 13 L5 17 L9 13" fill="#4ade80" stroke="#4ade80" stroke-width="0.5" stroke-linejoin="round"/>
+        <text x="9" y="10.5" text-anchor="middle" fill="#4ade80" font-family="-apple-system,SF Pro,Helvetica" font-size="9" font-weight="700">J</text>
+      </svg>
+      <h2 style="margin:0;font-size:20px;color:#fff;">Welcome to JoiceTyper</h2>
+      <p style="margin:4px 0 0;font-size:13px;color:#888;">Hold a key, speak, text appears at your cursor.</p>
+    </div>
+
+    <!-- Step 1: Accessibility -->
+    <div style="display:flex;align-items:flex-start;gap:12px;padding:14px 16px;background:#2a2a3e;border-radius:10px;margin-bottom:10px;border-left:3px solid #4ade80;">
+      <span style="font-size:18px;margin-top:1px;">✅</span>
+      <div style="flex:1;">
+        <div style="font-weight:600;font-size:14px;color:#fff;">1. Accessibility Permission</div>
+        <div style="font-size:12px;color:#4ade80;margin-top:3px;">Granted</div>
+      </div>
+    </div>
+
+    <!-- Step 2: Microphone -->
+    <div style="display:flex;align-items:flex-start;gap:12px;padding:14px 16px;background:#2a2a3e;border-radius:10px;margin-bottom:10px;border-left:3px solid #60a5fa;">
+      <span style="font-size:18px;margin-top:1px;">🎤</span>
+      <div style="flex:1;">
+        <div style="font-weight:600;font-size:14px;color:#fff;">2. Select Microphone</div>
+        <div style="margin-top:8px;">
+          <select style="width:100%;padding:6px 10px;background:#3a3a50;border:1px solid #555;border-radius:6px;color:#fff;font-size:13px;">
+            <option>Logi USB Headset H340</option>
+            <option>MacBook Pro Microphone</option>
+            <option>Jacki Ng's iPhone Microphone</option>
+          </select>
+        </div>
+      </div>
+    </div>
+
+    <!-- Step 3: Model Download -->
+    <div style="display:flex;align-items:flex-start;gap:12px;padding:14px 16px;background:#2a2a3e;border-radius:10px;margin-bottom:10px;border-left:3px solid #f59e0b;">
+      <span style="font-size:18px;margin-top:1px;">⏳</span>
+      <div style="flex:1;">
+        <div style="font-weight:600;font-size:14px;color:#fff;">3. Download Speech Model</div>
+        <div style="font-size:12px;color:#888;margin-top:3px;">whisper-small · 466 MB</div>
+        <div style="margin-top:8px;background:#3a3a50;border-radius:4px;height:8px;overflow:hidden;">
+          <div style="width:62%;height:100%;background:linear-gradient(90deg,#f59e0b,#fbbf24);border-radius:4px;"></div>
+        </div>
+        <div style="font-size:11px;color:#888;margin-top:4px;">289 MB / 466 MB — 62%</div>
+      </div>
+    </div>
+
+    <!-- Step 4: Ready -->
+    <div style="display:flex;align-items:flex-start;gap:12px;padding:14px 16px;background:#2a2a3e;border-radius:10px;margin-bottom:20px;border-left:3px solid #555;opacity:0.5;">
+      <span style="font-size:18px;margin-top:1px;">⏳</span>
+      <div style="flex:1;">
+        <div style="font-weight:600;font-size:14px;color:#fff;">4. Ready</div>
+        <div style="font-size:12px;color:#888;margin-top:3px;">Waiting for download...</div>
+      </div>
+    </div>
+
+    <div style="text-align:right;">
+      <button style="padding:8px 28px;background:#3a3a50;border:1px solid #555;border-radius:8px;color:#666;font-size:14px;cursor:not-allowed;">Continue</button>
+    </div>
+  </div>
+</div>
+
+<p class="subtitle" style="margin-top:20px;">Native NSWindow — no web views. Steps progress top to bottom. Continue enables when all steps are complete.</p>
