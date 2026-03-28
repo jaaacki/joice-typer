@@ -9,5 +9,6 @@ void updateSetupDownloadComplete(void);
 void updateSetupReady(void);
 int isSetupComplete(void);
 const char *getSelectedDevice(void);
+void runSetupEventLoop(void);
 
 #endif

@@ -184,15 +184,15 @@ void updateSetupAccessibility(int granted) {
 }
 
 void populateSetupDevices(const char **deviceNames, int count, int defaultIndex) {
-    dispatch_async(dispatch_get_main_queue(), ^{
-        [sMicDropdown removeAllItems];
-        for (int i = 0; i < count; i++) {
-            [sMicDropdown addItemWithTitle:[NSString stringWithUTF8String:deviceNames[i]]];
-        }
-        if (defaultIndex >= 0 && defaultIndex < count) {
-            [sMicDropdown selectItemAtIndex:defaultIndex];
-        }
-    });
+    // Called from main thread — no dispatch needed. Must be synchronous
+    // because the caller frees the C strings immediately after this returns.
+    [sMicDropdown removeAllItems];
+    for (int i = 0; i < count; i++) {
+        [sMicDropdown addItemWithTitle:[NSString stringWithUTF8String:deviceNames[i]]];
+    }
+    if (defaultIndex >= 0 && defaultIndex < count) {
+        [sMicDropdown selectItemAtIndex:defaultIndex];
+    }
 }
 
 void updateSetupDownloadProgress(double progress, long long bytesDownloaded, long long bytesTotal) {
@@ -248,4 +248,10 @@ const char *getSelectedDevice(void) {
     memcpy(sSelectedDeviceBuffer, utf8, len);
     sSelectedDeviceBuffer[len] = '\0';
     return sSelectedDeviceBuffer;
+}
+
+void runSetupEventLoop(void) {
+    [NSApplication sharedApplication];
+    [NSApp setActivationPolicy:NSApplicationActivationPolicyAccessory];
+    [NSApp run];
 }

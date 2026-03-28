@@ -4,7 +4,12 @@
 
 void postNotification(const char *title, const char *body) {
     @autoreleasepool {
+        // Copy to NSString immediately — the C pointers will be freed by the caller
+        NSString *nsTitle = [NSString stringWithUTF8String:title];
+        NSString *nsBody = [NSString stringWithUTF8String:body];
+
         UNUserNotificationCenter *center = [UNUserNotificationCenter currentNotificationCenter];
+        if (center == nil) return;
 
         // Request permission (first time only, macOS remembers)
         [center requestAuthorizationWithOptions:(UNAuthorizationOptionAlert | UNAuthorizationOptionSound)
@@ -12,8 +17,8 @@ void postNotification(const char *title, const char *body) {
             if (!granted) return;
 
             UNMutableNotificationContent *content = [[UNMutableNotificationContent alloc] init];
-            content.title = [NSString stringWithUTF8String:title];
-            content.body = [NSString stringWithUTF8String:body];
+            content.title = nsTitle;
+            content.body = nsBody;
             content.sound = [UNNotificationSound defaultSound];
 
             UNNotificationRequest *request = [UNNotificationRequest

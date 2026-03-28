@@ -2,6 +2,7 @@ package main
 
 import (
 	"log/slog"
+	"sync"
 	"sync/atomic"
 )
 
@@ -14,6 +15,7 @@ type App struct {
 	sound         *Sound
 	logger        *slog.Logger
 	busy          int32 // atomic flag: 1 = transcribing
+	stateMu       sync.RWMutex
 	onStateChange func(AppState)
 }
 
@@ -53,7 +55,17 @@ func (a *App) Run(events <-chan HotkeyEvent) {
 
 // SetStateCallback sets a function called on every state transition.
 func (a *App) SetStateCallback(fn func(AppState)) {
+	a.stateMu.Lock()
 	a.onStateChange = fn
+	a.stateMu.Unlock()
+}
+
+// emitState calls the state callback safely under a read lock.
+func (a *App) emitState(state AppState) {
+	a.stateMu.RLock()
+	fn := a.onStateChange
+	a.stateMu.RUnlock()
+	fn(state)
 }
 
 func (a *App) handlePress() {
@@ -65,13 +77,13 @@ func (a *App) handlePress() {
 	}
 	a.logger.Debug("trigger pressed", "operation", "handlePress")
 	a.sound.PlayStart()
-	a.onStateChange(StateRecording)
+	a.emitState(StateRecording)
 
 	if err := a.recorder.Start(); err != nil {
 		a.logger.Error("failed to start recording",
 			"operation", "handlePress", "error", err)
 		a.sound.PlayError()
-		a.onStateChange(StateReady)
+		a.emitState(StateReady)
 	}
 }
 
@@ -83,16 +95,16 @@ func (a *App) handleRelease() {
 		a.logger.Error("failed to stop recording",
 			"operation", "handleRelease", "error", err)
 		a.sound.PlayError()
-		a.onStateChange(StateReady)
+		a.emitState(StateReady)
 		return
 	}
 
 	a.sound.PlayStop()
-	a.onStateChange(StateTranscribing)
+	a.emitState(StateTranscribing)
 
 	if len(audio) == 0 {
 		a.logger.Warn("no audio captured", "operation", "handleRelease")
-		a.onStateChange(StateReady)
+		a.emitState(StateReady)
 		return
 	}
 
@@ -113,13 +125,13 @@ func (a *App) transcribeAndPaste(audio []float32) {
 		a.logger.Error("transcription failed",
 			"operation", "transcribeAndPaste", "error", err)
 		a.sound.PlayError()
-		a.onStateChange(StateReady)
+		a.emitState(StateReady)
 		return
 	}
 
 	if text == "" {
 		a.logger.Warn("no speech detected", "operation", "transcribeAndPaste")
-		a.onStateChange(StateReady)
+		a.emitState(StateReady)
 		return
 	}
 
@@ -127,13 +139,13 @@ func (a *App) transcribeAndPaste(audio []float32) {
 		a.logger.Error("paste failed",
 			"operation", "transcribeAndPaste", "error", err)
 		a.sound.PlayError()
-		a.onStateChange(StateReady)
+		a.emitState(StateReady)
 		return
 	}
 
 	a.logger.Info("text pasted", "operation", "transcribeAndPaste",
 		"text_length", len(text))
-	a.onStateChange(StateReady)
+	a.emitState(StateReady)
 }
 
 // Shutdown gracefully closes all components.

@@ -64,14 +64,124 @@ func suppressStderr(logDir string) {
 
 // runAppMode is the entry point when running inside a .app bundle.
 func runAppMode() {
-	// TODO: Will be implemented when setup wizard and status bar are integrated.
-	// For now, fall back to terminal mode.
-	cfgPath, err := DefaultConfigPath()
+	logDir, err := DefaultConfigDir()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "fatal: %v\n", err)
 		os.Exit(1)
 	}
-	runTerminalMode(cfgPath)
+
+	// Suppress whisper.cpp stderr spam
+	suppressStderr(logDir)
+
+	logger, logCleanup, err := SetupLogger(logDir)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "fatal: %v\n", err)
+		os.Exit(1)
+	}
+	defer logCleanup()
+
+	// Init PortAudio early (needed for device listing in setup wizard)
+	if err := InitAudio(); err != nil {
+		logger.Error("failed to initialize audio", "component", "main", "operation", "runAppMode", "error", err)
+		os.Exit(1)
+	}
+	defer func() {
+		if tErr := TerminateAudio(); tErr != nil {
+			logger.Error("failed to terminate audio", "component", "main", "operation", "runAppMode", "error", tErr)
+		}
+	}()
+
+	// First-run: show setup wizard
+	firstRun := IsFirstRun()
+	if firstRun {
+		selectedDevice, setupErr := RunSetupWizard(logger)
+		if setupErr != nil {
+			logger.Error("setup wizard failed", "component", "main", "operation", "runAppMode", "error", setupErr)
+			os.Exit(1)
+		}
+		logger.Info("setup complete", "component", "main", "operation", "runAppMode", "device", selectedDevice)
+	}
+
+	// Load config (now exists after setup)
+	cfgPath, err := DefaultConfigPath()
+	if err != nil {
+		logger.Error("failed to resolve config path", "component", "main", "operation", "runAppMode", "error", err)
+		os.Exit(1)
+	}
+	cfg, err := LoadConfig(cfgPath)
+	if err != nil {
+		logger.Error("failed to load config", "component", "main", "operation", "runAppMode", "error", err)
+		os.Exit(1)
+	}
+
+	// Load model
+	modelPath, err := DefaultModelPath(cfg.ModelSize)
+	if err != nil {
+		logger.Error("failed to resolve model path", "component", "main", "operation", "runAppMode", "error", err)
+		os.Exit(1)
+	}
+
+	// Init status bar
+	InitStatusBar()
+	UpdateStatusBar(StateLoading)
+
+	transcriber, err := NewTranscriber(modelPath, cfg.Language, logger)
+	if err != nil {
+		logger.Error("failed to initialize transcriber", "component", "main", "operation", "runAppMode", "error", err)
+		os.Exit(1)
+	}
+
+	recorder := NewRecorder(cfg.SampleRate, cfg.InputDevice, logger)
+	paster := NewPaster(logger)
+	sound := NewSound(cfg.SoundFeedback, logger)
+
+	app := NewApp(recorder, transcriber, paster, sound, logger)
+	app.SetStateCallback(func(state AppState) {
+		UpdateStatusBar(state)
+	})
+
+	events := make(chan HotkeyEvent, 10)
+	hotkey := NewHotkeyListener(cfg.TriggerKey, logger)
+
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	go func() {
+		sig := <-sigCh
+		logger.Info("received signal", "component", "main", "operation", "signal", "signal", sig.String())
+		if stopErr := hotkey.Stop(); stopErr != nil {
+			logger.Error("failed to stop hotkey", "component", "main", "operation", "signal", "error", stopErr)
+		}
+	}()
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		app.Run(events)
+		app.Shutdown()
+	}()
+
+	UpdateStatusBar(StateReady)
+	sound.PlayReady()
+
+	if firstRun {
+		PostNotification("JoiceTyper is ready", "Hold Fn+Shift to dictate.")
+	}
+
+	logger.Info("ready", "component", "main", "operation", "runAppMode", "trigger_key", cfg.TriggerKey)
+
+	if err := hotkey.Start(events); err != nil {
+		logger.Error("hotkey listener failed", "component", "main", "operation", "runAppMode", "error", err)
+		os.Exit(1)
+	}
+
+	hotkeyMu.Lock()
+	hotkeyEvents = nil
+	hotkeyMu.Unlock()
+	close(events)
+	wg.Wait()
+
+	logger.Info("voicetype stopped", "component", "main", "operation", "runAppMode")
 }
 
 // runTerminalMode is the entry point for CLI invocations.
