@@ -15,16 +15,16 @@ int setClipboard(const char* text) {
     }
 }
 
-void simulateCmdV(void) {
+int simulateCmdV(void) {
     // 'v' key = keycode 0x09
     CGEventRef keyDown = CGEventCreateKeyboardEvent(NULL, 0x09, true);
-    if (keyDown == NULL) return;
+    if (keyDown == NULL) return 1;
     CGEventSetFlags(keyDown, kCGEventFlagMaskCommand);
 
     CGEventRef keyUp = CGEventCreateKeyboardEvent(NULL, 0x09, false);
     if (keyUp == NULL) {
         CFRelease(keyDown);
-        return;
+        return 2;
     }
     CGEventSetFlags(keyUp, kCGEventFlagMaskCommand);
 
@@ -33,4 +33,5 @@ void simulateCmdV(void) {
 
     CFRelease(keyDown);
     CFRelease(keyUp);
+    return 0;
 }

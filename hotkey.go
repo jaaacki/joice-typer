@@ -56,17 +56,26 @@ func hotkeyCallback(eventType C.int) {
 	if ch == nil {
 		return
 	}
+	var event HotkeyEvent
 	switch int(eventType) {
 	case 0:
-		if hotkeyLogger != nil {
-			hotkeyLogger.Info("TRIGGER PRESSED", "operation", "hotkeyCallback")
-		}
-		ch <- TriggerPressed
+		event = TriggerPressed
 	case 1:
+		event = TriggerReleased
+	default:
+		return
+	}
+	if hotkeyLogger != nil {
+		hotkeyLogger.Info("hotkey event", "operation", "hotkeyCallback", "event", event.String())
+	}
+	select {
+	case ch <- event:
+	default:
+		// Channel full — drop event rather than block the run loop
 		if hotkeyLogger != nil {
-			hotkeyLogger.Info("TRIGGER RELEASED", "operation", "hotkeyCallback")
+			hotkeyLogger.Warn("event dropped, channel full",
+				"operation", "hotkeyCallback", "event", event.String())
 		}
-		ch <- TriggerReleased
 	}
 }
 

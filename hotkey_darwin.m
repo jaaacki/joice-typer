@@ -37,7 +37,6 @@ static CGEventRef eventTapCallback(
     }
 
     uint64_t flags = CGEventGetFlags(event);
-    fprintf(stderr, "[hotkey] flags=0x%llx target=0x%llx match=%d\n", flags, sTargetFlags, (int)((flags & sTargetFlags) == sTargetFlags));
     hotkeyFlagsChanged(flags);
     int allHeld = (flags & sTargetFlags) == sTargetFlags;
 
@@ -68,7 +67,6 @@ int startHotkeyListener(uint64_t targetFlags) {
     );
 
     if (sEventTap == NULL) {
-        fprintf(stderr, "[hotkey] CGEventTapCreate failed — no accessibility permission\n");
         return -1;
     }
 
@@ -76,7 +74,6 @@ int startHotkeyListener(uint64_t targetFlags) {
     CFRunLoopAddSource(CFRunLoopGetCurrent(), sRunLoopSource, kCFRunLoopCommonModes);
     CGEventTapEnable(sEventTap, true);
 
-    fprintf(stderr, "[hotkey] event tap created, target=0x%llx\n", targetFlags);
     return 0;
 }
 
@@ -99,7 +96,6 @@ void runMainLoop(void) {
         // Without it, CGEvent taps are created but never fire.
         [NSApplication sharedApplication];
         [NSApp setActivationPolicy:NSApplicationActivationPolicyAccessory];
-        fprintf(stderr, "[hotkey] NSApplication initialized, starting run loop\n");
         [NSApp run];
     }
 }

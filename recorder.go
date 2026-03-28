@@ -9,15 +9,17 @@ import (
 )
 
 type portaudioRecorder struct {
-	sampleRate  float64
-	deviceName  string
-	stream      *portaudio.Stream
-	buffer      []float32
-	chunks      [][]float32
-	mu          sync.Mutex
-	recording   bool
-	done        chan struct{}
-	logger      *slog.Logger
+	sampleRate   float64
+	deviceName   string
+	stream       *portaudio.Stream
+	buffer       []float32
+	chunks       [][]float32
+	mu           sync.Mutex
+	recording    bool
+	done         chan struct{}
+	logger       *slog.Logger
+	maxSamples   int
+	totalSamples int
 }
 
 func NewRecorder(sampleRate int, deviceName string, logger *slog.Logger) Recorder {
@@ -25,6 +27,7 @@ func NewRecorder(sampleRate int, deviceName string, logger *slog.Logger) Recorde
 		sampleRate: float64(sampleRate),
 		deviceName: deviceName,
 		logger:     logger.With("component", "recorder"),
+		maxSamples: int(float64(sampleRate) * 30.0),
 	}
 }
 
@@ -36,7 +39,8 @@ func TerminateAudio() error {
 	return portaudio.Terminate()
 }
 
-// ListInputDevices prints all available input devices to stdout.
+// ListInputDevices prints available input devices to stdout.
+// This is intentional CLI output for --list-devices, not application logging.
 func ListInputDevices() error {
 	devices, err := portaudio.Devices()
 	if err != nil {
@@ -78,6 +82,7 @@ func (r *portaudioRecorder) Start() error {
 		"sample_rate", r.sampleRate, "device", r.deviceName)
 
 	r.chunks = nil
+	r.totalSamples = 0
 	r.recording = true
 	r.done = make(chan struct{})
 	r.buffer = make([]float32, 1024)
@@ -127,7 +132,17 @@ func (r *portaudioRecorder) Start() error {
 }
 
 func (r *portaudioRecorder) readLoop() {
-	defer close(r.done)
+	defer func() {
+		// readLoop owns stream cleanup — Stop() must never close the stream
+		// because readLoop may still be blocked in stream.Read()
+		r.mu.Lock()
+		if r.stream != nil {
+			r.stream.Close()
+			r.stream = nil
+		}
+		r.mu.Unlock()
+		close(r.done)
+	}()
 	for {
 		if err := r.stream.Read(); err != nil {
 			// stream.Read returns error when stream is stopped — this is expected
@@ -141,6 +156,16 @@ func (r *portaudioRecorder) readLoop() {
 		chunk := make([]float32, len(r.buffer))
 		copy(chunk, r.buffer)
 		r.chunks = append(r.chunks, chunk)
+		r.totalSamples += len(chunk)
+		if r.totalSamples >= r.maxSamples {
+			r.recording = false
+			r.mu.Unlock()
+			r.logger.Warn("max recording duration reached",
+				"operation", "readLoop",
+				"total_samples", r.totalSamples,
+				"max_samples", r.maxSamples)
+			return
+		}
 		r.mu.Unlock()
 	}
 }
@@ -156,30 +181,17 @@ func (r *portaudioRecorder) Stop() ([]float32, error) {
 
 	r.logger.Debug("stopping", "operation", "Stop")
 
-	// Stop the stream first — this causes stream.Read() in readLoop to return
-	// an error, breaking the loop. PortAudio's Pa_StopStream is safe to call
-	// concurrently with Pa_ReadStream.
-	var stopErr error
-	if err := r.stream.Stop(); err != nil {
-		stopErr = fmt.Errorf("recorder.Stop: stop stream: %w", err)
-		r.logger.Error("failed to stop stream", "operation", "Stop", "error", err)
-	}
-
-	// Wait for readLoop to finish (now unblocked by stream.Stop)
-	<-r.done
-
-	if err := r.stream.Close(); err != nil {
-		r.logger.Error("failed to close stream", "operation", "Stop", "error", err)
-		if stopErr == nil {
-			stopErr = fmt.Errorf("recorder.Stop: close stream: %w", err)
-		}
-	}
-	r.stream = nil
-
+	// Grab audio immediately — don't wait for readLoop to exit.
+	// readLoop cleans up the stream in its own defer.
 	r.mu.Lock()
 	chunks := r.chunks
 	r.chunks = nil
 	r.mu.Unlock()
+
+	// Signal PortAudio to stop (readLoop will exit when Read returns error)
+	if err := r.stream.Stop(); err != nil {
+		r.logger.Error("failed to stop stream", "operation", "Stop", "error", err)
+	}
 
 	total := 0
 	for _, chunk := range chunks {
@@ -187,7 +199,7 @@ func (r *portaudioRecorder) Stop() ([]float32, error) {
 	}
 	if total == 0 {
 		r.logger.Warn("no audio captured", "operation", "Stop")
-		return []float32{}, stopErr
+		return []float32{}, nil
 	}
 
 	audio := make([]float32, 0, total)
@@ -196,17 +208,12 @@ func (r *portaudioRecorder) Stop() ([]float32, error) {
 	}
 	r.logger.Debug("recording stopped", "operation", "Stop", "samples", len(audio),
 		"duration_sec", float64(len(audio))/r.sampleRate)
-	return audio, stopErr
+	return audio, nil
 }
 
 func (r *portaudioRecorder) Close() error {
 	r.logger.Info("closing", "operation", "Close")
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if r.stream != nil {
-		if err := r.stream.Close(); err != nil {
-			return fmt.Errorf("recorder.Close: %w", err)
-		}
-	}
+	// Stream cleanup is handled by readLoop's defer.
+	// If readLoop never started or already exited, stream is already nil.
 	return nil
 }

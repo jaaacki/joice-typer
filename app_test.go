@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"log/slog"
+	"sync"
 	"testing"
 	"time"
 )
@@ -10,6 +11,7 @@ import (
 // --- Mock implementations ---
 
 type mockRecorder struct {
+	mu          sync.Mutex
 	startCalled bool
 	stopCalled  bool
 	closeCalled bool
@@ -19,19 +21,26 @@ type mockRecorder struct {
 }
 
 func (m *mockRecorder) Start() error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.startCalled = true
 	return m.startErr
 }
 func (m *mockRecorder) Stop() ([]float32, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.stopCalled = true
 	return m.audio, m.stopErr
 }
 func (m *mockRecorder) Close() error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.closeCalled = true
 	return nil
 }
 
 type mockTranscriber struct {
+	mu            sync.Mutex
 	text          string
 	err           error
 	closeCalled   bool
@@ -39,20 +48,27 @@ type mockTranscriber struct {
 }
 
 func (m *mockTranscriber) Transcribe(audio []float32) (string, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.receivedAudio = audio
 	return m.text, m.err
 }
 func (m *mockTranscriber) Close() error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.closeCalled = true
 	return nil
 }
 
 type mockPaster struct {
+	mu         sync.Mutex
 	pastedText string
 	err        error
 }
 
 func (m *mockPaster) Paste(text string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.pastedText = text
 	return m.err
 }
@@ -80,7 +96,8 @@ func TestApp_HappyPath(t *testing.T) {
 	events <- TriggerPressed
 	time.Sleep(50 * time.Millisecond)
 	events <- TriggerReleased
-	time.Sleep(100 * time.Millisecond)
+	// Wait for async transcription goroutine to complete
+	time.Sleep(200 * time.Millisecond)
 
 	// Shut down
 	close(events)
@@ -90,14 +107,23 @@ func TestApp_HappyPath(t *testing.T) {
 		t.Fatal("Run did not return after closing events channel")
 	}
 
-	if !rec.startCalled {
+	rec.mu.Lock()
+	startCalled := rec.startCalled
+	stopCalled := rec.stopCalled
+	rec.mu.Unlock()
+
+	if !startCalled {
 		t.Error("recorder.Start was not called")
 	}
-	if !rec.stopCalled {
+	if !stopCalled {
 		t.Error("recorder.Stop was not called")
 	}
-	if paste.pastedText != "hello world" {
-		t.Errorf("expected pasted text 'hello world', got %q", paste.pastedText)
+
+	paste.mu.Lock()
+	got := paste.pastedText
+	paste.mu.Unlock()
+	if got != "hello world" {
+		t.Errorf("expected pasted text 'hello world', got %q", got)
 	}
 }
 
@@ -122,17 +148,24 @@ func TestApp_TranscriptionError_ContinuesListening(t *testing.T) {
 	events <- TriggerPressed
 	time.Sleep(50 * time.Millisecond)
 	events <- TriggerReleased
-	time.Sleep(100 * time.Millisecond)
+	// Wait for async transcription goroutine to complete
+	time.Sleep(200 * time.Millisecond)
 
 	// Second attempt -- should still work (continues listening)
+	rec.mu.Lock()
 	rec.audio = []float32{0.3, 0.4}
+	rec.mu.Unlock()
+
+	trans.mu.Lock()
 	trans.err = nil
 	trans.text = "recovered"
+	trans.mu.Unlock()
 
 	events <- TriggerPressed
 	time.Sleep(50 * time.Millisecond)
 	events <- TriggerReleased
-	time.Sleep(100 * time.Millisecond)
+	// Wait for async transcription goroutine to complete
+	time.Sleep(200 * time.Millisecond)
 
 	close(events)
 	select {
@@ -141,8 +174,11 @@ func TestApp_TranscriptionError_ContinuesListening(t *testing.T) {
 		t.Fatal("Run did not return after closing events channel")
 	}
 
-	if paste.pastedText != "recovered" {
-		t.Errorf("expected pasted text 'recovered' after error recovery, got %q", paste.pastedText)
+	paste.mu.Lock()
+	got := paste.pastedText
+	paste.mu.Unlock()
+	if got != "recovered" {
+		t.Errorf("expected pasted text 'recovered' after error recovery, got %q", got)
 	}
 }
 
@@ -166,7 +202,7 @@ func TestApp_EmptyAudio_NoPaste(t *testing.T) {
 	events <- TriggerPressed
 	time.Sleep(50 * time.Millisecond)
 	events <- TriggerReleased
-	time.Sleep(100 * time.Millisecond)
+	time.Sleep(200 * time.Millisecond)
 
 	close(events)
 	select {
@@ -175,8 +211,11 @@ func TestApp_EmptyAudio_NoPaste(t *testing.T) {
 		t.Fatal("Run did not return after closing events channel")
 	}
 
-	if paste.pastedText != "" {
-		t.Errorf("expected no paste for empty audio, got %q", paste.pastedText)
+	paste.mu.Lock()
+	got := paste.pastedText
+	paste.mu.Unlock()
+	if got != "" {
+		t.Errorf("expected no paste for empty audio, got %q", got)
 	}
 }
 
@@ -200,7 +239,8 @@ func TestApp_EmptyText_NoPaste(t *testing.T) {
 	events <- TriggerPressed
 	time.Sleep(50 * time.Millisecond)
 	events <- TriggerReleased
-	time.Sleep(100 * time.Millisecond)
+	// Wait for async transcription goroutine to complete
+	time.Sleep(200 * time.Millisecond)
 
 	close(events)
 	select {
@@ -209,8 +249,11 @@ func TestApp_EmptyText_NoPaste(t *testing.T) {
 		t.Fatal("Run did not return after closing events channel")
 	}
 
-	if paste.pastedText != "" {
-		t.Errorf("expected no paste for empty transcription, got %q", paste.pastedText)
+	paste.mu.Lock()
+	got := paste.pastedText
+	paste.mu.Unlock()
+	if got != "" {
+		t.Errorf("expected no paste for empty transcription, got %q", got)
 	}
 }
 
@@ -224,10 +267,17 @@ func TestApp_Shutdown_ClosesBoth(t *testing.T) {
 	app := NewApp(rec, trans, paste, snd, logger)
 	app.Shutdown()
 
-	if !rec.closeCalled {
+	rec.mu.Lock()
+	recClosed := rec.closeCalled
+	rec.mu.Unlock()
+	if !recClosed {
 		t.Error("recorder.Close was not called during Shutdown")
 	}
-	if !trans.closeCalled {
+
+	trans.mu.Lock()
+	transClosed := trans.closeCalled
+	trans.mu.Unlock()
+	if !transClosed {
 		t.Error("transcriber.Close was not called during Shutdown")
 	}
 }

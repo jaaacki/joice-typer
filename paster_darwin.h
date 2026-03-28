@@ -6,6 +6,7 @@
 int setClipboard(const char* text);
 
 // simulateCmdV simulates pressing Cmd+V to paste from clipboard.
-void simulateCmdV(void);
+// Returns 0 on success, non-zero on failure.
+int simulateCmdV(void);
 
 #endif

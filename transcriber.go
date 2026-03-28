@@ -9,6 +9,7 @@ package main
 import "C"
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"log/slog"
@@ -97,9 +98,26 @@ func (t *whisperTranscriber) Close() error {
 
 // ensureModel checks if the model file exists and downloads it if not.
 func ensureModel(modelPath string, logger *slog.Logger) error {
-	if _, err := os.Stat(modelPath); err == nil {
-		logger.Info("model found", "operation", "ensureModel", "path", modelPath)
-		return nil
+	info, err := os.Stat(modelPath)
+	if err == nil {
+		// File exists — validate minimum size (whisper small model is ~460MB)
+		const minModelBytes = 100 * 1024 * 1024 // 100MB minimum for any whisper model
+		if info.Size() < minModelBytes {
+			logger.Warn("model file appears truncated, re-downloading",
+				"operation", "ensureModel",
+				"path", modelPath,
+				"size", info.Size(),
+				"min_expected", minModelBytes,
+			)
+			if err := os.Remove(modelPath); err != nil {
+				return fmt.Errorf("transcriber.ensureModel: remove corrupt model: %w", err)
+			}
+			// Fall through to download
+		} else {
+			logger.Info("model found", "operation", "ensureModel",
+				"path", modelPath, "size", info.Size())
+			return nil
+		}
 	}
 
 	// Extract model name from path (e.g., "ggml-small.bin" from the full path)
@@ -117,8 +135,16 @@ func ensureModel(modelPath string, logger *slog.Logger) error {
 		return fmt.Errorf("transcriber.ensureModel: create dir: %w", err)
 	}
 
-	client := &http.Client{Timeout: 5 * time.Minute}
-	resp, err := client.Get(url)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	if err != nil {
+		return fmt.Errorf("transcriber.ensureModel: create request: %w", err)
+	}
+
+	client := &http.Client{Timeout: 10 * time.Minute}
+	resp, err := client.Do(req)
 	if err != nil {
 		return fmt.Errorf("transcriber.ensureModel: download: %w", err)
 	}
@@ -128,6 +154,16 @@ func ensureModel(modelPath string, logger *slog.Logger) error {
 		return fmt.Errorf("transcriber.ensureModel: download returned status %d", resp.StatusCode)
 	}
 
+	// Reject HTML error pages from proxies
+	ct := resp.Header.Get("Content-Type")
+	if strings.Contains(ct, "text/html") {
+		return fmt.Errorf("transcriber.ensureModel: download returned HTML instead of model (possible proxy error)")
+	}
+
+	// Cap download at 2GB to prevent abuse
+	const maxDownloadBytes = 2 * 1024 * 1024 * 1024
+	limitedBody := io.LimitReader(resp.Body, maxDownloadBytes)
+
 	tmpPath := modelPath + ".tmp"
 	f, err := os.Create(tmpPath)
 	if err != nil {
@@ -135,7 +171,7 @@ func ensureModel(modelPath string, logger *slog.Logger) error {
 	}
 
 	pr := &progressWriter{
-		reader: resp.Body,
+		reader: limitedBody,
 		total:  resp.ContentLength,
 		logger: logger,
 	}

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	_ "embed"
 	"fmt"
 	"os"
@@ -50,7 +51,9 @@ func LoadConfig(path string) (Config, error) {
 	}
 
 	var cfg Config
-	if err := yaml.Unmarshal(data, &cfg); err != nil {
+	decoder := yaml.NewDecoder(bytes.NewReader(data))
+	decoder.KnownFields(true)
+	if err := decoder.Decode(&cfg); err != nil {
 		return Config{}, fmt.Errorf("config.LoadConfig: parse: %w", err)
 	}
 
@@ -73,8 +76,8 @@ func (c Config) Validate() error {
 	if !validModelSizes[c.ModelSize] {
 		return fmt.Errorf("config.Validate: invalid model_size %q (must be tiny, base, small, or medium)", c.ModelSize)
 	}
-	if c.SampleRate <= 0 {
-		return fmt.Errorf("config.Validate: sample_rate must be positive, got %d", c.SampleRate)
+	if c.SampleRate <= 0 || c.SampleRate > 96000 {
+		return fmt.Errorf("config.Validate: sample_rate must be between 1 and 96000, got %d", c.SampleRate)
 	}
 	return nil
 }

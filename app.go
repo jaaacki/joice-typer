@@ -2,6 +2,7 @@ package main
 
 import (
 	"log/slog"
+	"sync/atomic"
 )
 
 // App is the orchestrator that wires hotkey events to the
@@ -12,6 +13,7 @@ type App struct {
 	paster      Paster
 	sound       *Sound
 	logger      *slog.Logger
+	busy        int32 // atomic flag: 1 = transcribing
 }
 
 // NewApp creates an App with all components pre-constructed.
@@ -48,7 +50,13 @@ func (a *App) Run(events <-chan HotkeyEvent) {
 }
 
 func (a *App) handlePress() {
-	a.logger.Debug("trigger pressed", "operation", "handlePress")
+	if atomic.LoadInt32(&a.busy) == 1 {
+		a.logger.Warn("still transcribing, ignoring press",
+			"operation", "handlePress")
+		a.sound.PlayError()
+		return
+	}
+	a.logger.Info(">>> RECORDING", "operation", "handlePress")
 	a.sound.PlayStart()
 
 	if err := a.recorder.Start(); err != nil {
@@ -59,7 +67,7 @@ func (a *App) handlePress() {
 }
 
 func (a *App) handleRelease() {
-	a.logger.Debug("trigger released", "operation", "handleRelease")
+	a.logger.Info(">>> RELEASED — stopping recorder", "operation", "handleRelease")
 
 	audio, err := a.recorder.Stop()
 	if err != nil {
@@ -76,27 +84,39 @@ func (a *App) handleRelease() {
 		return
 	}
 
+	// Process transcription async so event loop stays responsive
+	go a.transcribeAndPaste(audio)
+}
+
+func (a *App) transcribeAndPaste(audio []float32) {
+	if !atomic.CompareAndSwapInt32(&a.busy, 0, 1) {
+		a.logger.Warn("transcription already in progress, dropping audio",
+			"operation", "transcribeAndPaste")
+		return
+	}
+	defer atomic.StoreInt32(&a.busy, 0)
+
 	text, err := a.transcriber.Transcribe(audio)
 	if err != nil {
 		a.logger.Error("transcription failed",
-			"operation", "handleRelease", "error", err)
+			"operation", "transcribeAndPaste", "error", err)
 		a.sound.PlayError()
 		return
 	}
 
 	if text == "" {
-		a.logger.Warn("no speech detected", "operation", "handleRelease")
+		a.logger.Warn("no speech detected", "operation", "transcribeAndPaste")
 		return
 	}
 
 	if err := a.paster.Paste(text); err != nil {
 		a.logger.Error("paste failed",
-			"operation", "handleRelease", "error", err)
+			"operation", "transcribeAndPaste", "error", err)
 		a.sound.PlayError()
 		return
 	}
 
-	a.logger.Info("text pasted", "operation", "handleRelease",
+	a.logger.Info("text pasted", "operation", "transcribeAndPaste",
 		"text_length", len(text))
 }
 

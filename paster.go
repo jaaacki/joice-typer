@@ -38,7 +38,10 @@ func (p *clipboardPaster) Paste(text string) error {
 	// Brief pause to let pasteboard settle before simulating keypress
 	time.Sleep(50 * time.Millisecond)
 
-	C.simulateCmdV()
+	pasteResult := C.simulateCmdV()
+	if pasteResult != 0 {
+		return fmt.Errorf("paster.Paste: failed to simulate Cmd+V (error %d)", int(pasteResult))
+	}
 
 	p.logger.Debug("pasted", "operation", "Paste")
 	return nil

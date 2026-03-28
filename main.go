@@ -152,7 +152,10 @@ func main() {
 		os.Exit(1)
 	}
 
-	// When hotkey.Start returns (after Stop()), close the events channel
+	// Nil the global channel to prevent late C callbacks from sending on closed channel
+	hotkeyMu.Lock()
+	hotkeyEvents = nil
+	hotkeyMu.Unlock()
 	close(events)
 
 	// Wait for the app goroutine to finish processing and shut down
