@@ -30,6 +30,7 @@ type HotkeyListener interface {
 type Recorder interface {
 	Start() error
 	Stop() ([]float32, error)
+	Snapshot() []float32 // copy of audio captured so far, without stopping
 	Close() error
 }
 
@@ -42,4 +43,13 @@ type Transcriber interface {
 // Paster inserts text at the current cursor position.
 type Paster interface {
 	Paste(text string) error
+}
+
+// Typer streams text at the cursor via simulated keystrokes.
+type Typer interface {
+	Type(text string) error
+	Backspace(count int) error
+	// ReplaceAll backspaces oldLen runes then types newText.
+	// Non-atomic: if interrupted between backspace and type, text may be lost.
+	ReplaceAll(oldLen int, newText string) error
 }

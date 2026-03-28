@@ -135,7 +135,12 @@ func runAppMode() {
 	paster := NewPaster(logger)
 	sound := NewSound(cfg.SoundFeedback, logger)
 
-	app := NewApp(recorder, transcriber, paster, sound, logger)
+	var typer Typer
+	if cfg.TypeMode == "stream" {
+		typer = NewTyper(logger)
+	}
+
+	app := NewApp(recorder, transcriber, paster, typer, sound, cfg.TypeMode, logger)
 	app.SetStateCallback(func(state AppState) {
 		UpdateStatusBar(state)
 	})
@@ -255,8 +260,14 @@ func runTerminalMode(configPath string) {
 	// --- Init sound ---
 	sound := NewSound(cfg.SoundFeedback, logger)
 
+	// --- Init typer (stream mode only) ---
+	var typer Typer
+	if cfg.TypeMode == "stream" {
+		typer = NewTyper(logger)
+	}
+
 	// --- Create app ---
-	app := NewApp(recorder, transcriber, paster, sound, logger)
+	app := NewApp(recorder, transcriber, paster, typer, sound, cfg.TypeMode, logger)
 
 	// --- Signal handling ---
 	events := make(chan HotkeyEvent, 10)

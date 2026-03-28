@@ -20,6 +20,7 @@ type Config struct {
 	SampleRate    int      `yaml:"sample_rate"`
 	SoundFeedback bool     `yaml:"sound_feedback"`
 	InputDevice   string   `yaml:"input_device"`
+	TypeMode      string   `yaml:"type_mode"`
 }
 
 var validModelSizes = map[string]bool{
@@ -57,6 +58,10 @@ func LoadConfig(path string) (Config, error) {
 		return Config{}, fmt.Errorf("config.LoadConfig: parse: %w", err)
 	}
 
+	if cfg.TypeMode == "" {
+		cfg.TypeMode = "clipboard"
+	}
+
 	if err := cfg.Validate(); err != nil {
 		return Config{}, err
 	}
@@ -78,6 +83,10 @@ func (c Config) Validate() error {
 	}
 	if c.SampleRate <= 0 || c.SampleRate > 96000 {
 		return fmt.Errorf("config.Validate: sample_rate must be between 1 and 96000, got %d", c.SampleRate)
+	}
+	validTypeModes := map[string]bool{"clipboard": true, "stream": true}
+	if c.TypeMode != "" && !validTypeModes[c.TypeMode] {
+		return fmt.Errorf("config.Validate: invalid type_mode %q (must be clipboard or stream)", c.TypeMode)
 	}
 	return nil
 }

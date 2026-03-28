@@ -25,6 +25,8 @@ The ONLY job: hold a hotkey, speak, release, text appears at the cursor. Whereve
 - **Paste mechanism**: NSPasteboard + CGEvent Cmd+V simulation
 - **Config**: `~/.config/voicetype/config.yaml` (YAML)
 - **Default hotkey**: Fn+Shift (push-to-talk: hold to record, release to transcribe)
+- **Type modes**: "clipboard" (v1 paste) or "stream" (v2 live CGEvent keystrokes)
+- **Streaming**: 1-second interval sliding window transcription with common-prefix diff correction
 
 ## Build
 
@@ -57,6 +59,8 @@ whisper.cpp lives in `third_party/whisper.cpp/` as a git submodule.
 
 ## Roadmap
 
-- **v1** (current): Core push-to-talk, configurable trigger key
-- **v2**: Custom dictionary for improved recognition
-- **v3**: Menu bar UI (Wails) for settings and dictionary management
+- **v1** (done): Core push-to-talk, configurable trigger key
+- **v1.5** (done): .app bundle, menu bar icon, setup wizard
+- **v2** (current): Streaming type mode with live self-correcting transcription
+- **v2.5**: Custom dictionary, settings UI for mic/hotkey/type mode
+- **v3**: Menu bar UI (Wails) for full settings management

@@ -145,3 +145,47 @@ func TestValidate_InvalidSampleRate(t *testing.T) {
 		t.Errorf("error should mention sample_rate, got: %v", err)
 	}
 }
+
+func TestValidate_InvalidTypeMode(t *testing.T) {
+	cfg := Config{
+		TriggerKey: []string{"fn", "shift"},
+		ModelSize:  "small",
+		SampleRate: 16000,
+		TypeMode:   "banana",
+	}
+	err := cfg.Validate()
+	if err == nil {
+		t.Fatal("expected error for invalid type_mode")
+	}
+	if !strings.Contains(err.Error(), "type_mode") {
+		t.Errorf("error should mention type_mode, got: %v", err)
+	}
+}
+
+func TestValidate_ValidTypeModes(t *testing.T) {
+	for _, mode := range []string{"clipboard", "stream", ""} {
+		cfg := Config{
+			TriggerKey: []string{"fn", "shift"},
+			ModelSize:  "small",
+			SampleRate: 16000,
+			TypeMode:   mode,
+		}
+		if err := cfg.Validate(); err != nil {
+			t.Errorf("expected type_mode %q to be valid, got error: %v", mode, err)
+		}
+	}
+}
+
+func TestLoadConfig_DefaultTypeMode(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+
+	cfg, err := LoadConfig(path)
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+
+	if cfg.TypeMode != "clipboard" {
+		t.Errorf("expected default type_mode 'clipboard', got %q", cfg.TypeMode)
+	}
+}

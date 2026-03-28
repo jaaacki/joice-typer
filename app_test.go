@@ -32,6 +32,11 @@ func (m *mockRecorder) Stop() ([]float32, error) {
 	m.stopCalled = true
 	return m.audio, m.stopErr
 }
+func (m *mockRecorder) Snapshot() []float32 {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.audio
+}
 func (m *mockRecorder) Close() error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -73,6 +78,44 @@ func (m *mockPaster) Paste(text string) error {
 	return m.err
 }
 
+type mockTyper struct {
+	mu         sync.Mutex
+	typed      string
+	backspaced int
+}
+
+func (m *mockTyper) Type(text string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.typed += text
+	return nil
+}
+
+func (m *mockTyper) Backspace(count int) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.backspaced += count
+	runes := []rune(m.typed)
+	if count > len(runes) {
+		count = len(runes)
+	}
+	m.typed = string(runes[:len(runes)-count])
+	return nil
+}
+
+func (m *mockTyper) ReplaceAll(oldLen int, newText string) error {
+	if err := m.Backspace(oldLen); err != nil {
+		return err
+	}
+	return m.Type(newText)
+}
+
+func (m *mockTyper) getText() string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.typed
+}
+
 // --- Tests ---
 
 func TestApp_HappyPath(t *testing.T) {
@@ -82,7 +125,7 @@ func TestApp_HappyPath(t *testing.T) {
 	logger := slog.Default()
 	snd := NewSound(false, logger)
 
-	app := NewApp(rec, trans, paste, snd, logger)
+	app := NewApp(rec, trans, paste, nil, snd, "clipboard", logger)
 
 	var states []AppState
 	var statesMu sync.Mutex
@@ -149,7 +192,7 @@ func TestApp_TranscriptionError_ContinuesListening(t *testing.T) {
 	logger := slog.Default()
 	snd := NewSound(false, logger)
 
-	app := NewApp(rec, trans, paste, snd, logger)
+	app := NewApp(rec, trans, paste, nil, snd, "clipboard", logger)
 
 	events := make(chan HotkeyEvent, 10)
 	done := make(chan struct{})
@@ -204,7 +247,7 @@ func TestApp_EmptyAudio_NoPaste(t *testing.T) {
 	logger := slog.Default()
 	snd := NewSound(false, logger)
 
-	app := NewApp(rec, trans, paste, snd, logger)
+	app := NewApp(rec, trans, paste, nil, snd, "clipboard", logger)
 
 	events := make(chan HotkeyEvent, 10)
 	done := make(chan struct{})
@@ -241,7 +284,7 @@ func TestApp_EmptyText_NoPaste(t *testing.T) {
 	logger := slog.Default()
 	snd := NewSound(false, logger)
 
-	app := NewApp(rec, trans, paste, snd, logger)
+	app := NewApp(rec, trans, paste, nil, snd, "clipboard", logger)
 
 	events := make(chan HotkeyEvent, 10)
 	done := make(chan struct{})
@@ -279,7 +322,7 @@ func TestApp_Shutdown_ClosesBoth(t *testing.T) {
 	logger := slog.Default()
 	snd := NewSound(false, logger)
 
-	app := NewApp(rec, trans, paste, snd, logger)
+	app := NewApp(rec, trans, paste, nil, snd, "clipboard", logger)
 	app.Shutdown()
 
 	rec.mu.Lock()
@@ -294,5 +337,98 @@ func TestApp_Shutdown_ClosesBoth(t *testing.T) {
 	trans.mu.Unlock()
 	if !transClosed {
 		t.Error("transcriber.Close was not called during Shutdown")
+	}
+}
+
+func TestApp_StreamMode(t *testing.T) {
+	rec := &mockRecorder{audio: []float32{0.1, 0.2, 0.3}}
+	trans := &mockTranscriber{text: "hello stream"}
+	typer := &mockTyper{}
+	paste := &mockPaster{}
+	logger := slog.Default()
+	snd := NewSound(false, logger)
+
+	app := NewApp(rec, trans, paste, typer, snd, "stream", logger)
+	app.streamInterval = 50 * time.Millisecond
+
+	events := make(chan HotkeyEvent, 10)
+	done := make(chan struct{})
+	go func() {
+		app.Run(events)
+		close(done)
+	}()
+
+	events <- TriggerPressed
+	time.Sleep(200 * time.Millisecond) // let streamer tick
+	events <- TriggerReleased
+	time.Sleep(200 * time.Millisecond) // wait for async finalize
+
+	close(events)
+	<-done
+
+	got := typer.getText()
+	if got == "" {
+		t.Error("expected streamer to have typed text")
+	}
+}
+
+func TestApp_StreamMode_ReleaseWithoutPress(t *testing.T) {
+	rec := &mockRecorder{audio: []float32{0.1, 0.2}}
+	trans := &mockTranscriber{text: "hello"}
+	paste := &mockPaster{}
+	logger := slog.Default()
+	snd := NewSound(false, logger)
+
+	app := NewApp(rec, trans, paste, nil, snd, "stream", logger)
+
+	events := make(chan HotkeyEvent, 10)
+	done := make(chan struct{})
+	go func() {
+		app.Run(events)
+		close(done)
+	}()
+
+	// Release without press — should not crash or call recorder.Stop
+	events <- TriggerReleased
+	time.Sleep(50 * time.Millisecond)
+
+	close(events)
+	<-done
+
+	rec.mu.Lock()
+	stopped := rec.stopCalled
+	rec.mu.Unlock()
+	if stopped {
+		t.Error("recorder.Stop should not be called on release without press")
+	}
+}
+
+func TestApp_ClipboardMode_ReleaseWithoutPress(t *testing.T) {
+	rec := &mockRecorder{audio: []float32{0.1, 0.2}}
+	trans := &mockTranscriber{text: "hello"}
+	paste := &mockPaster{}
+	logger := slog.Default()
+	snd := NewSound(false, logger)
+
+	app := NewApp(rec, trans, paste, nil, snd, "clipboard", logger)
+
+	events := make(chan HotkeyEvent, 10)
+	done := make(chan struct{})
+	go func() {
+		app.Run(events)
+		close(done)
+	}()
+
+	events <- TriggerReleased
+	time.Sleep(50 * time.Millisecond)
+
+	close(events)
+	<-done
+
+	rec.mu.Lock()
+	stopped := rec.stopCalled
+	rec.mu.Unlock()
+	if stopped {
+		t.Error("recorder.Stop should not be called on release without press")
 	}
 }
