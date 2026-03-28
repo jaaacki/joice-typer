@@ -26,18 +26,14 @@ var validModelSizes = map[string]bool{
 
 var validKeys = map[string]bool{
 	"fn": true, "shift": true, "ctrl": true, "option": true, "cmd": true,
-	"space": true,
-	"a": true, "b": true, "c": true, "d": true, "e": true, "f": true,
-	"g": true, "h": true, "i": true, "j": true, "k": true, "l": true,
-	"m": true, "n": true, "o": true, "p": true, "q": true, "r": true,
-	"s": true, "t": true, "u": true, "v": true, "w": true, "x": true,
-	"y": true, "z": true,
-	"f1": true, "f2": true, "f3": true, "f4": true, "f5": true, "f6": true,
-	"f7": true, "f8": true, "f9": true, "f10": true, "f11": true, "f12": true,
 }
 
 func LoadConfig(path string) (Config, error) {
-	if _, err := os.Stat(path); os.IsNotExist(err) {
+	_, statErr := os.Stat(path)
+	if statErr != nil && !os.IsNotExist(statErr) {
+		return Config{}, fmt.Errorf("config.LoadConfig: stat: %w", statErr)
+	}
+	if os.IsNotExist(statErr) {
 		dir := filepath.Dir(path)
 		if err := os.MkdirAll(dir, 0755); err != nil {
 			return Config{}, fmt.Errorf("config.LoadConfig: create dir: %w", err)
@@ -82,15 +78,26 @@ func (c Config) Validate() error {
 	return nil
 }
 
-func DefaultConfigDir() string {
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".config", "voicetype")
+func DefaultConfigDir() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("config.DefaultConfigDir: %w", err)
+	}
+	return filepath.Join(home, ".config", "voicetype"), nil
 }
 
-func DefaultConfigPath() string {
-	return filepath.Join(DefaultConfigDir(), "config.yaml")
+func DefaultConfigPath() (string, error) {
+	dir, err := DefaultConfigDir()
+	if err != nil {
+		return "", fmt.Errorf("config.DefaultConfigPath: %w", err)
+	}
+	return filepath.Join(dir, "config.yaml"), nil
 }
 
-func DefaultModelPath(modelSize string) string {
-	return filepath.Join(DefaultConfigDir(), "models", "ggml-"+modelSize+".bin")
+func DefaultModelPath(modelSize string) (string, error) {
+	dir, err := DefaultConfigDir()
+	if err != nil {
+		return "", fmt.Errorf("config.DefaultModelPath: %w", err)
+	}
+	return filepath.Join(dir, "models", "ggml-"+modelSize+".bin"), nil
 }

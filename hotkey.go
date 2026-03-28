@@ -9,22 +9,40 @@ import "C"
 import (
 	"fmt"
 	"log/slog"
+	"sync"
 )
+
+func (e HotkeyEvent) String() string {
+	switch e {
+	case TriggerPressed:
+		return "TriggerPressed"
+	case TriggerReleased:
+		return "TriggerReleased"
+	default:
+		return fmt.Sprintf("HotkeyEvent(%d)", int(e))
+	}
+}
 
 // Package-level channel for the cgo callback to send events.
 // Set by Start(), read by the exported callback.
-var hotkeyEvents chan<- HotkeyEvent
+var (
+	hotkeyMu     sync.Mutex
+	hotkeyEvents chan<- HotkeyEvent
+)
 
 //export hotkeyCallback
 func hotkeyCallback(eventType C.int) {
-	if hotkeyEvents == nil {
+	hotkeyMu.Lock()
+	ch := hotkeyEvents
+	hotkeyMu.Unlock()
+	if ch == nil {
 		return
 	}
 	switch int(eventType) {
 	case 0:
-		hotkeyEvents <- TriggerPressed
+		ch <- TriggerPressed
 	case 1:
-		hotkeyEvents <- TriggerReleased
+		ch <- TriggerReleased
 	}
 }
 
@@ -65,7 +83,9 @@ func (h *cgEventHotkeyListener) Start(events chan<- HotkeyEvent) error {
 		return fmt.Errorf("hotkey.Start: %w", err)
 	}
 
+	hotkeyMu.Lock()
 	hotkeyEvents = events
+	hotkeyMu.Unlock()
 
 	result := C.startHotkeyListener(C.uint64_t(flags))
 	if result != 0 {

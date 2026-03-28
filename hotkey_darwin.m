@@ -75,6 +75,7 @@ void stopHotkeyListener(void) {
         sEventTap = NULL;
     }
     if (sRunLoopSource != NULL) {
+        CFRunLoopRemoveSource(CFRunLoopGetMain(), sRunLoopSource, kCFRunLoopCommonModes);
         CFRelease(sRunLoopSource);
         sRunLoopSource = NULL;
     }

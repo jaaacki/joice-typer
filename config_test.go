@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -44,7 +45,7 @@ func TestLoadConfig_ReadsExisting(t *testing.T) {
 
 	content := []byte(`trigger_key:
   - ctrl
-  - space
+  - shift
 model_size: tiny
 language: "en"
 sample_rate: 16000
@@ -59,8 +60,8 @@ sound_feedback: false
 		t.Fatalf("LoadConfig: %v", err)
 	}
 
-	if len(cfg.TriggerKey) != 2 || cfg.TriggerKey[0] != "ctrl" || cfg.TriggerKey[1] != "space" {
-		t.Errorf("expected trigger_key [ctrl space], got %v", cfg.TriggerKey)
+	if len(cfg.TriggerKey) != 2 || cfg.TriggerKey[0] != "ctrl" || cfg.TriggerKey[1] != "shift" {
+		t.Errorf("expected trigger_key [ctrl shift], got %v", cfg.TriggerKey)
 	}
 	if cfg.ModelSize != "tiny" {
 		t.Errorf("expected model_size tiny, got %s", cfg.ModelSize)
@@ -95,7 +96,7 @@ func TestValidate_EmptyTriggerKey(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for empty trigger_key")
 	}
-	if !containsSubstring(err.Error(), "trigger_key") {
+	if !strings.Contains(err.Error(), "trigger_key") {
 		t.Errorf("error should mention trigger_key, got: %v", err)
 	}
 }
@@ -110,7 +111,7 @@ func TestValidate_UnknownKey(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for unknown key")
 	}
-	if !containsSubstring(err.Error(), "banana") {
+	if !strings.Contains(err.Error(), "banana") {
 		t.Errorf("error should mention the bad key, got: %v", err)
 	}
 }
@@ -125,7 +126,7 @@ func TestValidate_InvalidModelSize(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for invalid model_size")
 	}
-	if !containsSubstring(err.Error(), "model_size") {
+	if !strings.Contains(err.Error(), "model_size") {
 		t.Errorf("error should mention model_size, got: %v", err)
 	}
 }
@@ -140,7 +141,7 @@ func TestValidate_InvalidSampleRate(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for zero sample_rate")
 	}
-	if !containsSubstring(err.Error(), "sample_rate") {
+	if !strings.Contains(err.Error(), "sample_rate") {
 		t.Errorf("error should mention sample_rate, got: %v", err)
 	}
 }

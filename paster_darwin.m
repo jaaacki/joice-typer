@@ -18,8 +18,14 @@ int setClipboard(const char* text) {
 void simulateCmdV(void) {
     // 'v' key = keycode 0x09
     CGEventRef keyDown = CGEventCreateKeyboardEvent(NULL, 0x09, true);
+    if (keyDown == NULL) return;
     CGEventSetFlags(keyDown, kCGEventFlagMaskCommand);
+
     CGEventRef keyUp = CGEventCreateKeyboardEvent(NULL, 0x09, false);
+    if (keyUp == NULL) {
+        CFRelease(keyDown);
+        return;
+    }
     CGEventSetFlags(keyUp, kCGEventFlagMaskCommand);
 
     CGEventPost(kCGHIDEventTap, keyDown);

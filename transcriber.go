@@ -16,6 +16,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 	"unsafe"
 )
 
@@ -37,7 +38,8 @@ func NewTranscriber(modelPath string, language string, logger *slog.Logger) (Tra
 	cPath := C.CString(modelPath)
 	defer C.free(unsafe.Pointer(cPath))
 
-	ctx := C.whisper_init_from_file(cPath)
+	cparams := C.whisper_context_default_params()
+	ctx := C.whisper_init_from_file_with_params(cPath, cparams)
 	if ctx == nil {
 		return nil, fmt.Errorf("transcriber.NewTranscriber: failed to load model from %s", modelPath)
 	}
@@ -47,6 +49,10 @@ func NewTranscriber(modelPath string, language string, logger *slog.Logger) (Tra
 }
 
 func (t *whisperTranscriber) Transcribe(audio []float32) (string, error) {
+	if len(audio) == 0 {
+		return "", fmt.Errorf("transcriber.Transcribe: empty audio buffer")
+	}
+
 	t.logger.Info("transcribing", "operation", "Transcribe", "samples", len(audio))
 
 	params := C.whisper_full_default_params(C.WHISPER_SAMPLING_GREEDY)
@@ -100,7 +106,7 @@ func ensureModel(modelPath string, logger *slog.Logger) error {
 	modelFile := filepath.Base(modelPath)
 	url := "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/" + modelFile
 
-	logger.Info("model not found, downloading",
+	logger.Warn("model not found, downloading from network",
 		"operation", "ensureModel",
 		"url", url,
 		"dest", modelPath,
@@ -108,23 +114,24 @@ func ensureModel(modelPath string, logger *slog.Logger) error {
 
 	dir := filepath.Dir(modelPath)
 	if err := os.MkdirAll(dir, 0755); err != nil {
-		return fmt.Errorf("ensureModel: create dir: %w", err)
+		return fmt.Errorf("transcriber.ensureModel: create dir: %w", err)
 	}
 
-	resp, err := http.Get(url)
+	client := &http.Client{Timeout: 5 * time.Minute}
+	resp, err := client.Get(url)
 	if err != nil {
-		return fmt.Errorf("ensureModel: download: %w", err)
+		return fmt.Errorf("transcriber.ensureModel: download: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("ensureModel: download returned status %d", resp.StatusCode)
+		return fmt.Errorf("transcriber.ensureModel: download returned status %d", resp.StatusCode)
 	}
 
 	tmpPath := modelPath + ".tmp"
 	f, err := os.Create(tmpPath)
 	if err != nil {
-		return fmt.Errorf("ensureModel: create file: %w", err)
+		return fmt.Errorf("transcriber.ensureModel: create file: %w", err)
 	}
 
 	pr := &progressWriter{
@@ -133,18 +140,26 @@ func ensureModel(modelPath string, logger *slog.Logger) error {
 		logger: logger,
 	}
 
-	written, err := io.Copy(f, pr)
-	if closeErr := f.Close(); closeErr != nil {
-		return fmt.Errorf("ensureModel: close file: %w", closeErr)
+	written, copyErr := io.Copy(f, pr)
+	closeErr := f.Close()
+	if copyErr != nil {
+		if removeErr := os.Remove(tmpPath); removeErr != nil {
+			logger.Error("failed to remove temp file", "operation", "ensureModel", "error", removeErr)
+		}
+		return fmt.Errorf("transcriber.ensureModel: write: %w", copyErr)
 	}
-	if err != nil {
-		os.Remove(tmpPath)
-		return fmt.Errorf("ensureModel: write: %w", err)
+	if closeErr != nil {
+		if removeErr := os.Remove(tmpPath); removeErr != nil {
+			logger.Error("failed to remove temp file", "operation", "ensureModel", "error", removeErr)
+		}
+		return fmt.Errorf("transcriber.ensureModel: close file: %w", closeErr)
 	}
 
 	if err := os.Rename(tmpPath, modelPath); err != nil {
-		return fmt.Errorf("ensureModel: rename: %w", err)
+		return fmt.Errorf("transcriber.ensureModel: rename: %w", err)
 	}
+
+	// TODO(v2): Add SHA256 checksum verification of downloaded model file.
 
 	logger.Info("model downloaded", "operation", "ensureModel", "bytes", written)
 	return nil

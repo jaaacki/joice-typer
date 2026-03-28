@@ -42,7 +42,7 @@ func (r *portaudioRecorder) Start() error {
 		return fmt.Errorf("recorder.Start: already recording")
 	}
 
-	r.logger.Info("starting", "operation", "Start", "sample_rate", r.sampleRate)
+	r.logger.Debug("starting", "operation", "Start", "sample_rate", r.sampleRate)
 
 	r.chunks = nil
 	r.recording = true
@@ -68,13 +68,19 @@ func (r *portaudioRecorder) Start() error {
 	// Read audio in a goroutine
 	go r.readLoop()
 
-	r.logger.Info("recording started", "operation", "Start")
+	r.logger.Debug("recording started", "operation", "Start")
 	return nil
 }
 
 func (r *portaudioRecorder) readLoop() {
 	defer close(r.done)
 	for {
+		r.mu.Lock()
+		recording := r.recording
+		r.mu.Unlock()
+		if !recording {
+			return
+		}
 		if err := r.stream.Read(); err != nil {
 			r.mu.Lock()
 			isRecording := r.recording
@@ -85,12 +91,7 @@ func (r *portaudioRecorder) readLoop() {
 			r.logger.Error("read error", "operation", "readLoop", "error", err)
 			return
 		}
-
 		r.mu.Lock()
-		if !r.recording {
-			r.mu.Unlock()
-			return
-		}
 		chunk := make([]float32, len(r.buffer))
 		copy(chunk, r.buffer)
 		r.chunks = append(r.chunks, chunk)
@@ -107,44 +108,47 @@ func (r *portaudioRecorder) Stop() ([]float32, error) {
 	r.recording = false
 	r.mu.Unlock()
 
-	r.logger.Info("stopping", "operation", "Stop")
+	r.logger.Debug("stopping", "operation", "Stop")
 
-	if err := r.stream.Stop(); err != nil {
-		r.logger.Error("failed to stop stream", "operation", "Stop", "error", err)
-	}
-
-	// Wait for read goroutine to exit
+	// Wait for readLoop to exit (it checks r.recording and exits)
 	<-r.done
 
+	// Now safe to stop and close the stream — readLoop is no longer reading
+	var stopErr error
+	if err := r.stream.Stop(); err != nil {
+		stopErr = fmt.Errorf("recorder.Stop: stop stream: %w", err)
+		r.logger.Error("failed to stop stream", "operation", "Stop", "error", err)
+	}
 	if err := r.stream.Close(); err != nil {
 		r.logger.Error("failed to close stream", "operation", "Stop", "error", err)
+		if stopErr == nil {
+			stopErr = fmt.Errorf("recorder.Stop: close stream: %w", err)
+		}
 	}
 	r.stream = nil
 
+	// Flatten chunks
 	r.mu.Lock()
 	chunks := r.chunks
 	r.chunks = nil
 	r.mu.Unlock()
 
-	// Flatten chunks
 	total := 0
 	for _, chunk := range chunks {
 		total += len(chunk)
 	}
-
 	if total == 0 {
 		r.logger.Warn("no audio captured", "operation", "Stop")
-		return nil, nil
+		return []float32{}, stopErr
 	}
 
 	audio := make([]float32, 0, total)
 	for _, chunk := range chunks {
 		audio = append(audio, chunk...)
 	}
-
-	r.logger.Info("recording stopped", "operation", "Stop", "samples", len(audio),
+	r.logger.Debug("recording stopped", "operation", "Stop", "samples", len(audio),
 		"duration_sec", float64(len(audio))/r.sampleRate)
-	return audio, nil
+	return audio, stopErr
 }
 
 func (r *portaudioRecorder) Close() error {

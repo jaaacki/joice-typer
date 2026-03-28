@@ -1,7 +1,5 @@
 package main
 
-import "fmt"
-
 // ============================================================================
 // CONTRACTS — These interfaces are ABSOLUTE. Implementations must match exactly.
 // ============================================================================
@@ -17,17 +15,6 @@ const (
 	// TriggerReleased fires when any configured trigger key is released.
 	TriggerReleased
 )
-
-func (e HotkeyEvent) String() string {
-	switch e {
-	case TriggerPressed:
-		return "TriggerPressed"
-	case TriggerReleased:
-		return "TriggerReleased"
-	default:
-		return fmt.Sprintf("HotkeyEvent(%d)", int(e))
-	}
-}
 
 // --- Component Interfaces ---
 

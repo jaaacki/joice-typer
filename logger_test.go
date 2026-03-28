@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -46,10 +47,10 @@ func TestSetupLogger_WritesToFile(t *testing.T) {
 	if len(content) == 0 {
 		t.Fatal("log file is empty after writing")
 	}
-	if !contains(content, "test message") {
+	if !strings.Contains(content, "test message") {
 		t.Errorf("log file missing message, got: %s", content)
 	}
-	if !contains(content, `"component"`) {
+	if !strings.Contains(content, `"component"`) {
 		t.Errorf("log file missing component field, got: %s", content)
 	}
 }
@@ -104,17 +105,4 @@ func TestTruncateIfNeeded_NonexistentFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected no error for nonexistent file, got: %v", err)
 	}
-}
-
-func contains(s, substr string) bool {
-	return len(s) >= len(substr) && (s == substr || len(s) > 0 && containsSubstring(s, substr))
-}
-
-func containsSubstring(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
 }

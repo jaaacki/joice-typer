@@ -25,7 +25,7 @@ func NewPaster(logger *slog.Logger) Paster {
 }
 
 func (p *clipboardPaster) Paste(text string) error {
-	p.logger.Info("pasting", "operation", "Paste", "text_length", len(text))
+	p.logger.Debug("pasting", "operation", "Paste", "text_length", len(text))
 
 	cText := C.CString(text)
 	defer C.free(unsafe.Pointer(cText))
@@ -40,6 +40,6 @@ func (p *clipboardPaster) Paste(text string) error {
 
 	C.simulateCmdV()
 
-	p.logger.Info("pasted", "operation", "Paste")
+	p.logger.Debug("pasted", "operation", "Paste")
 	return nil
 }

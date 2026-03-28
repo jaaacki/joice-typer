@@ -28,6 +28,7 @@ func (s *Sound) Play(name string) {
 			s.logger.Error("failed to play sound",
 				"operation", "Play",
 				"sound", name,
+				"path", path,
 				"error", err,
 			)
 		}
