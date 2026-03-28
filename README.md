@@ -48,7 +48,7 @@ On first launch, a setup wizard guides you through granting Accessibility permis
 
 ## Configuration
 
-Config lives at `~/.config/voicetype/config.yaml`:
+Config lives at `~/Library/Application Support/JoiceTyper/config.yaml`:
 
 ```yaml
 trigger_key:

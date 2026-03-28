@@ -23,7 +23,7 @@ The ONLY job: hold a hotkey, speak, release, text appears at the cursor. Whereve
 - **Audio capture**: PortAudio via `gordonklaus/portaudio`
 - **Global hotkey**: CGEvent tap (supports Fn key detection)
 - **Paste mechanism**: NSPasteboard + CGEvent Cmd+V simulation
-- **Config**: `~/.config/voicetype/config.yaml` (YAML)
+- **Config**: `~/Library/Application Support/JoiceTyper/config.yaml` (YAML)
 - **Default hotkey**: Fn+Shift (push-to-talk: hold to record, release to transcribe)
 - **Type modes**: "clipboard" (v1 paste) or "stream" (v2 live CGEvent keystrokes)
 - **Streaming**: 1-second interval sliding window transcription with common-prefix diff correction

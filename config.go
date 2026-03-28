@@ -53,7 +53,6 @@ func LoadConfig(path string) (Config, error) {
 
 	var cfg Config
 	decoder := yaml.NewDecoder(bytes.NewReader(data))
-	decoder.KnownFields(true)
 	if err := decoder.Decode(&cfg); err != nil {
 		return Config{}, fmt.Errorf("config.LoadConfig: parse: %w", err)
 	}
@@ -106,7 +105,19 @@ func DefaultConfigDir() (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("config.DefaultConfigDir: %w", err)
 	}
-	return filepath.Join(home, ".config", "voicetype"), nil
+	newDir := filepath.Join(home, "Library", "Application Support", "JoiceTyper")
+	oldDir := filepath.Join(home, ".config", "voicetype")
+
+	// Migrate from old path if it exists and new path doesn't
+	if _, err := os.Stat(oldDir); err == nil {
+		if _, err := os.Stat(newDir); os.IsNotExist(err) {
+			if mkErr := os.MkdirAll(filepath.Dir(newDir), 0755); mkErr == nil {
+				os.Rename(oldDir, newDir)
+			}
+		}
+	}
+
+	return newDir, nil
 }
 
 func DefaultConfigPath() (string, error) {
