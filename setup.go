@@ -58,7 +58,25 @@ func RunSetupWizard(logger *slog.Logger) (string, error) {
 		}
 	}()
 
-	// Step 2: Populate mic list (synchronous — no dispatch_async issue)
+	// Step 2: Input Monitoring polling in background goroutine
+	go func() {
+		for {
+			select {
+			case <-done:
+				return
+			default:
+			}
+			granted := C.checkInputMonitoring(1) == 1
+			C.updateSetupInputMonitoring(boolToCInt(granted))
+			if granted {
+				l.Info("input monitoring granted", "operation", "RunSetupWizard")
+				return
+			}
+			time.Sleep(2 * time.Second)
+		}
+	}()
+
+	// Step 3: Populate mic list (synchronous — no dispatch_async issue)
 	populateMicList(l)
 
 	// Step 3: Model download in background goroutine

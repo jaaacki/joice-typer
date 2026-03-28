@@ -3,6 +3,7 @@
 
 void showSetupWindow(void);
 void updateSetupAccessibility(int granted);
+void updateSetupInputMonitoring(int granted);
 void populateSetupDevices(const char **deviceNames, int count, int defaultIndex);
 void updateSetupDownloadProgress(double progress, long long bytesDownloaded, long long bytesTotal);
 void updateSetupDownloadComplete(void);

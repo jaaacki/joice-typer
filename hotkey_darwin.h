@@ -3,9 +3,17 @@
 
 #include <stdint.h>
 
+// ensureNSApp initialises the NSApplication singleton exactly once.
+// Safe to call multiple times from any code path (setup wizard, status bar, hotkey).
+void ensureNSApp(void);
+
 // checkAccessibility returns 1 if accessibility is granted, 0 if not.
 // If prompt is 1, shows the macOS permission dialog.
 int checkAccessibility(int prompt);
+
+// checkInputMonitoring returns 1 if Input Monitoring is granted, 0 if not.
+// If prompt is 1, shows the macOS permission dialog.
+int checkInputMonitoring(int prompt);
 
 // startHotkeyListener creates a CGEvent tap monitoring modifier flags.
 // targetFlags is the bitmask of modifier flags that must all be held to trigger.

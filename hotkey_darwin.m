@@ -3,6 +3,7 @@
 #import <CoreGraphics/CoreGraphics.h>
 #import <Carbon/Carbon.h>
 #import <ApplicationServices/ApplicationServices.h>
+#import <IOKit/hidsystem/IOHIDLib.h>
 
 // Defined in hotkey.go via //export
 extern void hotkeyCallback(int eventType);
@@ -11,6 +12,21 @@ extern void hotkeyFlagsChanged(uint64_t flags);
 int checkAccessibility(int prompt) {
     NSDictionary *options = @{(__bridge id)kAXTrustedCheckOptionPrompt: @(prompt ? YES : NO)};
     return AXIsProcessTrustedWithOptions((__bridge CFDictionaryRef)options) ? 1 : 0;
+}
+
+int checkInputMonitoring(int prompt) {
+    if (prompt) {
+        IOHIDRequestAccess(kIOHIDRequestTypeListenEvent);
+    }
+    return IOHIDCheckAccess(kIOHIDRequestTypeListenEvent) == kIOHIDAccessTypeGranted ? 1 : 0;
+}
+
+void ensureNSApp(void) {
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        [NSApplication sharedApplication];
+        [NSApp setActivationPolicy:NSApplicationActivationPolicyAccessory];
+    });
 }
 
 static uint64_t sTargetFlags = 0;
@@ -94,8 +110,9 @@ void runMainLoop(void) {
     @autoreleasepool {
         // NSApplication is REQUIRED for a CLI process to receive system events.
         // Without it, CGEvent taps are created but never fire.
-        [NSApplication sharedApplication];
-        [NSApp setActivationPolicy:NSApplicationActivationPolicyAccessory];
+        // ensureNSApp() guarantees the singleton exists; it may have been
+        // created earlier by the setup wizard or status bar.
+        ensureNSApp();
         [NSApp run];
     }
 }

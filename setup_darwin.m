@@ -1,20 +1,23 @@
 #import <Cocoa/Cocoa.h>
 #import <ApplicationServices/ApplicationServices.h>
 #include "setup_darwin.h"
+#include "hotkey_darwin.h"
 
 static NSWindow *sSetupWindow = nil;
 static NSTextField *sStep1Status = nil;
+static NSTextField *sStep2Status = nil;
 static NSPopUpButton *sMicDropdown = nil;
 static NSProgressIndicator *sProgressBar = nil;
 static NSTextField *sProgressLabel = nil;
-static NSTextField *sStep3Status = nil;
 static NSTextField *sStep4Status = nil;
+static NSTextField *sStep5Status = nil;
 static NSButton *sContinueButton = nil;
 static BOOL sSetupComplete = NO;
 static NSTextField *sStep1Indicator = nil;
 static NSTextField *sStep2Indicator = nil;
 static NSTextField *sStep3Indicator = nil;
 static NSTextField *sStep4Indicator = nil;
+static NSTextField *sStep5Indicator = nil;
 static char sSelectedDeviceBuffer[512] = {0};
 
 static NSTextField *makeLabel(NSString *text, CGFloat fontSize, BOOL bold, NSColor *color, NSRect frame) {
@@ -36,25 +39,14 @@ static NSTextField *makeLabel(NSString *text, CGFloat fontSize, BOOL bold, NSCol
 @implementation SetupDelegate
 - (BOOL)windowShouldClose:(NSWindow *)sender {
     sSetupComplete = NO;
-    [NSApp stop:nil];
+    [NSApp stopModal];
     return YES;
 }
 
 - (void)continueClicked:(id)sender {
     sSetupComplete = YES;
     [sSetupWindow close];
-    [NSApp stop:nil];
-    // Post dummy event to unblock [NSApp run]
-    NSEvent *event = [NSEvent otherEventWithType:NSEventTypeApplicationDefined
-                                        location:NSMakePoint(0, 0)
-                                   modifierFlags:0
-                                       timestamp:0
-                                    windowNumber:0
-                                         context:nil
-                                         subtype:0
-                                           data1:0
-                                           data2:0];
-    [NSApp postEvent:event atStart:YES];
+    [NSApp stopModal];
 }
 @end
 
@@ -62,7 +54,7 @@ static SetupDelegate *sSetupDelegate = nil;
 
 void showSetupWindow(void) {
     @autoreleasepool {
-        CGFloat w = 480, h = 460;
+        CGFloat w = 480, h = 520;
         NSRect frame = NSMakeRect(0, 0, w, h);
         sSetupWindow = [[NSWindow alloc]
             initWithContentRect:frame
@@ -106,27 +98,39 @@ void showSetupWindow(void) {
         [content addSubview:sStep1Status];
         y -= 36;
 
-        // Step 2: Microphone
+        // Step 2: Input Monitoring
         sStep2Indicator = makeLabel(@"\u23F3", 16, NO, [NSColor labelColor], NSMakeRect(pad, y, 24, 24));
         [content addSubview:sStep2Indicator];
-        NSTextField *s2title = makeLabel(@"2. Select Microphone", 13, YES,
+        NSTextField *s2title = makeLabel(@"2. Input Monitoring Permission", 13, YES,
             [NSColor labelColor], NSMakeRect(pad + 28, y, innerW - 28, 20));
         [content addSubview:s2title];
+        y -= 20;
+        sStep2Status = makeLabel(@"Checking...", 11, NO,
+            [NSColor secondaryLabelColor], NSMakeRect(pad + 28, y, innerW - 28, 16));
+        [content addSubview:sStep2Status];
+        y -= 36;
+
+        // Step 3: Microphone
+        sStep3Indicator = makeLabel(@"\u23F3", 16, NO, [NSColor labelColor], NSMakeRect(pad, y, 24, 24));
+        [content addSubview:sStep3Indicator];
+        NSTextField *s3title = makeLabel(@"3. Select Microphone", 13, YES,
+            [NSColor labelColor], NSMakeRect(pad + 28, y, innerW - 28, 20));
+        [content addSubview:s3title];
         y -= 28;
         sMicDropdown = [[NSPopUpButton alloc] initWithFrame:NSMakeRect(pad + 28, y, innerW - 28, 26) pullsDown:NO];
         [content addSubview:sMicDropdown];
         y -= 36;
 
-        // Step 3: Download
-        sStep3Indicator = makeLabel(@"\u23F3", 16, NO, [NSColor labelColor], NSMakeRect(pad, y, 24, 24));
-        [content addSubview:sStep3Indicator];
-        NSTextField *s3title = makeLabel(@"3. Download Speech Model", 13, YES,
+        // Step 4: Download
+        sStep4Indicator = makeLabel(@"\u23F3", 16, NO, [NSColor labelColor], NSMakeRect(pad, y, 24, 24));
+        [content addSubview:sStep4Indicator];
+        NSTextField *s4title = makeLabel(@"4. Download Speech Model", 13, YES,
             [NSColor labelColor], NSMakeRect(pad + 28, y, innerW - 28, 20));
-        [content addSubview:s3title];
+        [content addSubview:s4title];
         y -= 16;
-        sStep3Status = makeLabel(@"whisper-small \u00B7 466 MB", 11, NO,
+        sStep4Status = makeLabel(@"whisper-small \u00B7 466 MB", 11, NO,
             [NSColor secondaryLabelColor], NSMakeRect(pad + 28, y, innerW - 28, 16));
-        [content addSubview:sStep3Status];
+        [content addSubview:sStep4Status];
         y -= 18;
         sProgressBar = [[NSProgressIndicator alloc] initWithFrame:NSMakeRect(pad + 28, y, innerW - 28, 8)];
         sProgressBar.style = NSProgressIndicatorStyleBar;
@@ -141,16 +145,16 @@ void showSetupWindow(void) {
         [content addSubview:sProgressLabel];
         y -= 36;
 
-        // Step 4: Ready
-        sStep4Indicator = makeLabel(@"\u23F3", 16, NO, [NSColor labelColor], NSMakeRect(pad, y, 24, 24));
-        [content addSubview:sStep4Indicator];
-        NSTextField *s4title = makeLabel(@"4. Ready", 13, YES,
+        // Step 5: Ready
+        sStep5Indicator = makeLabel(@"\u23F3", 16, NO, [NSColor labelColor], NSMakeRect(pad, y, 24, 24));
+        [content addSubview:sStep5Indicator];
+        NSTextField *s5title = makeLabel(@"5. Ready", 13, YES,
             [NSColor labelColor], NSMakeRect(pad + 28, y, innerW - 28, 20));
-        [content addSubview:s4title];
+        [content addSubview:s5title];
         y -= 20;
-        sStep4Status = makeLabel(@"Waiting...", 11, NO,
+        sStep5Status = makeLabel(@"Waiting...", 11, NO,
             [NSColor secondaryLabelColor], NSMakeRect(pad + 28, y, innerW - 28, 16));
-        [content addSubview:sStep4Status];
+        [content addSubview:sStep5Status];
 
         // Continue button (bottom right, initially disabled)
         sContinueButton = [[NSButton alloc] initWithFrame:NSMakeRect(w - pad - 120, 16, 120, 32)];
@@ -174,11 +178,25 @@ void updateSetupAccessibility(int granted) {
             sStep1Indicator.stringValue = @"\u2705";
             sStep1Status.stringValue = @"Granted";
             sStep1Status.textColor = [NSColor systemGreenColor];
-            sStep2Indicator.stringValue = @"\U0001F3A4";
         } else {
             sStep1Indicator.stringValue = @"\u23F3";
-            sStep1Status.stringValue = @"Open System Settings to grant access";
+            sStep1Status.stringValue = @"System Settings \u2192 Privacy & Security \u2192 Accessibility";
             sStep1Status.textColor = [NSColor systemOrangeColor];
+        }
+    });
+}
+
+void updateSetupInputMonitoring(int granted) {
+    dispatch_async(dispatch_get_main_queue(), ^{
+        if (granted) {
+            sStep2Indicator.stringValue = @"\u2705";
+            sStep2Status.stringValue = @"Granted";
+            sStep2Status.textColor = [NSColor systemGreenColor];
+            sStep3Indicator.stringValue = @"\U0001F3A4";
+        } else {
+            sStep2Indicator.stringValue = @"\u23F3";
+            sStep2Status.stringValue = @"System Settings \u2192 Privacy & Security \u2192 Input Monitoring";
+            sStep2Status.textColor = [NSColor systemOrangeColor];
         }
     });
 }
@@ -197,7 +215,7 @@ void populateSetupDevices(const char **deviceNames, int count, int defaultIndex)
 
 void updateSetupDownloadProgress(double progress, long long bytesDownloaded, long long bytesTotal) {
     dispatch_async(dispatch_get_main_queue(), ^{
-        sStep3Indicator.stringValue = @"\u2B07\uFE0F";
+        sStep4Indicator.stringValue = @"\u2B07\uFE0F";
         sProgressBar.doubleValue = progress;
         long long mb_done = bytesDownloaded / (1024 * 1024);
         long long mb_total = bytesTotal / (1024 * 1024);
@@ -208,30 +226,30 @@ void updateSetupDownloadProgress(double progress, long long bytesDownloaded, lon
 
 void updateSetupDownloadComplete(void) {
     dispatch_async(dispatch_get_main_queue(), ^{
-        sStep3Indicator.stringValue = @"\u2705";
+        sStep4Indicator.stringValue = @"\u2705";
         sProgressBar.doubleValue = 1.0;
         sProgressLabel.stringValue = @"Download complete";
-        sStep3Status.stringValue = @"Model ready";
-        sStep3Status.textColor = [NSColor systemGreenColor];
+        sStep4Status.stringValue = @"Model ready";
+        sStep4Status.textColor = [NSColor systemGreenColor];
     });
 }
 
 void updateSetupDownloadFailed(const char *errorMsg) {
     NSString *msg = [NSString stringWithUTF8String:errorMsg];
     dispatch_async(dispatch_get_main_queue(), ^{
-        sStep3Indicator.stringValue = @"\u274C";
+        sStep4Indicator.stringValue = @"\u274C";
         sProgressBar.doubleValue = 0;
         sProgressLabel.stringValue = msg;
-        sStep3Status.stringValue = @"Download failed \u2014 restart to retry";
-        sStep3Status.textColor = [NSColor systemRedColor];
+        sStep4Status.stringValue = @"Download failed \u2014 restart to retry";
+        sStep4Status.textColor = [NSColor systemRedColor];
     });
 }
 
 void updateSetupReady(void) {
     dispatch_async(dispatch_get_main_queue(), ^{
-        sStep4Indicator.stringValue = @"\u2705";
-        sStep4Status.stringValue = @"All set!";
-        sStep4Status.textColor = [NSColor systemGreenColor];
+        sStep5Indicator.stringValue = @"\u2705";
+        sStep5Status.stringValue = @"All set!";
+        sStep5Status.textColor = [NSColor systemGreenColor];
         sContinueButton.title = @"Start JoiceTyper";
         sContinueButton.enabled = YES;
     });
@@ -262,7 +280,9 @@ const char *getSelectedDevice(void) {
 }
 
 void runSetupEventLoop(void) {
-    [NSApplication sharedApplication];
-    [NSApp setActivationPolicy:NSApplicationActivationPolicyAccessory];
-    [NSApp run];
+    // Ensure NSApplication singleton exists (idempotent, safe to call many times).
+    ensureNSApp();
+    // Run as modal session — does NOT call [NSApp run].
+    // The single [NSApp run] happens later in hotkey's runMainLoop().
+    [NSApp runModalForWindow:sSetupWindow];
 }

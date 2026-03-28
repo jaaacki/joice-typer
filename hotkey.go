@@ -1,7 +1,7 @@
 package main
 
 /*
-#cgo LDFLAGS: -framework CoreGraphics -framework Carbon -framework Cocoa
+#cgo LDFLAGS: -framework CoreGraphics -framework Carbon -framework Cocoa -framework IOKit
 #include "hotkey_darwin.h"
 */
 import "C"
@@ -118,9 +118,13 @@ func (h *cgEventHotkeyListener) Start(events chan<- HotkeyEvent) error {
 	hotkeyLogger = h.logger
 	h.logger.Info("starting", "operation", "Start", "trigger_keys", h.triggerKeys)
 
-	// Check Accessibility permission (don't block — rebuilds invalidate trust)
+	// Check permissions (don't block — rebuilds invalidate trust)
 	if C.checkAccessibility(0) == 0 {
-		h.logger.Warn("accessibility may not be granted — if hotkeys don't work, add this binary in System Settings → Privacy & Security → Accessibility",
+		h.logger.Warn("Accessibility not granted — enable in System Settings → Privacy & Security → Accessibility",
+			"operation", "Start")
+	}
+	if C.checkInputMonitoring(0) == 0 {
+		h.logger.Warn("Input Monitoring not granted — enable in System Settings → Privacy & Security → Input Monitoring",
 			"operation", "Start")
 	}
 
@@ -135,7 +139,7 @@ func (h *cgEventHotkeyListener) Start(events chan<- HotkeyEvent) error {
 
 	result := C.startHotkeyListener(C.uint64_t(flags))
 	if result != 0 {
-		return fmt.Errorf("hotkey.Start: failed to create event tap — grant Accessibility permission in System Settings → Privacy & Security → Accessibility")
+		return fmt.Errorf("hotkey.Start: failed to create event tap — grant both Accessibility and Input Monitoring in System Settings → Privacy & Security")
 	}
 
 	h.logger.Info("listening", "operation", "Start", "flags", fmt.Sprintf("0x%x", flags))

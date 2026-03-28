@@ -1,5 +1,6 @@
 #import <Cocoa/Cocoa.h>
 #include "statusbar_darwin.h"
+#include "hotkey_darwin.h"
 
 // Defined in statusbar_appkit.go via //export
 extern void statusBarQuitClicked(void);
@@ -77,6 +78,12 @@ static NSString *textForState(int state) {
 static StatusBarDelegate *sDelegate = nil;
 
 void initStatusBar(void) {
+    // Must initialize NSApplication with correct activation policy BEFORE
+    // touching any AppKit objects. Without this, [NSStatusBar systemStatusBar]
+    // implicitly creates NSApp with the default Regular policy, which breaks
+    // CGEvent tap delivery.
+    ensureNSApp();
+
     sDelegate = [[StatusBarDelegate alloc] init];
 
     sStatusItem = [[NSStatusBar systemStatusBar] statusItemWithLength:NSVariableStatusItemLength];
