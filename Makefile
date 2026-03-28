@@ -44,8 +44,15 @@ app: build
 	rm -rf $(APP_BUNDLE)
 	mkdir -p $(APP_BUNDLE)/Contents/MacOS
 	mkdir -p $(APP_BUNDLE)/Contents/Resources
+	mkdir -p $(APP_BUNDLE)/Contents/Frameworks
 	cp voicetype $(APP_BUNDLE)/Contents/MacOS/$(APP_NAME)
 	cp Info.plist $(APP_BUNDLE)/Contents/
 	@if [ -f icon.icns ]; then cp icon.icns $(APP_BUNDLE)/Contents/Resources/; fi
+	@# Bundle PortAudio dylib and fix load path
+	cp /opt/homebrew/opt/portaudio/lib/libportaudio.2.dylib $(APP_BUNDLE)/Contents/Frameworks/
+	install_name_tool -change /opt/homebrew/opt/portaudio/lib/libportaudio.2.dylib \
+		@executable_path/../Frameworks/libportaudio.2.dylib \
+		$(APP_BUNDLE)/Contents/MacOS/$(APP_NAME)
+	codesign --force --sign - $(APP_BUNDLE)/Contents/Frameworks/libportaudio.2.dylib
 	codesign --force --sign - $(APP_BUNDLE)
 	@echo "Built $(APP_BUNDLE)"
