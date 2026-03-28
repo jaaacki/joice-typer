@@ -1,9 +1,17 @@
 #include "hotkey_darwin.h"
+#import <Cocoa/Cocoa.h>
 #import <CoreGraphics/CoreGraphics.h>
 #import <Carbon/Carbon.h>
+#import <ApplicationServices/ApplicationServices.h>
 
 // Defined in hotkey.go via //export
 extern void hotkeyCallback(int eventType);
+extern void hotkeyFlagsChanged(uint64_t flags);
+
+int checkAccessibility(int prompt) {
+    NSDictionary *options = @{(__bridge id)kAXTrustedCheckOptionPrompt: @(prompt ? YES : NO)};
+    return AXIsProcessTrustedWithOptions((__bridge CFDictionaryRef)options) ? 1 : 0;
+}
 
 static uint64_t sTargetFlags = 0;
 static int sTriggered = 0;
@@ -29,6 +37,8 @@ static CGEventRef eventTapCallback(
     }
 
     uint64_t flags = CGEventGetFlags(event);
+    fprintf(stderr, "[hotkey] flags=0x%llx target=0x%llx match=%d\n", flags, sTargetFlags, (int)((flags & sTargetFlags) == sTargetFlags));
+    hotkeyFlagsChanged(flags);
     int allHeld = (flags & sTargetFlags) == sTargetFlags;
 
     if (allHeld && !sTriggered) {
@@ -58,13 +68,15 @@ int startHotkeyListener(uint64_t targetFlags) {
     );
 
     if (sEventTap == NULL) {
-        return -1;  // Accessibility permission not granted
+        fprintf(stderr, "[hotkey] CGEventTapCreate failed — no accessibility permission\n");
+        return -1;
     }
 
     sRunLoopSource = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, sEventTap, 0);
-    CFRunLoopAddSource(CFRunLoopGetMain(), sRunLoopSource, kCFRunLoopCommonModes);
+    CFRunLoopAddSource(CFRunLoopGetCurrent(), sRunLoopSource, kCFRunLoopCommonModes);
     CGEventTapEnable(sEventTap, true);
 
+    fprintf(stderr, "[hotkey] event tap created, target=0x%llx\n", targetFlags);
     return 0;
 }
 
@@ -75,16 +87,36 @@ void stopHotkeyListener(void) {
         sEventTap = NULL;
     }
     if (sRunLoopSource != NULL) {
-        CFRunLoopRemoveSource(CFRunLoopGetMain(), sRunLoopSource, kCFRunLoopCommonModes);
+        CFRunLoopRemoveSource(CFRunLoopGetCurrent(), sRunLoopSource, kCFRunLoopCommonModes);
         CFRelease(sRunLoopSource);
         sRunLoopSource = NULL;
     }
 }
 
 void runMainLoop(void) {
-    CFRunLoopRun();
+    @autoreleasepool {
+        // NSApplication is REQUIRED for a CLI process to receive system events.
+        // Without it, CGEvent taps are created but never fire.
+        [NSApplication sharedApplication];
+        [NSApp setActivationPolicy:NSApplicationActivationPolicyAccessory];
+        fprintf(stderr, "[hotkey] NSApplication initialized, starting run loop\n");
+        [NSApp run];
+    }
 }
 
 void stopMainLoop(void) {
-    CFRunLoopStop(CFRunLoopGetMain());
+    dispatch_async(dispatch_get_main_queue(), ^{
+        [NSApp stop:nil];
+        // Post dummy event to unblock [NSApp run]
+        NSEvent *event = [NSEvent otherEventWithType:NSEventTypeApplicationDefined
+                                            location:NSMakePoint(0, 0)
+                                       modifierFlags:0
+                                           timestamp:0
+                                        windowNumber:0
+                                             context:nil
+                                             subtype:0
+                                               data1:0
+                                               data2:0];
+        [NSApp postEvent:event atStart:YES];
+    });
 }

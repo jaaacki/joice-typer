@@ -18,6 +18,7 @@ type Config struct {
 	Language      string   `yaml:"language"`
 	SampleRate    int      `yaml:"sample_rate"`
 	SoundFeedback bool     `yaml:"sound_feedback"`
+	InputDevice   string   `yaml:"input_device"`
 }
 
 var validModelSizes = map[string]bool{

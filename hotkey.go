@@ -1,7 +1,7 @@
 package main
 
 /*
-#cgo LDFLAGS: -framework CoreGraphics -framework Carbon
+#cgo LDFLAGS: -framework CoreGraphics -framework Carbon -framework Cocoa
 #include "hotkey_darwin.h"
 */
 import "C"
@@ -30,6 +30,24 @@ var (
 	hotkeyEvents chan<- HotkeyEvent
 )
 
+var hotkeyLogger *slog.Logger
+
+//export hotkeyFlagsChanged
+func hotkeyFlagsChanged(flags C.uint64_t) {
+	if hotkeyLogger != nil {
+		f := uint64(flags)
+		hotkeyLogger.Debug("flags changed",
+			"operation", "eventTap",
+			"raw_flags", fmt.Sprintf("0x%x", f),
+			"fn", f&flagFn != 0,
+			"shift", f&flagShift != 0,
+			"ctrl", f&flagCtrl != 0,
+			"option", f&flagOption != 0,
+			"cmd", f&flagCmd != 0,
+		)
+	}
+}
+
 //export hotkeyCallback
 func hotkeyCallback(eventType C.int) {
 	hotkeyMu.Lock()
@@ -40,8 +58,14 @@ func hotkeyCallback(eventType C.int) {
 	}
 	switch int(eventType) {
 	case 0:
+		if hotkeyLogger != nil {
+			hotkeyLogger.Info("TRIGGER PRESSED", "operation", "hotkeyCallback")
+		}
 		ch <- TriggerPressed
 	case 1:
+		if hotkeyLogger != nil {
+			hotkeyLogger.Info("TRIGGER RELEASED", "operation", "hotkeyCallback")
+		}
 		ch <- TriggerReleased
 	}
 }
@@ -76,7 +100,14 @@ func NewHotkeyListener(triggerKeys []string, logger *slog.Logger) HotkeyListener
 }
 
 func (h *cgEventHotkeyListener) Start(events chan<- HotkeyEvent) error {
+	hotkeyLogger = h.logger
 	h.logger.Info("starting", "operation", "Start", "trigger_keys", h.triggerKeys)
+
+	// Check Accessibility permission (don't block — rebuilds invalidate trust)
+	if C.checkAccessibility(0) == 0 {
+		h.logger.Warn("accessibility may not be granted — if hotkeys don't work, add this binary in System Settings → Privacy & Security → Accessibility",
+			"operation", "Start")
+	}
 
 	flags, err := keysToFlags(h.triggerKeys)
 	if err != nil {

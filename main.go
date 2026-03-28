@@ -22,7 +22,23 @@ func main() {
 	}
 
 	configPath := flag.String("config", defaultCfgPath, "path to config file")
+	listDevices := flag.Bool("list-devices", false, "list available audio input devices and exit")
 	flag.Parse()
+
+	// --- List devices mode ---
+	if *listDevices {
+		if err := InitAudio(); err != nil {
+			fmt.Fprintf(os.Stderr, "fatal: %v\n", err)
+			os.Exit(1)
+		}
+		if err := ListInputDevices(); err != nil {
+			fmt.Fprintf(os.Stderr, "fatal: %v\n", err)
+			TerminateAudio()
+			os.Exit(1)
+		}
+		TerminateAudio()
+		return
+	}
 
 	// --- Load config ---
 	cfg, err := LoadConfig(*configPath)
@@ -85,7 +101,7 @@ func main() {
 	}
 
 	// --- Init recorder ---
-	recorder := NewRecorder(cfg.SampleRate, logger)
+	recorder := NewRecorder(cfg.SampleRate, cfg.InputDevice, logger)
 
 	// --- Init paster ---
 	paster := NewPaster(logger)

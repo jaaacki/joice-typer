@@ -3,6 +3,10 @@
 
 #include <stdint.h>
 
+// checkAccessibility returns 1 if accessibility is granted, 0 if not.
+// If prompt is 1, shows the macOS permission dialog.
+int checkAccessibility(int prompt);
+
 // startHotkeyListener creates a CGEvent tap monitoring modifier flags.
 // targetFlags is the bitmask of modifier flags that must all be held to trigger.
 // Returns 0 on success, -1 if event tap creation fails (no Accessibility permission).
