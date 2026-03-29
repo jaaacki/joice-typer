@@ -238,77 +238,59 @@ type DownloadProgressFunc func(progress float64, bytesDownloaded, bytesTotal int
 // A .sha256 sidecar file caches the result to avoid re-hashing on every startup.
 // Returns true if the model is ready to use. Quarantines bad models.
 func validateCachedModel(modelPath string, modelSize string, logger *slog.Logger) bool {
-	spec, hasSpec := modelManifest[modelSize]
+	l := logger.With("operation", "validateCachedModel")
+	spec, ok := modelManifest[modelSize]
+	if !ok {
+		l.Error("unknown model size", "model_size", modelSize)
+		return false
+	}
+
+	// Check file exists and size matches
 	info, err := os.Stat(modelPath)
 	if err != nil {
-		return false // file doesn't exist
+		return false
 	}
-
-	// Exact size validation against manifest
-	if hasSpec && info.Size() != spec.exactLen {
-		logger.Warn("model file size mismatch",
-			"operation", "validateCachedModel",
-			"size", info.Size(), "expected", spec.exactLen, "model_size", modelSize)
-		os.Remove(modelPath)
+	if info.Size() != spec.exactLen {
+		l.Warn("model size mismatch", "expected", spec.exactLen, "actual", info.Size())
+		os.Rename(modelPath, modelPath+".bad")
 		return false
 	}
 
-	if !hasSpec {
-		// Unknown model size — no manifest entry, cannot verify
-		logger.Warn("no manifest entry for model size, cannot verify",
-			"operation", "validateCachedModel", "model_size", modelSize)
-		return false
-	}
-
-	// Fast path: if sidecar hash matches the pinned manifest hash, skip re-hashing.
-	// The sidecar is a cache, not an authority — the manifest is the trusted root.
+	// Fast path: if sidecar hash matches manifest AND file size matches, trust it
 	hashPath := modelPath + ".sha256"
-	if savedHash, readErr := os.ReadFile(hashPath); readErr == nil {
-		if strings.TrimSpace(string(savedHash)) == spec.sha256 {
-			logger.Info("model verified (cached hash matches manifest)",
-				"operation", "validateCachedModel", "sha256", spec.sha256)
+	if cached, err := os.ReadFile(hashPath); err == nil {
+		if strings.TrimSpace(string(cached)) == spec.sha256 {
+			l.Info("model verified via cached hash", "model_size", modelSize)
 			return true
 		}
-		// Sidecar disagrees with manifest — fall through to full hash
-		logger.Warn("cached hash does not match manifest, re-verifying",
-			"operation", "validateCachedModel")
 	}
 
-	// Slow path: compute hash from file content, verify against pinned manifest
-	f, openErr := os.Open(modelPath)
-	if openErr != nil {
-		logger.Error("cannot open model for hash verification",
-			"operation", "validateCachedModel", "error", openErr)
+	// Slow path: hash the actual file
+	l.Info("hashing model file", "model_size", modelSize, "size", info.Size())
+	f, err := os.Open(modelPath)
+	if err != nil {
+		l.Error("failed to open model for hashing", "error", err)
 		return false
 	}
+	defer f.Close()
 	h := sha256.New()
-	if _, copyErr := io.Copy(h, f); copyErr != nil {
-		f.Close()
-		logger.Error("failed to hash model",
-			"operation", "validateCachedModel", "error", copyErr)
+	if _, err := io.Copy(h, f); err != nil {
+		l.Error("failed to hash model", "error", err)
 		return false
 	}
-	f.Close()
 	currentHash := hex.EncodeToString(h.Sum(nil))
 
 	if currentHash != spec.sha256 {
-		logger.Warn("model hash does not match pinned manifest, quarantining",
-			"operation", "validateCachedModel",
-			"pinned", spec.sha256, "got", currentHash)
-		badPath := modelPath + ".bad"
-		os.Rename(modelPath, badPath)
+		l.Warn("model hash mismatch — quarantining",
+			"expected", spec.sha256, "actual", currentHash)
+		os.Rename(modelPath, modelPath+".bad")
 		os.Remove(hashPath)
 		return false
 	}
 
-	// Hash matches manifest — cache it for future fast-path
-	if writeErr := os.WriteFile(hashPath, []byte(currentHash), 0644); writeErr != nil {
-		logger.Error("failed to write hash cache file",
-			"operation", "validateCachedModel", "error", writeErr)
-	}
-
-	logger.Info("model verified (full hash against manifest)",
-		"operation", "validateCachedModel", "sha256", currentHash)
+	// Hash matches — update sidecar cache
+	os.WriteFile(hashPath, []byte(currentHash), 0644)
+	l.Info("model verified", "model_size", modelSize)
 	return true
 }
 
