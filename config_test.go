@@ -230,6 +230,17 @@ func TestValidate_InvalidLanguageCode(t *testing.T) {
 	}
 }
 
+func TestLoadConfig_RejectsUnknownFields(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	data := []byte("trigger_key: [fn]\nmodel_size: small\nsample_rate: 16000\nbogus_field: true\n")
+	os.WriteFile(path, data, 0644)
+	_, err := LoadConfig(path)
+	if err == nil {
+		t.Error("expected error for unknown YAML field 'bogus_field'")
+	}
+}
+
 func TestLoadConfig_DefaultTypeMode(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.yaml")

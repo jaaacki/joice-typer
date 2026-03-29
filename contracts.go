@@ -1,5 +1,7 @@
 package main
 
+import "fmt"
+
 // ============================================================================
 // CONTRACTS — These interfaces are ABSOLUTE. Implementations must match exactly.
 // ============================================================================
@@ -56,4 +58,55 @@ type Typer interface {
 	// ReplaceAll backspaces oldLen runes then types newText.
 	// Non-atomic: if interrupted between backspace and type, text may be lost.
 	ReplaceAll(oldLen int, newText string) error
+}
+
+// --- Typed Errors ---
+
+// ErrDependencyTimeout indicates a blocking dependency exceeded its deadline.
+type ErrDependencyTimeout struct {
+	Component string
+	Operation string
+	Wrapped   error
+}
+
+func (e *ErrDependencyTimeout) Error() string {
+	if e.Wrapped != nil {
+		return fmt.Sprintf("%s.%s: dependency timeout: %v", e.Component, e.Operation, e.Wrapped)
+	}
+	return fmt.Sprintf("%s.%s: dependency timeout", e.Component, e.Operation)
+}
+
+func (e *ErrDependencyTimeout) Unwrap() error { return e.Wrapped }
+
+// ErrDependencyUnavailable indicates a dependency could not be reached or initialized.
+type ErrDependencyUnavailable struct {
+	Component string
+	Operation string
+	Wrapped   error
+}
+
+func (e *ErrDependencyUnavailable) Error() string {
+	return fmt.Sprintf("%s.%s: dependency unavailable: %v", e.Component, e.Operation, e.Wrapped)
+}
+
+func (e *ErrDependencyUnavailable) Unwrap() error { return e.Wrapped }
+
+// ErrBadPayload indicates corrupted, oversized, or malformed data from a dependency.
+type ErrBadPayload struct {
+	Component string
+	Operation string
+	Detail    string
+}
+
+func (e *ErrBadPayload) Error() string {
+	return fmt.Sprintf("%s.%s: bad payload: %s", e.Component, e.Operation, e.Detail)
+}
+
+// ErrPermissionDenied indicates a required macOS permission is not granted.
+type ErrPermissionDenied struct {
+	Permission string
+}
+
+func (e *ErrPermissionDenied) Error() string {
+	return fmt.Sprintf("permission denied: %s — enable in System Settings → Privacy & Security", e.Permission)
 }

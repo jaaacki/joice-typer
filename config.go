@@ -106,7 +106,7 @@ func LoadConfig(path string) (Config, error) {
 		if err := os.MkdirAll(dir, 0755); err != nil {
 			return Config{}, fmt.Errorf("config.LoadConfig: create dir: %w", err)
 		}
-		if err := os.WriteFile(path, defaultConfigYAML, 0644); err != nil {
+		if err := atomicWriteFile(path, defaultConfigYAML, 0644); err != nil {
 			return Config{}, fmt.Errorf("config.LoadConfig: write default: %w", err)
 		}
 	}
@@ -117,9 +117,10 @@ func LoadConfig(path string) (Config, error) {
 	}
 
 	var cfg Config
-	decoder := yaml.NewDecoder(bytes.NewReader(data))
-	if err := decoder.Decode(&cfg); err != nil {
-		return Config{}, fmt.Errorf("config.LoadConfig: parse: %w", err)
+	dec := yaml.NewDecoder(bytes.NewReader(data))
+	dec.KnownFields(true)
+	if err := dec.Decode(&cfg); err != nil {
+		return Config{}, fmt.Errorf("config.LoadConfig: parse %s: %w", path, err)
 	}
 
 	if cfg.TypeMode == "" {
@@ -192,4 +193,18 @@ func DefaultModelPath(modelSize string) (string, error) {
 		return "", fmt.Errorf("config.DefaultModelPath: %w", err)
 	}
 	return filepath.Join(dir, "models", "ggml-"+modelSize+".bin"), nil
+}
+
+// atomicWriteFile writes data to a temporary file then renames it to path.
+// This prevents partial writes from corrupting the config on crash/power loss.
+func atomicWriteFile(path string, data []byte, perm os.FileMode) error {
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, data, perm); err != nil {
+		return fmt.Errorf("atomicWriteFile: write tmp: %w", err)
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		os.Remove(tmp) // best-effort cleanup
+		return fmt.Errorf("atomicWriteFile: rename: %w", err)
+	}
+	return nil
 }

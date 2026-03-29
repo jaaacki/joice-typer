@@ -232,7 +232,7 @@ func writeSetupConfig(deviceName string, language string, triggerKeys []string, 
 		return fmt.Errorf("writeSetupConfig: create dir: %w", err)
 	}
 
-	if err := os.WriteFile(cfgPath, data, 0644); err != nil {
+	if err := atomicWriteFile(cfgPath, data, 0644); err != nil {
 		return fmt.Errorf("writeSetupConfig: write: %w", err)
 	}
 
@@ -327,7 +327,7 @@ func OpenPreferences() {
 		}
 		return
 	}
-	if writeErr := os.WriteFile(cfgPath, data, 0644); writeErr != nil {
+	if writeErr := atomicWriteFile(cfgPath, data, 0644); writeErr != nil {
 		if settingsLogger != nil {
 			settingsLogger.Error("failed to write config", "operation", "OpenPreferences", "error", writeErr)
 		}
