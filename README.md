@@ -2,7 +2,7 @@
 
 Hold a key, speak, release — text appears at your cursor. Anywhere.
 
-A lightweight, fully local voice-to-text tool for macOS. No cloud APIs, no network calls, no data leaves your machine. Powered by [whisper.cpp](https://github.com/ggerganov/whisper.cpp) with Metal GPU acceleration.
+A lightweight, fully local voice-to-text tool for macOS. No cloud APIs, no data leaves your machine (one-time model download from Hugging Face on first run). Powered by [whisper.cpp](https://github.com/ggerganov/whisper.cpp) with Metal GPU acceleration.
 
 ## How It Works
 

@@ -135,7 +135,6 @@ func (a *App) handleReleaseStream() {
 	a.recording = false
 	a.sound.PlayStop()
 
-	// Get streamer's last text before stopping
 	lastText := ""
 	if a.streamer != nil {
 		lastText = a.streamer.LastText()
@@ -143,7 +142,6 @@ func (a *App) handleReleaseStream() {
 		a.streamer = nil
 	}
 
-	// Stop recorder and get full audio
 	audio, err := a.recorder.Stop()
 	if err != nil {
 		a.logger.Error("failed to stop recorder", "component", "app", "operation", "handleReleaseStream", "error", err)
@@ -157,36 +155,51 @@ func (a *App) handleReleaseStream() {
 		return
 	}
 
-	// Final transcription of complete audio (bounded by clipboardTranscribeTimeout)
+	// Run final transcription async — don't block the event loop
+	a.wg.Add(1)
+	go a.finalStreamTranscribe(audio, lastText)
+}
+
+func (a *App) finalStreamTranscribe(audio []float32, lastText string) {
+	defer a.wg.Done()
+	if !atomic.CompareAndSwapInt32(&a.busy, 0, 1) {
+		a.logger.Warn("already busy, skipping final stream transcription",
+			"component", "app", "operation", "finalStreamTranscribe")
+		a.emitState(StateReady)
+		return
+	}
+	defer atomic.StoreInt32(&a.busy, 0)
+
 	a.emitState(StateTranscribing)
-	streamFinalCtx, streamFinalCancel := context.WithTimeout(context.Background(), clipboardTranscribeTimeout)
-	defer streamFinalCancel()
-	finalText, transcribeErr := a.transcriber.Transcribe(streamFinalCtx, audio)
-	if transcribeErr != nil {
-		a.logger.Error("final transcription failed", "component", "app", "operation", "handleReleaseStream", "error", transcribeErr)
+
+	transcribeCtx, cancel := context.WithTimeout(context.Background(), clipboardTranscribeTimeout)
+	defer cancel()
+
+	finalText, err := a.transcriber.Transcribe(transcribeCtx, audio)
+	if err != nil {
+		a.logger.Error("final transcription failed", "component", "app", "operation", "finalStreamTranscribe", "error", err)
 		a.emitState(StateReady)
 		return
 	}
 
 	finalText = strings.TrimSpace(finalText)
 	if finalText == "" {
-		a.logger.Warn("no speech detected in final transcription", "component", "app", "operation", "handleReleaseStream")
+		a.logger.Warn("no speech detected in final transcription", "component", "app", "operation", "finalStreamTranscribe")
 		a.emitState(StateReady)
 		return
 	}
 
-	// Replace streamer's partial text with the complete transcription
 	if a.typer != nil && lastText != "" {
 		if err := a.typer.ReplaceAll(len([]rune(lastText)), finalText); err != nil {
-			a.logger.Error("failed to replace with final text", "component", "app", "operation", "handleReleaseStream", "error", err)
+			a.logger.Error("failed to replace with final text", "component", "app", "operation", "finalStreamTranscribe", "error", err)
 		}
 	} else if a.typer != nil {
 		if err := a.typer.Type(finalText); err != nil {
-			a.logger.Error("failed to type final text", "component", "app", "operation", "handleReleaseStream", "error", err)
+			a.logger.Error("failed to type final text", "component", "app", "operation", "finalStreamTranscribe", "error", err)
 		}
 	}
 
-	a.logger.Info("stream complete", "component", "app", "operation", "handleReleaseStream",
+	a.logger.Info("stream complete", "component", "app", "operation", "finalStreamTranscribe",
 		"text_length", len(finalText))
 	a.emitState(StateReady)
 }
