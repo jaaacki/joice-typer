@@ -23,10 +23,10 @@ type App struct {
 	logger         *slog.Logger
 	baseLogger     *slog.Logger
 	busy           int32 // atomic flag: 1 = transcribing/finalizing
+	recording      int32 // atomic flag: 1 = recording in progress
 	stateMu        sync.RWMutex
 	onStateChange  func(AppState)
 	typeMode       string
-	recording      bool
 	streamInterval time.Duration
 	streamer       *Streamer
 	wg             sync.WaitGroup
@@ -106,7 +106,7 @@ func (a *App) handlePress() {
 		return
 	}
 
-	a.recording = true
+	atomic.StoreInt32(&a.recording, 1)
 
 	if a.typeMode == "stream" {
 		a.streamer = NewStreamer(a.transcriber, a.typer, a.recorder, a.baseLogger, a.streamInterval)
@@ -115,7 +115,7 @@ func (a *App) handlePress() {
 }
 
 func (a *App) handleRelease() {
-	if !a.recording {
+	if atomic.LoadInt32(&a.recording) == 0 {
 		a.logger.Debug("not recording, ignoring release", "operation", "handleRelease")
 		return
 	}
@@ -129,11 +129,11 @@ func (a *App) handleRelease() {
 }
 
 func (a *App) handleReleaseStream() {
-	if !a.recording {
+	if atomic.LoadInt32(&a.recording) == 0 {
 		a.logger.Debug("not recording, ignoring release", "operation", "handleReleaseStream")
 		return
 	}
-	a.recording = false
+	atomic.StoreInt32(&a.recording, 0)
 	a.sound.PlayStop()
 
 	lastText := ""
@@ -248,7 +248,7 @@ func (a *App) finalStreamTranscribe(audio []float32, lastText string) {
 
 func (a *App) handleReleaseClipboard() {
 	audio, err := a.recorder.Stop()
-	a.recording = false
+	atomic.StoreInt32(&a.recording, 0)
 	if err != nil {
 		a.logger.Error("failed to stop recording",
 			"operation", "handleReleaseClipboard", "error", err)
@@ -326,7 +326,7 @@ func (a *App) transcribeAndPaste(audio []float32) {
 // IsIdle returns true if no recording, transcription, or native CGO work is in flight.
 // Checks both the app-level busy flag AND the transcriber's bulkhead semaphore.
 func (a *App) IsIdle() bool {
-	if a.recording || atomic.LoadInt32(&a.busy) != 0 {
+	if atomic.LoadInt32(&a.recording) != 0 || atomic.LoadInt32(&a.busy) != 0 {
 		return false
 	}
 	// Probe the transcriber bulkhead — if we can acquire and release, it's idle

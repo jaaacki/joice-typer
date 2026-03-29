@@ -77,13 +77,16 @@ func hotkeyCallback(eventType C.int) {
 		hotkeyLogger.Info("hotkey event", "operation", "hotkeyCallback", "event", event.String())
 	}
 	if event == TriggerReleased {
-		// Release is critical — try hard but don't block the OS thread forever
+		// Release is critical control traffic — must not be dropped (causes
+		// stuck recording state). Block up to 1s, which is long enough for
+		// any consumer delay but short enough to not freeze the OS thread.
+		timer := time.NewTimer(1 * time.Second)
 		select {
 		case ch <- event:
-		default:
-			// Channel full — should never happen, but don't hang the OS callback
+			timer.Stop()
+		case <-timer.C:
 			if hotkeyLogger != nil {
-				hotkeyLogger.Error("release event dropped, channel full",
+				hotkeyLogger.Error("release event send timed out after 1s",
 					"operation", "hotkeyCallback")
 			}
 		}

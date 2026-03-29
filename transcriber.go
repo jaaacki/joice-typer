@@ -513,6 +513,15 @@ func doDownload(ctx context.Context, client *http.Client, url string, tmpPath st
 		startByte = info.Size()
 	}
 
+	// Reject oversized partial files — corrupt or hostile .tmp
+	if startByte > 0 && startByte >= expectedSize {
+		logger.Warn("stale .tmp file is already >= expected size, deleting",
+			"component", "transcriber", "operation", "doDownload",
+			"tmp_size", startByte, "expected", expectedSize)
+		os.Remove(tmpPath)
+		startByte = 0
+	}
+
 	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
 		return err
