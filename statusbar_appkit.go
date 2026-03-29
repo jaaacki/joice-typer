@@ -16,6 +16,12 @@ func InitStatusBar() {
 	C.initStatusBar()
 }
 
+// InitStatusBarAsync dispatches status bar creation to the main thread.
+// Safe to call from any goroutine. Blocks until creation completes.
+func InitStatusBarAsync() {
+	C.initStatusBarOnMainThread()
+}
+
 // UpdateStatusBar changes the menu bar icon state.
 func UpdateStatusBar(state AppState) {
 	C.updateStatusBar(C.int(state))

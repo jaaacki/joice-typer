@@ -120,6 +120,12 @@ void initStatusBar(void) {
     sStatusItem.menu = sMenu;
 }
 
+void initStatusBarOnMainThread(void) {
+    dispatch_sync(dispatch_get_main_queue(), ^{
+        initStatusBar();
+    });
+}
+
 void updateStatusBar(int state) {
     dispatch_async(dispatch_get_main_queue(), ^{
         if (sStatusItem == nil) return;

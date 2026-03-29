@@ -153,12 +153,6 @@ func runAppMode() {
 		os.Exit(1)
 	}
 
-	// Init status bar and start [NSApp run] IMMEDIATELY so the app is
-	// responsive. All heavy work (model loading, permission checks)
-	// happens in goroutines after the run loop is active.
-	InitStatusBar()
-	UpdateStatusBar(StateLoading)
-
 	events := make(chan HotkeyEvent, 10)
 	hotkey := NewHotkeyListener(cfg.TriggerKey, logger)
 
@@ -180,7 +174,12 @@ func runAppMode() {
 	)
 
 	go func() {
-		// Step 1: Check permissions
+		// Wait for [NSApp run] to start on the main thread
+		time.Sleep(200 * time.Millisecond)
+
+		// Create status bar on the main thread via dispatch_sync.
+		// initStatusBar touches AppKit which must be on the main thread.
+		InitStatusBarAsync()
 		UpdateStatusBar(StateNoPermission)
 		if err := hotkey.WaitForPermissions(startupCtx, func(acc, inp bool) {
 			if acc && inp {
