@@ -825,17 +825,20 @@ const char *getSelectedModel(void) {
 }
 
 void updateSettingsModelStatus(const char *status) {
+    NSString *statusStr = [NSString stringWithUTF8String:status];
     dispatch_async(dispatch_get_main_queue(), ^{
         if (sModelStatus != nil) {
-            sModelStatus.stringValue = [NSString stringWithUTF8String:status];
+            sModelStatus.stringValue = statusStr;
         }
     });
 }
 
 void updateModelActionButton(const char *title, int enabled) {
+    // Copy the string before dispatching — the caller may free it immediately.
+    NSString *titleStr = [NSString stringWithUTF8String:title];
     dispatch_async(dispatch_get_main_queue(), ^{
         if (sModelActionBtn == nil) return;
-        sModelActionBtn.title = [NSString stringWithUTF8String:title];
+        sModelActionBtn.title = titleStr;
         sModelActionBtn.enabled = (enabled != 0);
     });
 }

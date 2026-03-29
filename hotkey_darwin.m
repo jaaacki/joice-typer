@@ -18,7 +18,13 @@ int checkAccessibility(void) {
 }
 
 int checkInputMonitoring(void) {
-    return CGPreflightListenEventAccess() ? 1 : 0;
+    // CGPreflightListenEventAccess is unreliable for ad-hoc signed binaries —
+    // returns stale/false even after the user grants Input Monitoring.
+    // The only reliable check: actually create a CGEvent tap and see if it works.
+    // This requires Accessibility to be granted first (tap creation needs it).
+    // If Accessibility isn't granted, this returns false (which is correct —
+    // both permissions are needed).
+    return probeEventTap();
 }
 
 static CGEventRef probeCallback(CGEventTapProxy p, CGEventType t, CGEventRef e, void *u) {
