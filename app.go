@@ -8,6 +8,8 @@ import (
 	"time"
 )
 
+const clipboardTranscribeTimeout = 30 * time.Second
+
 // App is the orchestrator that wires hotkey events to the
 // record -> transcribe -> paste pipeline.
 type App struct {
@@ -180,7 +182,9 @@ func (a *App) transcribeAndPaste(audio []float32) {
 	}
 	defer atomic.StoreInt32(&a.busy, 0)
 
-	text, err := a.transcriber.Transcribe(context.Background(), audio)
+	transcribeCtx, cancel := context.WithTimeout(context.Background(), clipboardTranscribeTimeout)
+	defer cancel()
+	text, err := a.transcriber.Transcribe(transcribeCtx, audio)
 	if err != nil {
 		a.logger.Error("transcription failed",
 			"operation", "transcribeAndPaste", "error", err)
@@ -211,17 +215,33 @@ func (a *App) transcribeAndPaste(audio []float32) {
 // Shutdown gracefully closes all components.
 // Waits for in-flight background goroutines before freeing resources.
 func (a *App) Shutdown() {
-	a.logger.Info("shutting down, waiting for in-flight work", "operation", "Shutdown")
-	a.wg.Wait()
+	a.logger.Info("shutting down, waiting for in-flight work",
+		"component", "app", "operation", "Shutdown")
 
-	if err := a.recorder.Close(); err != nil {
-		a.logger.Error("failed to close recorder",
-			"operation", "Shutdown", "error", err)
-	}
-	if err := a.transcriber.Close(); err != nil {
-		a.logger.Error("failed to close transcriber",
-			"operation", "Shutdown", "error", err)
+	done := make(chan struct{})
+	go func() {
+		a.wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		a.logger.Info("shutdown complete", "component", "app", "operation", "Shutdown")
+	case <-time.After(10 * time.Second):
+		a.logger.Error("shutdown timed out, some goroutines may be leaked",
+			"component", "app", "operation", "Shutdown")
 	}
 
-	a.logger.Info("shutdown complete", "operation", "Shutdown")
+	if a.recorder != nil {
+		if err := a.recorder.Close(); err != nil {
+			a.logger.Error("failed to close recorder",
+				"component", "app", "operation", "Shutdown", "error", err)
+		}
+	}
+	if a.transcriber != nil {
+		if err := a.transcriber.Close(); err != nil {
+			a.logger.Error("failed to close transcriber",
+				"component", "app", "operation", "Shutdown", "error", err)
+		}
+	}
 }
