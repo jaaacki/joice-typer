@@ -1,5 +1,6 @@
 #import <Cocoa/Cocoa.h>
 #import <ApplicationServices/ApplicationServices.h>
+#include <stdatomic.h>
 #include "settings_darwin.h"
 #include "hotkey_darwin.h"
 
@@ -28,9 +29,10 @@ static NSButton *sHotkeyChangeBtn = nil;
 static NSButton *sHotkeyCancelBtn = nil;
 static NSButton *sHotkeyConfirmBtn = nil;
 static char sHotkeyBuffer[128] = {0};
-static uint64_t sRecordedFlags = 0;
+static _Atomic uint64_t sRecordedFlags = 0;
 static uint64_t sConfirmedFlags = 0;
 static CFMachPortRef sRecorderTap = NULL;
+static CFRunLoopSourceRef sRecorderSource = NULL;
 
 static NSTextField *makeLabel(NSString *text, CGFloat fontSize, BOOL bold, NSColor *color, NSRect frame) {
     NSTextField *label = [[NSTextField alloc] initWithFrame:frame];
@@ -116,10 +118,9 @@ static CGEventRef recorderTapCallback(
         NULL
     );
     if (sRecorderTap != NULL) {
-        CFRunLoopSourceRef src = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, sRecorderTap, 0);
-        CFRunLoopAddSource(CFRunLoopGetMain(), src, kCFRunLoopCommonModes);
+        sRecorderSource = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, sRecorderTap, 0);
+        CFRunLoopAddSource(CFRunLoopGetMain(), sRecorderSource, kCFRunLoopCommonModes);
         CGEventTapEnable(sRecorderTap, true);
-        CFRelease(src);
     }
 }
 
@@ -146,6 +147,11 @@ static CGEventRef recorderTapCallback(
     sHotkeyConfirmBtn.hidden = YES;
     if (sRecorderTap != NULL) {
         CGEventTapEnable(sRecorderTap, false);
+        if (sRecorderSource != NULL) {
+            CFRunLoopRemoveSource(CFRunLoopGetMain(), sRecorderSource, kCFRunLoopCommonModes);
+            CFRelease(sRecorderSource);
+            sRecorderSource = NULL;
+        }
         CFRelease(sRecorderTap);
         sRecorderTap = NULL;
     }
@@ -157,6 +163,16 @@ static BOOL sIsOnboarding = YES;
 
 void showSettingsWindow(int onboarding) {
     @autoreleasepool {
+        // Close any existing window to prevent leaks on repeated opens
+        if (sSetupWindow != nil) {
+            [sSetupWindow close];
+            sSetupWindow = nil;
+        }
+
+        // Reset stale hotkey recorder state
+        sConfirmedFlags = 0;
+        sRecordedFlags = 0;
+
         sIsOnboarding = (onboarding != 0);
         CGFloat w = 480, h = 640;
         NSRect frame = NSMakeRect(0, 0, w, h);
@@ -318,6 +334,11 @@ void showSettingsWindow(int onboarding) {
         [content addSubview:sContinueButton];
 
         sSetupComplete = NO;
+
+        // In preferences mode, Save is always available (no download gate)
+        if (!sIsOnboarding) {
+            sContinueButton.enabled = YES;
+        }
 
         [sSetupWindow makeKeyAndOrderFront:nil];
         [NSApp activateIgnoringOtherApps:YES];

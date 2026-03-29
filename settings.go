@@ -21,6 +21,8 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+var settingsLogger *slog.Logger
+
 // IsFirstRun returns true if no config file exists yet.
 func IsFirstRun() bool {
 	path, err := DefaultConfigPath()
@@ -36,6 +38,7 @@ func IsFirstRun() bool {
 // Must be called from the main thread.
 func RunSetupWizard(logger *slog.Logger) (string, error) {
 	l := logger.With("component", "setup")
+	settingsLogger = logger.With("component", "settings")
 	l.Info("starting setup wizard", "operation", "RunSetupWizard")
 
 	C.showSettingsWindow(1)
@@ -78,7 +81,7 @@ func RunSetupWizard(logger *slog.Logger) (string, error) {
 	}()
 
 	// Step 3: Populate mic list (synchronous — no dispatch_async issue)
-	populateMicList(l)
+	populateMicList("", l)
 
 	// Step 4: Populate language list
 	populateLanguageList("en")
@@ -155,15 +158,19 @@ func RunSetupWizard(logger *slog.Logger) (string, error) {
 	return selectedDevice, nil
 }
 
-func populateMicList(l *slog.Logger) {
-	devices, devErr := portaudio.Devices()
-	if devErr != nil {
-		l.Error("failed to list devices", "operation", "populateMicList", "error", devErr)
+func populateMicList(selectedDevice string, l *slog.Logger) {
+	devices, err := portaudio.Devices()
+	if err != nil {
+		l.Error("failed to list devices", "operation", "populateMicList", "error", err)
 		return
 	}
 	var inputNames []string
+	defaultIdx := 0
 	for _, d := range devices {
 		if d.MaxInputChannels > 0 {
+			if d.Name == selectedDevice {
+				defaultIdx = len(inputNames)
+			}
 			inputNames = append(inputNames, d.Name)
 		}
 	}
@@ -174,7 +181,7 @@ func populateMicList(l *slog.Logger) {
 	for i, name := range inputNames {
 		cNames[i] = C.CString(name)
 	}
-	C.populateSetupDevices(&cNames[0], C.int(len(inputNames)), 0)
+	C.populateSetupDevices(&cNames[0], C.int(len(inputNames)), C.int(defaultIdx))
 	for _, cn := range cNames {
 		C.free(unsafe.Pointer(cn))
 	}
@@ -254,10 +261,16 @@ func signalHotkeyRestart() {
 func OpenPreferences() {
 	cfgPath, err := DefaultConfigPath()
 	if err != nil {
+		if settingsLogger != nil {
+			settingsLogger.Error("failed to resolve config path", "operation", "OpenPreferences", "error", err)
+		}
 		return
 	}
 	cfg, err := LoadConfig(cfgPath)
 	if err != nil {
+		if settingsLogger != nil {
+			settingsLogger.Error("failed to load config", "operation", "OpenPreferences", "error", err)
+		}
 		return
 	}
 
@@ -265,7 +278,7 @@ func OpenPreferences() {
 
 	// Pre-populate from current config
 	populateLanguageList(cfg.Language)
-	populateMicListWithDefault(cfg.InputDevice)
+	populateMicList(cfg.InputDevice, settingsLogger)
 
 	// Set current hotkey display
 	display := formatHotkeyDisplay(cfg.TriggerKey)
@@ -298,9 +311,17 @@ func OpenPreferences() {
 
 	data, marshalErr := yaml.Marshal(&cfg)
 	if marshalErr != nil {
+		if settingsLogger != nil {
+			settingsLogger.Error("failed to marshal config", "operation", "OpenPreferences", "error", marshalErr)
+		}
 		return
 	}
-	os.WriteFile(cfgPath, data, 0644)
+	if writeErr := os.WriteFile(cfgPath, data, 0644); writeErr != nil {
+		if settingsLogger != nil {
+			settingsLogger.Error("failed to write config", "operation", "OpenPreferences", "error", writeErr)
+		}
+		return
+	}
 
 	// Signal hotkey restart
 	signalHotkeyRestart()
@@ -320,30 +341,3 @@ func formatHotkeyDisplay(keys []string) string {
 	return strings.Join(parts, " + ")
 }
 
-func populateMicListWithDefault(deviceName string) {
-	devices, err := portaudio.Devices()
-	if err != nil {
-		return
-	}
-	var inputNames []string
-	defaultIdx := 0
-	for _, d := range devices {
-		if d.MaxInputChannels > 0 {
-			if d.Name == deviceName {
-				defaultIdx = len(inputNames)
-			}
-			inputNames = append(inputNames, d.Name)
-		}
-	}
-	if len(inputNames) == 0 {
-		return
-	}
-	cNames := make([]*C.char, len(inputNames))
-	for i, name := range inputNames {
-		cNames[i] = C.CString(name)
-	}
-	C.populateSetupDevices(&cNames[0], C.int(len(inputNames)), C.int(defaultIdx))
-	for _, cn := range cNames {
-		C.free(unsafe.Pointer(cn))
-	}
-}

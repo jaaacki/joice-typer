@@ -148,6 +148,7 @@ func runAppMode() {
 	events := make(chan HotkeyEvent, 10)
 	hotkey := NewHotkeyListener(cfg.TriggerKey, logger)
 
+	var activeHotkeyMu sync.Mutex
 	var activeHotkey HotkeyListener = hotkey
 
 	sigCh := make(chan os.Signal, 1)
@@ -155,7 +156,10 @@ func runAppMode() {
 	go func() {
 		sig := <-sigCh
 		logger.Info("received signal", "component", "main", "operation", "signal", "signal", sig.String())
-		if stopErr := activeHotkey.Stop(); stopErr != nil {
+		activeHotkeyMu.Lock()
+		h := activeHotkey
+		activeHotkeyMu.Unlock()
+		if stopErr := h.Stop(); stopErr != nil {
 			logger.Error("failed to stop hotkey", "component", "main", "operation", "signal", "error", stopErr)
 		}
 	}()
@@ -199,11 +203,14 @@ func runAppMode() {
 			// Reload config and recreate listener
 			cfg, err = LoadConfig(cfgPath)
 			if err != nil {
-				logger.Error("failed to reload config", "component", "main", "error", err)
-				break
+				logger.Error("failed to reload config, keeping current hotkey",
+					"component", "main", "operation", "runAppMode", "error", err)
+				continue // retry with existing hotkey
 			}
 			hotkey = NewHotkeyListener(cfg.TriggerKey, logger)
+			activeHotkeyMu.Lock()
 			activeHotkey = hotkey
+			activeHotkeyMu.Unlock()
 			UpdateStatusBar(StateReady)
 			continue
 		default:
