@@ -312,8 +312,12 @@ func validateCachedModel(modelPath string, modelSize string, logger *slog.Logger
 		parts := strings.SplitN(strings.TrimSpace(string(sidecarData)), ":", 3)
 		if len(parts) == 3 {
 			cachedHash := parts[0]
-			cachedSize, _ := strconv.ParseInt(parts[1], 10, 64)
-			cachedMtime, _ := strconv.ParseInt(parts[2], 10, 64)
+			cachedSize, sizeErr := strconv.ParseInt(parts[1], 10, 64)
+			cachedMtime, mtimeErr := strconv.ParseInt(parts[2], 10, 64)
+			if sizeErr != nil || mtimeErr != nil {
+				l.Warn("malformed sidecar, will re-hash",
+					"model_size", modelSize, "size_err", sizeErr, "mtime_err", mtimeErr)
+			}
 			if cachedHash == spec.sha256 && cachedSize == info.Size() && cachedMtime == info.ModTime().Unix() {
 				l.Info("model verified via cached metadata", "model_size", modelSize)
 				return true

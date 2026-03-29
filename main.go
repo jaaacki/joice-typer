@@ -42,10 +42,14 @@ func main() {
 		}
 		if err := ListInputDevices(); err != nil {
 			fmt.Fprintf(os.Stderr, "fatal: %v\n", err)
-			TerminateAudio()
+			if tErr := TerminateAudio(); tErr != nil {
+				fmt.Fprintf(os.Stderr, "warning: failed to terminate audio: %v\n", tErr)
+			}
 			os.Exit(1)
 		}
-		TerminateAudio()
+		if tErr := TerminateAudio(); tErr != nil {
+			fmt.Fprintf(os.Stderr, "warning: failed to terminate audio: %v\n", tErr)
+		}
 		return
 	}
 
@@ -80,7 +84,9 @@ func suppressStderr(logDir string) {
 	}
 	// Dup2 succeeded — fd 2 now points to the file. Close the original
 	// descriptor to avoid leaking it for the process lifetime.
-	f.Close()
+	if closeErr := f.Close(); closeErr != nil {
+		fmt.Fprintf(os.Stderr, "warning: failed to close original stderr fd: %v\n", closeErr)
+	}
 }
 
 // runAppMode is the entry point when running inside a .app bundle.
@@ -101,9 +107,6 @@ func runAppMode() {
 	}
 	defer logCleanup()
 
-	// Ensure settingsLogger is always initialized — not just in RunSetupWizard.
-	// Without this, all `if settingsLogger != nil` guards in settings.go
-	// silently swallow errors on the non-first-run (preferences) path.
 	settingsLogger = logger.With("component", "settings")
 
 	// Init PortAudio early (needed for device listing in setup wizard)
