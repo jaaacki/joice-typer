@@ -1,6 +1,6 @@
 #import <Cocoa/Cocoa.h>
 #import <ApplicationServices/ApplicationServices.h>
-#include "setup_darwin.h"
+#include "settings_darwin.h"
 #include "hotkey_darwin.h"
 
 static NSWindow *sSetupWindow = nil;

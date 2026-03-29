@@ -2,7 +2,7 @@ package main
 
 /*
 #cgo LDFLAGS: -framework Cocoa -framework ApplicationServices
-#include "setup_darwin.h"
+#include "settings_darwin.h"
 #include "hotkey_darwin.h"
 #include <stdlib.h>
 */

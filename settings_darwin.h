@@ -1,5 +1,5 @@
-#ifndef SETUP_DARWIN_H
-#define SETUP_DARWIN_H
+#ifndef SETTINGS_DARWIN_H
+#define SETTINGS_DARWIN_H
 
 void showSetupWindow(void);
 void updateSetupAccessibility(int granted);
