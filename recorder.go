@@ -121,7 +121,7 @@ func (r *portaudioRecorder) Warm() {
 		return // already warmed
 	}
 
-	buf := make([]float32, 1024)
+	buf := make([]float32, 512)
 	stream, err := r.openStream(buf)
 	if err != nil {
 		r.logger.Warn("failed to pre-warm audio stream",
@@ -173,7 +173,7 @@ func (r *portaudioRecorder) Start(ctx context.Context) error {
 		r.logger.Debug("using pre-warmed stream", "operation", "Start")
 	} else {
 		// Cold path: open stream now (slow — can take 1-2 seconds)
-		r.buffer = make([]float32, 1024)
+		r.buffer = make([]float32, 512)
 		stream, err = r.openStream(r.buffer)
 		if err != nil {
 			r.recording = false
