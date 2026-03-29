@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -331,6 +332,40 @@ func TestApp_EmptyText_NoPaste(t *testing.T) {
 	}
 }
 
+func TestApp_TranscribeDrop_ResetsStateToReady(t *testing.T) {
+	rec := &mockRecorder{}
+	trans := &mockTranscriber{}
+	paste := &mockPaster{}
+	logger := slog.Default()
+	snd := NewSound(false, logger)
+
+	app := NewApp(rec, trans, paste, nil, snd, "clipboard", logger)
+
+	var states []AppState
+	var statesMu sync.Mutex
+	app.SetStateCallback(func(s AppState) {
+		statesMu.Lock()
+		states = append(states, s)
+		statesMu.Unlock()
+	})
+
+	// Simulate the release path having already moved the UI into Transcribing,
+	// then losing the transcription because another job already owns the busy flag.
+	app.emitState(StateTranscribing)
+	atomic.StoreInt32(&app.busy, 1)
+	app.wg.Add(1)
+	app.transcribeAndPaste([]float32{0.1})
+
+	statesMu.Lock()
+	defer statesMu.Unlock()
+	if len(states) < 2 {
+		t.Fatalf("expected at least 2 state transitions, got %v", states)
+	}
+	if states[len(states)-1] != StateReady {
+		t.Fatalf("expected final state Ready after dropped transcription, got %v", states[len(states)-1])
+	}
+}
+
 func TestApp_Shutdown_ClosesBoth(t *testing.T) {
 	rec := &mockRecorder{}
 	trans := &mockTranscriber{}
@@ -491,6 +526,84 @@ func TestApp_TranscriberTimeout_DoesNotHang(t *testing.T) {
 	case <-time.After(20 * time.Second):
 		t.Fatal("Shutdown hung with hanging transcriber — expected timeout")
 	}
+}
+
+func TestApp_StreamRelease_WaitsForBulkhead(t *testing.T) {
+	var callCount int32
+	transcriber := &mockTranscriber{
+		transcribeFn: func(ctx context.Context, audio []float32) (string, error) {
+			n := atomic.AddInt32(&callCount, 1)
+			if n == 1 {
+				time.Sleep(1 * time.Second) // slow tick
+				return "partial", nil
+			}
+			return "final result", nil
+		},
+	}
+
+	recorder := &mockRecorder{audio: make([]float32, 16000)}
+	sound := NewSound(false, slog.Default())
+	typer := &mockTyper{}
+	app := NewApp(recorder, transcriber, nil, typer, sound, "stream", slog.Default())
+	app.streamInterval = 50 * time.Millisecond // ensure at least one tick fires
+
+	events := make(chan HotkeyEvent, 10)
+	go app.Run(events)
+
+	events <- TriggerPressed
+	time.Sleep(200 * time.Millisecond) // let streamer tick fire (blocks in Transcribe for 1s)
+	events <- TriggerReleased
+	time.Sleep(3 * time.Second) // wait for slow tick + final transcription
+
+	close(events)
+	app.Shutdown()
+
+	// Final transcription should have happened (callCount >= 2)
+	got := atomic.LoadInt32(&callCount)
+	if got < 2 {
+		t.Errorf("expected at least 2 transcribe calls (tick + final), got %d", got)
+	}
+}
+
+func TestApp_IsIdle_FalseWhileBusy(t *testing.T) {
+	blockCh := make(chan struct{})
+	transcriber := &mockTranscriber{
+		transcribeFn: func(ctx context.Context, audio []float32) (string, error) {
+			<-blockCh
+			return "text", nil
+		},
+	}
+
+	recorder := &mockRecorder{audio: make([]float32, 16000)}
+	sound := NewSound(false, slog.Default())
+	app := NewApp(recorder, transcriber, &mockPaster{}, nil, sound, "clipboard", slog.Default())
+
+	if !app.IsIdle() {
+		t.Fatal("expected idle initially")
+	}
+
+	events := make(chan HotkeyEvent, 10)
+	go app.Run(events)
+
+	events <- TriggerPressed
+	time.Sleep(50 * time.Millisecond)
+	events <- TriggerReleased
+	time.Sleep(100 * time.Millisecond)
+
+	// busy flag should be set while transcriber is blocked
+	if app.IsIdle() {
+		t.Fatal("expected not idle while transcribing")
+	}
+
+	close(blockCh)
+	time.Sleep(300 * time.Millisecond)
+
+	if !app.IsIdle() {
+		t.Fatal("expected idle after transcription completes")
+	}
+
+	close(events)
+	app.Shutdown()
 }
 
 func TestApp_RecorderStartFails_ContinuesListening(t *testing.T) {
