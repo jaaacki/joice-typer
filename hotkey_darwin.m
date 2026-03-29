@@ -112,6 +112,10 @@ static CGEventRef eventTapCallback(
 }
 
 int startHotkeyListener(uint64_t targetFlags, int targetKeycode) {
+    // Clean up any existing tap before creating a new one.
+    // This prevents stale taps from accumulating on re-entry.
+    stopHotkeyListener();
+
     sTargetFlags = targetFlags;
     sTargetKeycode = targetKeycode;
     sTriggered = 0;
@@ -155,29 +159,15 @@ void stopHotkeyListener(void) {
 }
 
 void runMainLoop(void) {
-    @autoreleasepool {
-        // NSApplication is REQUIRED for a CLI process to receive system events.
-        // Without it, CGEvent taps are created but never fire.
-        // ensureNSApp() guarantees the singleton exists; it may have been
-        // created earlier by the setup wizard or status bar.
-        ensureNSApp();
-        [NSApp run];
-    }
+    // Use CFRunLoopRun instead of [NSApp run]. The CGEvent tap is a
+    // Core Foundation construct that only needs CFRunLoop. Using [NSApp run]
+    // caused [NSApp stopModal] from preferences to bleed into the hotkey
+    // event loop, killing the listener. CFRunLoop is isolated from NSApp's
+    // modal session management.
+    ensureNSApp(); // still needed for status bar and preferences window
+    CFRunLoopRun();
 }
 
 void stopMainLoop(void) {
-    dispatch_async(dispatch_get_main_queue(), ^{
-        [NSApp stop:nil];
-        // Post dummy event to unblock [NSApp run]
-        NSEvent *event = [NSEvent otherEventWithType:NSEventTypeApplicationDefined
-                                            location:NSMakePoint(0, 0)
-                                       modifierFlags:0
-                                           timestamp:0
-                                        windowNumber:0
-                                             context:nil
-                                             subtype:0
-                                               data1:0
-                                               data2:0];
-        [NSApp postEvent:event atStart:YES];
-    });
+    CFRunLoopStop(CFRunLoopGetMain());
 }
