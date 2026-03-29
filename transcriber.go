@@ -368,20 +368,30 @@ func downloadModelWithProgress(ctx context.Context, modelPath string, modelSize 
 		},
 	}
 
-	// Use manifest's expected size as default; HEAD may refine it
-	var expectedSize int64
-	if spec, ok := modelManifest[modelSize]; ok {
-		expectedSize = spec.exactLen
+	// expectedSize is ALWAYS the manifest's pinned value. HEAD is advisory
+	// liveness only — never overrides the pinned size. A lying HEAD must not
+	// cause a correct GET to be rejected as "truncated".
+	spec, ok := modelManifest[modelSize]
+	if !ok {
+		return &ErrBadPayload{
+			Component: "transcriber",
+			Operation: "downloadModel",
+			Detail:    fmt.Sprintf("unknown model size %q — no manifest entry", modelSize),
+		}
 	}
+	expectedSize := spec.exactLen
 
-	// HEAD preflight — advisory, not mandatory
+	// HEAD preflight — advisory liveness check only
 	headReq, err := http.NewRequestWithContext(dlCtx, "HEAD", url, nil)
 	if err == nil {
 		headResp, headErr := client.Do(headReq)
 		if headErr == nil {
 			headResp.Body.Close()
-			if headResp.StatusCode == http.StatusOK && headResp.ContentLength > 0 {
-				expectedSize = headResp.ContentLength
+			// Log mismatch but do NOT override expectedSize
+			if headResp.StatusCode == http.StatusOK && headResp.ContentLength > 0 && headResp.ContentLength != expectedSize {
+				logger.Warn("HEAD Content-Length differs from manifest, using manifest",
+					"component", "transcriber", "operation", "downloadModel",
+					"head_size", headResp.ContentLength, "manifest_size", expectedSize)
 			}
 		}
 		if headErr != nil {
@@ -551,13 +561,15 @@ func doDownload(ctx context.Context, client *http.Client, url string, tmpPath st
 		return err
 	}
 
-	// Cap download at maxDownloadBytes to prevent abuse
-	limitedBody := io.LimitReader(resp.Body, maxDownloadBytes-startByte)
+	// Cap download to expectedSize (manifest-pinned). A hostile upstream
+	// sending more bytes than expected is rejected here, not after 2GB.
+	readLimit := expectedSize - startByte
+	if readLimit <= 0 {
+		readLimit = maxDownloadBytes // fallback if somehow negative
+	}
+	limitedBody := io.LimitReader(resp.Body, readLimit+1) // +1 to detect overflow
 
 	totalSize := expectedSize
-	if totalSize <= 0 {
-		totalSize = resp.ContentLength
-	}
 
 	pr := &callbackProgressReader{
 		reader:     limitedBody,
@@ -581,14 +593,15 @@ func doDownload(ctx context.Context, client *http.Client, url string, tmpPath st
 
 	totalWritten := startByte + n
 
+	// Detect overflow — upstream sent more bytes than manifest allows
+	if totalWritten > expectedSize {
+		return &ErrBadPayload{Component: "transcriber", Operation: "doDownload",
+			Detail: "upstream sent more bytes than manifest expects"}
+	}
+
 	// Validate total size matches expected (detects truncation)
 	if expectedSize > 0 && totalWritten != expectedSize {
 		return &ErrBadPayload{Component: "transcriber", Operation: "doDownload", Detail: "download truncated"}
-	}
-
-	// Detect hitting the safety cap
-	if totalWritten >= maxDownloadBytes {
-		return &ErrBadPayload{Component: "transcriber", Operation: "doDownload", Detail: "exceeded download size limit"}
 	}
 
 	return nil
