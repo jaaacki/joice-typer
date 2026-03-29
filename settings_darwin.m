@@ -144,13 +144,15 @@ static CGEventRef recorderTapCallback(
     [self stopRecorder];
     sSetupComplete = NO;
     [NSApp stopModal];
-    return YES;
+    // Don't actually close — just hide. We reuse the window on next open.
+    [sSetupWindow orderOut:nil];
+    return NO;
 }
 
 - (void)continueClicked:(id)sender {
     [self stopRecorder];
     sSetupComplete = YES;
-    [sSetupWindow close];
+    [sSetupWindow orderOut:nil];
     [NSApp stopModal];
 }
 
@@ -217,12 +219,6 @@ static SetupDelegate *sSetupDelegate = nil;
 
 void showSettingsWindow(int onboarding) {
     @autoreleasepool {
-        // Close any existing window to prevent leaks on repeated opens
-        if (sSetupWindow != nil) {
-            [sSetupWindow close];
-            sSetupWindow = nil;
-        }
-
         // Reset stale hotkey recorder state
         sConfirmedFlags = 0;
         sConfirmedKeycode = -1;
@@ -235,6 +231,50 @@ void showSettingsWindow(int onboarding) {
         sDownloadComplete = NO;
 
         sIsOnboarding = (onboarding != 0);
+        sSetupComplete = NO;
+
+        // Reuse existing window if available — never close/recreate.
+        // The window is hidden (orderOut) on dismiss, not released.
+        if (sSetupWindow != nil) {
+            [sSetupWindow setTitle:sIsOnboarding ? @"JoiceTyper Setup" : @"JoiceTyper Preferences"];
+            sContinueButton.title = sIsOnboarding ? @"Start JoiceTyper" : @"Save";
+            sContinueButton.enabled = !sIsOnboarding;
+
+            // Reset step indicators to initial state
+            sStep1Indicator.stringValue = @"\u23F3";
+            sStep1Status.stringValue = @"Checking...";
+            sStep1Status.textColor = [NSColor secondaryLabelColor];
+            sStep2Indicator.stringValue = @"\u23F3";
+            sStep2Status.stringValue = @"Checking...";
+            sStep2Status.textColor = [NSColor secondaryLabelColor];
+            sStep6Indicator.stringValue = @"\u23F3";
+            if (sStep6Status != nil) {
+                sStep6Status.stringValue = @"whisper-small \u00B7 466 MB";
+                sStep6Status.textColor = [NSColor secondaryLabelColor];
+            }
+            if (sProgressBar != nil) {
+                sProgressBar.hidden = NO;
+                sProgressBar.doubleValue = 0;
+            }
+            if (sProgressLabel != nil) {
+                sProgressLabel.hidden = NO;
+                sProgressLabel.stringValue = @"";
+            }
+            sStep7Indicator.stringValue = @"\u23F3";
+            sStep7Status.stringValue = @"Waiting...";
+            sStep7Status.textColor = [NSColor secondaryLabelColor];
+
+            // Reset hotkey display
+            sHotkeyChangeBtn.hidden = NO;
+            sHotkeyCancelBtn.hidden = YES;
+            sHotkeyConfirmBtn.hidden = YES;
+
+            [sSetupWindow makeKeyAndOrderFront:nil];
+            [NSApp activateIgnoringOtherApps:YES];
+            return;
+        }
+
+        // First-time window creation
         CGFloat w = 480, h = 640;
         NSRect frame = NSMakeRect(0, 0, w, h);
         sSetupWindow = [[NSWindow alloc]
@@ -242,6 +282,7 @@ void showSettingsWindow(int onboarding) {
                       styleMask:NSWindowStyleMaskTitled | NSWindowStyleMaskClosable
                         backing:NSBackingStoreBuffered
                           defer:NO];
+        [sSetupWindow setReleasedWhenClosed:NO];
         [sSetupWindow setTitle:sIsOnboarding ? @"JoiceTyper Setup" : @"JoiceTyper Preferences"];
         [sSetupWindow center];
 
