@@ -179,6 +179,14 @@ void stopHotkeyListener(void) {
 
 void runMainLoop(void) {
     ensureNSApp();
+    // Initialize status bar on the main thread before entering the run loop.
+    // This is the only safe place — it's on the main thread and before [NSApp run]
+    // which is needed for the status bar to be responsive.
+    extern void initStatusBar(void);
+    static dispatch_once_t statusBarOnce;
+    dispatch_once(&statusBarOnce, ^{
+        initStatusBar();
+    });
     [NSApp run];
 }
 

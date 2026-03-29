@@ -174,14 +174,8 @@ func runAppMode() {
 	)
 
 	go func() {
-		// Wait for [NSApp run] to start on the main thread
-		time.Sleep(200 * time.Millisecond)
-
-		// Create status bar on the main thread via dispatch_async.
-		// initStatusBar touches AppKit which must be on the main thread.
-		InitStatusBarAsync()
-		// Brief wait to let the status bar render before permission polling
-		time.Sleep(100 * time.Millisecond)
+		// Wait for [NSApp run] to start (status bar is created there automatically)
+		time.Sleep(300 * time.Millisecond)
 		UpdateStatusBar(StateNoPermission)
 
 		// Step 1: Check permissions
