@@ -43,6 +43,18 @@ func TerminateAudio() error {
 	return portaudio.Terminate()
 }
 
+// RefreshAudioDevices re-initializes PortAudio to pick up newly
+// connected devices (e.g. Bluetooth microphones).
+func RefreshAudioDevices() error {
+	if err := portaudio.Terminate(); err != nil {
+		return fmt.Errorf("recorder.RefreshAudioDevices: terminate: %w", err)
+	}
+	if err := portaudio.Initialize(); err != nil {
+		return fmt.Errorf("recorder.RefreshAudioDevices: initialize: %w", err)
+	}
+	return nil
+}
+
 // ListInputDevices prints available input devices to stdout.
 // This is intentional CLI output for --list-devices, not application logging.
 func ListInputDevices() error {

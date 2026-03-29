@@ -336,6 +336,11 @@ func OpenPreferences() {
 		}
 	}()
 
+	// Refresh audio devices to pick up newly connected mics (e.g. Bluetooth)
+	if refreshErr := RefreshAudioDevices(); refreshErr != nil && settingsLogger != nil {
+		settingsLogger.Warn("failed to refresh audio devices", "operation", "OpenPreferences", "error", refreshErr)
+	}
+
 	// Pre-populate from current config
 	populateLanguageList(cfg.Language)
 	populateModelList(cfg.ModelSize)
