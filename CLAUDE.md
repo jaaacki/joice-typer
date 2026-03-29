@@ -56,7 +56,7 @@ Flat `package main`. All Go files in root. No sub-packages.
 - **typer.go** — CGEvent keyboard simulation, rune-by-rune with 1ms delay. Handles BMP and supplementary Unicode via UTF-16 surrogate pairs. Clears modifier flags to prevent Fn/Shift leaking into typed text.
 - **config.go** — YAML config at `~/Library/Application Support/JoiceTyper/config.yaml`. Auto-creates default on first run. Migrates from old `~/.config/voicetype/` path.
 - **statusbar.go** / **statusbar_appkit.go** — Menu bar icon (app mode only).
-- **setup.go** — First-run setup wizard (app mode only).
+- **settings.go** / **settings_darwin.m** — Unified onboarding + preferences window. Language dropdown, hotkey recorder, mic selection. Opens as modal (onboarding) or from menu bar (preferences).
 - **sound.go** — Audio feedback via macOS system sounds (`afplay`). Max 3 concurrent.
 
 ### cgo / Objective-C
@@ -96,6 +96,6 @@ macOS platform code lives in `*_darwin.m` files with corresponding `*_darwin.h` 
 - **v1** (done): Core push-to-talk, configurable trigger key
 - **v1.5** (done): .app bundle, menu bar icon, setup wizard
 - **v2** (done): Streaming type mode (experimental, default off)
-- **v2.5** (current): Settings UI for mic/hotkey selection
+- **v2.5** (done): Settings UI — language, hotkey recorder, preferences menu
 - **v3**: Custom dictionary (whisper prompt + post-processing replacement)
 - **v4**: Menu bar UI (Wails) for full settings management
