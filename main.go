@@ -153,6 +153,12 @@ func runAppMode() {
 		os.Exit(1)
 	}
 
+	// Create status bar on the main thread BEFORE [NSApp run].
+	// This is safe — the Accessibility dialog it may trigger is a
+	// system-level (WindowServer) dialog, not an AppKit dialog.
+	InitStatusBar()
+	UpdateStatusBar(StateLoading)
+
 	events := make(chan HotkeyEvent, 10)
 	hotkey := NewHotkeyListener(cfg.TriggerKey, logger)
 
@@ -161,9 +167,6 @@ func runAppMode() {
 	activeHotkeyMu.Unlock()
 
 	// Launch all heavy init work in a background goroutine.
-	// This goroutine does: permissions → model load → ready.
-	// When done, it stops the bare run loop so the main thread
-	// can enter the real hotkey start loop.
 	initDone := make(chan error, 1)
 	var (
 		app         *App
@@ -174,8 +177,6 @@ func runAppMode() {
 	)
 
 	go func() {
-		// Wait for [NSApp run] to start (status bar is created there automatically)
-		time.Sleep(300 * time.Millisecond)
 		UpdateStatusBar(StateNoPermission)
 
 		// Step 1: Check permissions
