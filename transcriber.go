@@ -84,11 +84,37 @@ func NewTranscriber(modelPath string, modelSize string, language string, logger 
 	return &whisperTranscriber{ctx: ctx, lang: language, logger: l}, nil
 }
 
-func (t *whisperTranscriber) Transcribe(audio []float32) (string, error) {
+type transcribeResult struct {
+	text string
+	err  error
+}
+
+func (t *whisperTranscriber) Transcribe(ctx context.Context, audio []float32) (string, error) {
 	if len(audio) == 0 {
 		return "", fmt.Errorf("transcriber.Transcribe: empty audio buffer")
 	}
 
+	ch := make(chan transcribeResult, 1)
+	go func() {
+		text, err := t.transcribeBlocking(audio)
+		ch <- transcribeResult{text, err}
+	}()
+
+	select {
+	case <-ctx.Done():
+		// CGO call still running but we return immediately.
+		// The goroutine will complete eventually and release the mutex.
+		return "", &ErrDependencyTimeout{
+			Component: "transcriber",
+			Operation: "Transcribe",
+			Wrapped:   ctx.Err(),
+		}
+	case result := <-ch:
+		return result.text, result.err
+	}
+}
+
+func (t *whisperTranscriber) transcribeBlocking(audio []float32) (string, error) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 

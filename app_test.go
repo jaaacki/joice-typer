@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"sync"
@@ -20,7 +21,7 @@ type mockRecorder struct {
 	stopErr     error
 }
 
-func (m *mockRecorder) Start() error {
+func (m *mockRecorder) Start(ctx context.Context) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.startCalled = true
@@ -52,7 +53,7 @@ type mockTranscriber struct {
 	receivedAudio []float32
 }
 
-func (m *mockTranscriber) Transcribe(audio []float32) (string, error) {
+func (m *mockTranscriber) Transcribe(ctx context.Context, audio []float32) (string, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.receivedAudio = audio

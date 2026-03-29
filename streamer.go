@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"log/slog"
 	"sync"
 	"time"
@@ -71,7 +72,7 @@ func (s *Streamer) tick() {
 		return
 	}
 
-	text, err := s.transcriber.Transcribe(audio)
+	text, err := s.transcriber.Transcribe(context.Background(), audio)
 	if err != nil {
 		s.logger.Error("streaming transcription failed", "operation", "tick", "error", err)
 		return

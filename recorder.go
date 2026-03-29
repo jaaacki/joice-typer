@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"sync"
@@ -72,7 +73,11 @@ func findInputDevice(name string) (*portaudio.DeviceInfo, error) {
 	return nil, fmt.Errorf("recorder.findInputDevice: input device %q not found", name)
 }
 
-func (r *portaudioRecorder) Start() error {
+func (r *portaudioRecorder) Start(ctx context.Context) error {
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+
 	r.mu.Lock()
 	defer r.mu.Unlock()
 

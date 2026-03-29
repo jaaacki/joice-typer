@@ -1,6 +1,9 @@
 package main
 
-import "fmt"
+import (
+	"context"
+	"fmt"
+)
 
 // ============================================================================
 // CONTRACTS — These interfaces are ABSOLUTE. Implementations must match exactly.
@@ -25,8 +28,8 @@ const (
 type HotkeyListener interface {
 	// WaitForPermissions polls until Accessibility and Input Monitoring are
 	// both granted, prompting the user via macOS dialogs. Calls onUpdate on
-	// each poll so the caller can update UI.
-	WaitForPermissions(onUpdate func(accessibility, inputMonitoring bool))
+	// each poll so the caller can update UI. Returns error on context cancellation.
+	WaitForPermissions(ctx context.Context, onUpdate func(accessibility, inputMonitoring bool)) error
 	Start(events chan<- HotkeyEvent) error
 	Stop() error
 }
@@ -34,7 +37,7 @@ type HotkeyListener interface {
 // Recorder captures audio from the default input device.
 // Start begins capture. Stop ends capture and returns the audio buffer.
 type Recorder interface {
-	Start() error
+	Start(ctx context.Context) error
 	Stop() ([]float32, error)
 	Snapshot() []float32 // copy of audio captured so far, without stopping
 	Close() error
@@ -42,7 +45,7 @@ type Recorder interface {
 
 // Transcriber converts audio samples to text using whisper.cpp.
 type Transcriber interface {
-	Transcribe(audio []float32) (string, error)
+	Transcribe(ctx context.Context, audio []float32) (string, error)
 	Close() error
 }
 

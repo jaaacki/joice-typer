@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"os"
@@ -184,7 +185,7 @@ func runAppMode() {
 	// Always validate permissions before starting hotkey — not just on first run.
 	// Ad-hoc signing means every rebuild/reinstall invalidates old grants.
 	UpdateStatusBar(StateNoPermission)
-	hotkey.WaitForPermissions(func(acc, inp bool) {
+	hotkey.WaitForPermissions(context.Background(), func(acc, inp bool) {
 		if acc && inp {
 			return
 		}

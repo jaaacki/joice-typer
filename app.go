@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"log/slog"
 	"sync"
 	"sync/atomic"
@@ -93,7 +94,7 @@ func (a *App) handlePress() {
 	a.sound.PlayStart()
 	a.emitState(StateRecording)
 
-	if err := a.recorder.Start(); err != nil {
+	if err := a.recorder.Start(context.Background()); err != nil {
 		a.logger.Error("failed to start recording",
 			"operation", "handlePress", "error", err)
 		a.sound.PlayError()
@@ -179,7 +180,7 @@ func (a *App) transcribeAndPaste(audio []float32) {
 	}
 	defer atomic.StoreInt32(&a.busy, 0)
 
-	text, err := a.transcriber.Transcribe(audio)
+	text, err := a.transcriber.Transcribe(context.Background(), audio)
 	if err != nil {
 		a.logger.Error("transcription failed",
 			"operation", "transcribeAndPaste", "error", err)
