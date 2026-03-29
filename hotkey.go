@@ -77,19 +77,13 @@ func hotkeyCallback(eventType C.int) {
 		hotkeyLogger.Info("hotkey event", "operation", "hotkeyCallback", "event", event.String())
 	}
 	if event == TriggerReleased {
-		// Release is critical control traffic — must not be dropped (causes
-		// stuck recording state). Block up to 1s, which is long enough for
-		// any consumer delay but short enough to not freeze the OS thread.
-		timer := time.NewTimer(1 * time.Second)
-		select {
-		case ch <- event:
-			timer.Stop()
-		case <-timer.C:
-			if hotkeyLogger != nil {
-				hotkeyLogger.Error("release event send timed out after 1s",
-					"operation", "hotkeyCallback")
-			}
-		}
+		// Release is critical control traffic — must never be dropped.
+		// Dropping causes stranded recording state with no recovery path.
+		// Blocking send is correct: the channel has capacity 10 and the
+		// consumer processes events in microseconds. If this blocks, the
+		// app is already in a fatal state and blocking the OS callback
+		// is less harmful than silently corrupting recording state.
+		ch <- event
 	} else {
 		select {
 		case ch <- event:
