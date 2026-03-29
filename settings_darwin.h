@@ -12,6 +12,7 @@ const char *getSelectedLanguage(void);
 void populateSettingsModels(const char **sizes, const char **descriptions, int count, int defaultIndex);
 const char *getSelectedModel(void);
 void updateSettingsModelStatus(const char *status);
+void updateModelActionButton(const char *title, int enabled);
 void setSettingsHotkey(const char *displayText);
 const char *getSettingsHotkey(void);
 uint64_t getSettingsHotkeyFlags(void);

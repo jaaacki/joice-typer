@@ -14,6 +14,7 @@ static NSProgressIndicator *sProgressBar = nil;
 static NSTextField *sProgressLabel = nil;
 static NSPopUpButton *sModelDropdown = nil;
 static NSTextField *sModelStatus = nil;
+static NSButton *sModelActionBtn = nil;
 static char sSelectedModelBuffer[32] = {0};
 static NSTextField *sStep7Status = nil;
 static NSButton *sContinueButton = nil;
@@ -157,6 +158,9 @@ static CGEventRef recorderTapCallback(
     return event;
 }
 
+extern void modelActionButtonClicked(void);
+extern void modelDropdownChanged(void);
+
 @interface SetupDelegate : NSObject <NSWindowDelegate>
 - (void)continueClicked:(id)sender;
 - (void)hotkeyChangeClicked:(id)sender;
@@ -164,6 +168,8 @@ static CGEventRef recorderTapCallback(
 - (void)hotkeyConfirmClicked:(id)sender;
 - (void)openAccessibilitySettings:(id)sender;
 - (void)openInputMonitoringSettings:(id)sender;
+- (void)modelActionClicked:(id)sender;
+- (void)modelSelectionChanged:(id)sender;
 - (void)stopRecorder;
 @end
 
@@ -256,6 +262,14 @@ static CGEventRef recorderTapCallback(
     [[NSWorkspace sharedWorkspace] openURL:[NSURL URLWithString:@"x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent"]];
 }
 
+- (void)modelActionClicked:(id)sender {
+    modelActionButtonClicked();
+}
+
+- (void)modelSelectionChanged:(id)sender {
+    modelDropdownChanged();
+}
+
 - (void)stopRecorder {
     sHotkeyChangeBtn.hidden = NO;
     sHotkeyCancelBtn.hidden = YES;
@@ -318,6 +332,11 @@ void showSettingsWindow(int onboarding) {
                 sProgressLabel.hidden = YES;
                 sProgressLabel.stringValue = @"";
             }
+            if (sModelActionBtn != nil) {
+                sModelActionBtn.title = @"Download";
+                sModelActionBtn.enabled = YES;
+            }
+
             sStep7Indicator.stringValue = @"\u23F3";
             sStep7Status.stringValue = @"Waiting...";
             sStep7Status.textColor = [NSColor secondaryLabelColor];
@@ -333,7 +352,7 @@ void showSettingsWindow(int onboarding) {
         }
 
         // First-time window creation
-        CGFloat w = 480, h = 700;
+        CGFloat w = 480, h = 750;
         NSRect frame = NSMakeRect(0, 0, w, h);
         sSetupWindow = [[NSWindow alloc]
             initWithContentRect:frame
@@ -483,12 +502,22 @@ void showSettingsWindow(int onboarding) {
         [content addSubview:s6title];
         y -= 28;
         sModelDropdown = [[NSPopUpButton alloc] initWithFrame:NSMakeRect(pad + 28, y, innerW - 28, 26) pullsDown:NO];
+        sModelDropdown.target = sSetupDelegate;
+        sModelDropdown.action = @selector(modelSelectionChanged:);
         [content addSubview:sModelDropdown];
         y -= 20;
         sModelStatus = makeLabel(@"", 10, NO,
             [NSColor secondaryLabelColor], NSMakeRect(pad + 28, y, innerW - 28, 14));
         [content addSubview:sModelStatus];
-        y -= 18;
+        y -= 22;
+
+        sModelActionBtn = [[NSButton alloc] initWithFrame:NSMakeRect(pad + 28, y, 120, 24)];
+        sModelActionBtn.title = @"Download";
+        sModelActionBtn.bezelStyle = NSBezelStyleRounded;
+        sModelActionBtn.target = sSetupDelegate;
+        sModelActionBtn.action = @selector(modelActionClicked:);
+        [content addSubview:sModelActionBtn];
+        y -= 28;
 
         // Keep progress bar for downloads
         sProgressBar = [[NSProgressIndicator alloc] initWithFrame:NSMakeRect(pad + 28, y, innerW - 28, 8)];
@@ -800,5 +829,13 @@ void updateSettingsModelStatus(const char *status) {
         if (sModelStatus != nil) {
             sModelStatus.stringValue = [NSString stringWithUTF8String:status];
         }
+    });
+}
+
+void updateModelActionButton(const char *title, int enabled) {
+    dispatch_async(dispatch_get_main_queue(), ^{
+        if (sModelActionBtn == nil) return;
+        sModelActionBtn.title = [NSString stringWithUTF8String:title];
+        sModelActionBtn.enabled = (enabled != 0);
     });
 }

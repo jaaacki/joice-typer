@@ -182,6 +182,112 @@ func populateMicList(selectedDevice string, l *slog.Logger) {
 	}
 }
 
+//export modelActionButtonClicked
+func modelActionButtonClicked() {
+	selectedModel := C.GoString(C.getSelectedModel())
+	if selectedModel == "" {
+		return
+	}
+
+	modelPath, err := DefaultModelPath(selectedModel)
+	if err != nil {
+		return
+	}
+
+	if _, statErr := os.Stat(modelPath); os.IsNotExist(statErr) {
+		// Not downloaded — start download
+		go downloadModelInPreferences(selectedModel, modelPath)
+	} else {
+		// Downloaded — check if this is the currently active model
+		cfgPath, _ := DefaultConfigPath()
+		cfg, _ := LoadConfig(cfgPath)
+		if cfg.ModelSize == selectedModel {
+			cStatus := C.CString("Cannot delete the active model")
+			C.updateSettingsModelStatus(cStatus)
+			C.free(unsafe.Pointer(cStatus))
+			return
+		}
+		if removeErr := os.Remove(modelPath); removeErr != nil {
+			settingsLogger.Error("failed to delete model", "operation", "modelActionButtonClicked", "error", removeErr)
+			return
+		}
+		// Also remove the sidecar
+		os.Remove(modelPath + ".sha256")
+		// Update UI
+		cTitle := C.CString("Download")
+		C.updateModelActionButton(cTitle, 1)
+		C.free(unsafe.Pointer(cTitle))
+		cStatus := C.CString("Model deleted")
+		C.updateSettingsModelStatus(cStatus)
+		C.free(unsafe.Pointer(cStatus))
+		// Refresh the model list to remove the checkmark
+		populateModelList(selectedModel)
+	}
+}
+
+func downloadModelInPreferences(modelSize string, modelPath string) {
+	cTitle := C.CString("Downloading...")
+	C.updateModelActionButton(cTitle, 0)
+	C.free(unsafe.Pointer(cTitle))
+
+	// Show progress bar
+	dlErr := downloadModelWithProgress(context.Background(), modelPath, modelSize, func(progress float64, downloaded, total int64) {
+		C.updateSetupDownloadProgress(C.double(progress), C.longlong(downloaded), C.longlong(total))
+	}, settingsLogger)
+
+	if dlErr != nil {
+		settingsLogger.Error("model download failed", "operation", "downloadModelInPreferences", "error", dlErr)
+		cFail := C.CString("Download")
+		C.updateModelActionButton(cFail, 1)
+		C.free(unsafe.Pointer(cFail))
+		cStatus := C.CString("Download failed — try again")
+		C.updateSettingsModelStatus(cStatus)
+		C.free(unsafe.Pointer(cStatus))
+		return
+	}
+
+	// Success
+	C.updateSetupDownloadComplete()
+	cDone := C.CString("Delete")
+	C.updateModelActionButton(cDone, 1)
+	C.free(unsafe.Pointer(cDone))
+	// Refresh model list to add checkmark
+	populateModelList(modelSize)
+}
+
+//export modelDropdownChanged
+func modelDropdownChanged() {
+	selectedModel := C.GoString(C.getSelectedModel())
+	if selectedModel != "" {
+		updateModelButton(selectedModel)
+	}
+}
+
+func updateModelButton(selectedSize string) {
+	modelPath, err := DefaultModelPath(selectedSize)
+	if err != nil {
+		return
+	}
+	if _, statErr := os.Stat(modelPath); os.IsNotExist(statErr) {
+		cTitle := C.CString("Download")
+		C.updateModelActionButton(cTitle, 1)
+		C.free(unsafe.Pointer(cTitle))
+	} else {
+		// Check if it's the active model
+		cfgPath, _ := DefaultConfigPath()
+		cfg, _ := LoadConfig(cfgPath)
+		if cfg.ModelSize == selectedSize {
+			cTitle := C.CString("In Use")
+			C.updateModelActionButton(cTitle, 0)
+			C.free(unsafe.Pointer(cTitle))
+		} else {
+			cTitle := C.CString("Delete")
+			C.updateModelActionButton(cTitle, 1)
+			C.free(unsafe.Pointer(cTitle))
+		}
+	}
+}
+
 func populateModelList(selectedSize string) {
 	sizes := make([]*C.char, len(ModelOptions))
 	descs := make([]*C.char, len(ModelOptions))
@@ -213,6 +319,7 @@ func populateModelList(selectedSize string) {
 	for _, d := range descs {
 		C.free(unsafe.Pointer(d))
 	}
+	updateModelButton(selectedSize)
 }
 
 func populateLanguageList(selectedCode string) {
