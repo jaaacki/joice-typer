@@ -2,48 +2,82 @@
 #import <CoreGraphics/CoreGraphics.h>
 #include "paster_darwin.h"
 
+// Clipboard save/restore strategy:
+//
+// Fast path: clipboard is empty or single plain-text item.
+//   → Save only the text string (or nothing). Restore is trivial.
+//
+// Slow path: clipboard has images, files, rich text, or multiple items.
+//   → Deep-copy all items/types. Restore reconstructs everything.
+//
+// This avoids paying the full deep-copy cost when the clipboard is simple,
+// which covers the vast majority of real usage.
+
+typedef enum {
+    ClipboardEmpty,
+    ClipboardPlainText,
+    ClipboardComplex,
+} ClipboardKind;
+
 int pasteText(const char* text) {
     @autoreleasepool {
-        NSPasteboard* pb = [NSPasteboard generalPasteboard];
+        NSPasteboard *pb = [NSPasteboard generalPasteboard];
 
-        // Save ALL current clipboard items (text, images, files, rich text, etc.)
+        // --- Classify and snapshot the clipboard ---
+        ClipboardKind kind = ClipboardEmpty;
+        NSString *savedText = nil;
+        NSMutableArray<NSDictionary<NSPasteboardType, NSData *> *> *savedItems = nil;
+
         NSArray<NSPasteboardItem *> *oldItems = pb.pasteboardItems;
-        NSMutableArray<NSDictionary<NSPasteboardType, NSData *> *> *savedItems = [NSMutableArray array];
-        for (NSPasteboardItem *item in oldItems) {
-            NSMutableDictionary<NSPasteboardType, NSData *> *itemData = [NSMutableDictionary dictionary];
-            for (NSPasteboardType type in item.types) {
-                NSData *data = [item dataForType:type];
-                if (data != nil) {
-                    itemData[type] = data;
+        if (oldItems.count == 0) {
+            kind = ClipboardEmpty;
+        } else if (oldItems.count == 1 && oldItems[0].types.count <= 3) {
+            // Single item with few types — check if it's just plain text.
+            // NSPasteboardTypeString items typically have 1-3 types
+            // (public.utf8-plain-text, public.utf16-plain-text, etc.)
+            NSString *existingText = [pb stringForType:NSPasteboardTypeString];
+            if (existingText != nil) {
+                kind = ClipboardPlainText;
+                savedText = [existingText copy];
+            } else {
+                // Single item but not plain text — fall through to complex
+                kind = ClipboardComplex;
+            }
+        } else {
+            kind = ClipboardComplex;
+        }
+
+        // Complex path: deep-copy all items (only when needed)
+        if (kind == ClipboardComplex) {
+            savedItems = [NSMutableArray array];
+            for (NSPasteboardItem *item in oldItems) {
+                NSMutableDictionary<NSPasteboardType, NSData *> *itemData = [NSMutableDictionary dictionary];
+                for (NSPasteboardType type in item.types) {
+                    NSData *data = [item dataForType:type];
+                    if (data != nil) {
+                        itemData[type] = data;
+                    }
+                }
+                if (itemData.count > 0) {
+                    [savedItems addObject:itemData];
                 }
             }
-            if (itemData.count > 0) {
-                [savedItems addObject:itemData];
-            }
         }
 
-        // Set clipboard to our text
+        // --- Set clipboard to our text ---
         [pb clearContents];
-        NSString* str = [NSString stringWithUTF8String:text];
-        if (str == nil) {
-            return 1;
-        }
-        BOOL ok = [pb setString:str forType:NSPasteboardTypeString];
-        if (!ok) {
-            return 2;
-        }
+        NSString *str = [NSString stringWithUTF8String:text];
+        if (str == nil) return 1;
+        if (![pb setString:str forType:NSPasteboardTypeString]) return 2;
 
-        // Capture changeCount AFTER our writes — not before + hardcoded offset.
-        // This is the actual count after our mutations, regardless of how macOS
-        // increments it internally.
         NSInteger postWriteChangeCount = [pb changeCount];
 
-        // Brief pause to let pasteboard settle before simulating keypress
-        usleep(50000); // 50ms
+        // --- Simulate Cmd+V ---
+        // Reduced pre-paste delay: 10ms is enough for the pasteboard to settle.
+        // The old 50ms was unnecessarily conservative.
+        usleep(10000); // 10ms
 
-        // Simulate Cmd+V
-        // 'v' key = keycode 0x09
-        CGEventRef keyDown = CGEventCreateKeyboardEvent(NULL, 0x09, true);
+        CGEventRef keyDown = CGEventCreateKeyboardEvent(NULL, 0x09, true); // V key
         if (keyDown == NULL) return 3;
         CGEventSetFlags(keyDown, kCGEventFlagMaskCommand);
 
@@ -60,30 +94,46 @@ int pasteText(const char* text) {
         CFRelease(keyDown);
         CFRelease(keyUp);
 
-        // Restore original clipboard after a delay (let the paste complete first).
-        // Build the full item array first, then write atomically in one call.
-        NSArray *restoreItems = [savedItems copy];
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(200 * NSEC_PER_MSEC)),
+        // --- Restore clipboard after paste completes ---
+        // 100ms is enough for the target app to consume the paste.
+        // The old 200ms was overly conservative.
+        NSArray *restoreComplex = [savedItems copy];
+        NSString *restoreText = [savedText copy];
+        ClipboardKind restoreKind = kind;
+
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(100 * NSEC_PER_MSEC)),
                        dispatch_get_main_queue(), ^{
-            // Only restore if nobody else touched the clipboard during our paste.
-            // Compare against the actual post-write count, not a hardcoded offset.
-            if ([pb changeCount] != postWriteChangeCount) {
-                return;
-            }
-            if (restoreItems.count > 0) {
-                NSMutableArray<NSPasteboardItem *> *itemsToRestore = [NSMutableArray array];
-                for (NSDictionary<NSPasteboardType, NSData *> *itemData in restoreItems) {
-                    NSPasteboardItem *newItem = [[NSPasteboardItem alloc] init];
-                    for (NSPasteboardType type in itemData) {
-                        [newItem setData:itemData[type] forType:type];
+            // Only restore if nobody else touched the clipboard
+            if ([pb changeCount] != postWriteChangeCount) return;
+
+            switch (restoreKind) {
+                case ClipboardEmpty:
+                    [pb clearContents];
+                    break;
+
+                case ClipboardPlainText:
+                    [pb clearContents];
+                    if (restoreText != nil) {
+                        [pb setString:restoreText forType:NSPasteboardTypeString];
                     }
-                    [itemsToRestore addObject:newItem];
-                }
-                [pb clearContents];
-                [pb writeObjects:itemsToRestore];
-            } else {
-                // Clipboard was empty before paste — restore that empty state
-                [pb clearContents];
+                    break;
+
+                case ClipboardComplex:
+                    if (restoreComplex.count > 0) {
+                        NSMutableArray<NSPasteboardItem *> *items = [NSMutableArray array];
+                        for (NSDictionary<NSPasteboardType, NSData *> *itemData in restoreComplex) {
+                            NSPasteboardItem *newItem = [[NSPasteboardItem alloc] init];
+                            for (NSPasteboardType type in itemData) {
+                                [newItem setData:itemData[type] forType:type];
+                            }
+                            [items addObject:newItem];
+                        }
+                        [pb clearContents];
+                        [pb writeObjects:items];
+                    } else {
+                        [pb clearContents];
+                    }
+                    break;
             }
         });
 
