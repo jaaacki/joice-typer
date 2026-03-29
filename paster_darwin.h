@@ -1,12 +1,10 @@
 #ifndef PASTER_DARWIN_H
 #define PASTER_DARWIN_H
 
-// setClipboard copies text to the macOS general pasteboard.
+// pasteText saves the current clipboard, sets clipboard to text,
+// simulates Cmd+V to paste, then restores the original clipboard
+// after a 200ms delay.
 // Returns 0 on success, non-zero on failure.
-int setClipboard(const char* text);
-
-// simulateCmdV simulates pressing Cmd+V to paste from clipboard.
-// Returns 0 on success, non-zero on failure.
-int simulateCmdV(void);
+int pasteText(const char* text);
 
 #endif

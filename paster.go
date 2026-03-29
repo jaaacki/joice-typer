@@ -10,7 +10,6 @@ import "C"
 import (
 	"fmt"
 	"log/slog"
-	"time"
 	"unsafe"
 )
 
@@ -30,17 +29,9 @@ func (p *clipboardPaster) Paste(text string) error {
 	cText := C.CString(text)
 	defer C.free(unsafe.Pointer(cText))
 
-	result := C.setClipboard(cText)
+	result := C.pasteText(cText)
 	if result != 0 {
-		return fmt.Errorf("paster.Paste: failed to set clipboard")
-	}
-
-	// Brief pause to let pasteboard settle before simulating keypress
-	time.Sleep(50 * time.Millisecond)
-
-	pasteResult := C.simulateCmdV()
-	if pasteResult != 0 {
-		return fmt.Errorf("paster.Paste: failed to simulate Cmd+V (error %d)", int(pasteResult))
+		return fmt.Errorf("paster.Paste: failed to paste text (error %d)", int(result))
 	}
 
 	p.logger.Debug("pasted", "operation", "Paste")
