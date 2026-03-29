@@ -7,10 +7,12 @@ static NSWindow *sSetupWindow = nil;
 static NSTextField *sStep1Status = nil;
 static NSTextField *sStep2Status = nil;
 static NSPopUpButton *sMicDropdown = nil;
+static NSPopUpButton *sLangDropdown = nil;
+static char sSelectedLangBuffer[8] = {0};
 static NSProgressIndicator *sProgressBar = nil;
 static NSTextField *sProgressLabel = nil;
-static NSTextField *sStep4Status = nil;
 static NSTextField *sStep5Status = nil;
+static NSTextField *sStep6Status = nil;
 static NSButton *sContinueButton = nil;
 static BOOL sSetupComplete = NO;
 static NSTextField *sStep1Indicator = nil;
@@ -18,6 +20,7 @@ static NSTextField *sStep2Indicator = nil;
 static NSTextField *sStep3Indicator = nil;
 static NSTextField *sStep4Indicator = nil;
 static NSTextField *sStep5Indicator = nil;
+static NSTextField *sStep6Indicator = nil;
 static char sSelectedDeviceBuffer[512] = {0};
 
 static NSTextField *makeLabel(NSString *text, CGFloat fontSize, BOOL bold, NSColor *color, NSRect frame) {
@@ -54,7 +57,7 @@ static SetupDelegate *sSetupDelegate = nil;
 
 void showSetupWindow(void) {
     @autoreleasepool {
-        CGFloat w = 480, h = 520;
+        CGFloat w = 480, h = 580;
         NSRect frame = NSMakeRect(0, 0, w, h);
         sSetupWindow = [[NSWindow alloc]
             initWithContentRect:frame
@@ -121,16 +124,27 @@ void showSetupWindow(void) {
         [content addSubview:sMicDropdown];
         y -= 36;
 
-        // Step 4: Download
-        sStep4Indicator = makeLabel(@"\u23F3", 16, NO, [NSColor labelColor], NSMakeRect(pad, y, 24, 24));
+        // Step 4: Language
+        sStep4Indicator = makeLabel(@"\U0001F310", 16, NO, [NSColor labelColor], NSMakeRect(pad, y, 24, 24));
         [content addSubview:sStep4Indicator];
-        NSTextField *s4title = makeLabel(@"4. Download Speech Model", 13, YES,
+        NSTextField *s4title = makeLabel(@"4. Language", 13, YES,
             [NSColor labelColor], NSMakeRect(pad + 28, y, innerW - 28, 20));
         [content addSubview:s4title];
+        y -= 28;
+        sLangDropdown = [[NSPopUpButton alloc] initWithFrame:NSMakeRect(pad + 28, y, innerW - 28, 26) pullsDown:NO];
+        [content addSubview:sLangDropdown];
+        y -= 36;
+
+        // Step 5: Download
+        sStep5Indicator = makeLabel(@"\u23F3", 16, NO, [NSColor labelColor], NSMakeRect(pad, y, 24, 24));
+        [content addSubview:sStep5Indicator];
+        NSTextField *s5title = makeLabel(@"5. Download Speech Model", 13, YES,
+            [NSColor labelColor], NSMakeRect(pad + 28, y, innerW - 28, 20));
+        [content addSubview:s5title];
         y -= 16;
-        sStep4Status = makeLabel(@"whisper-small \u00B7 466 MB", 11, NO,
+        sStep5Status = makeLabel(@"whisper-small \u00B7 466 MB", 11, NO,
             [NSColor secondaryLabelColor], NSMakeRect(pad + 28, y, innerW - 28, 16));
-        [content addSubview:sStep4Status];
+        [content addSubview:sStep5Status];
         y -= 18;
         sProgressBar = [[NSProgressIndicator alloc] initWithFrame:NSMakeRect(pad + 28, y, innerW - 28, 8)];
         sProgressBar.style = NSProgressIndicatorStyleBar;
@@ -145,16 +159,16 @@ void showSetupWindow(void) {
         [content addSubview:sProgressLabel];
         y -= 36;
 
-        // Step 5: Ready
-        sStep5Indicator = makeLabel(@"\u23F3", 16, NO, [NSColor labelColor], NSMakeRect(pad, y, 24, 24));
-        [content addSubview:sStep5Indicator];
-        NSTextField *s5title = makeLabel(@"5. Ready", 13, YES,
+        // Step 6: Ready
+        sStep6Indicator = makeLabel(@"\u23F3", 16, NO, [NSColor labelColor], NSMakeRect(pad, y, 24, 24));
+        [content addSubview:sStep6Indicator];
+        NSTextField *s6title = makeLabel(@"6. Ready", 13, YES,
             [NSColor labelColor], NSMakeRect(pad + 28, y, innerW - 28, 20));
-        [content addSubview:s5title];
+        [content addSubview:s6title];
         y -= 20;
-        sStep5Status = makeLabel(@"Waiting...", 11, NO,
+        sStep6Status = makeLabel(@"Waiting...", 11, NO,
             [NSColor secondaryLabelColor], NSMakeRect(pad + 28, y, innerW - 28, 16));
-        [content addSubview:sStep5Status];
+        [content addSubview:sStep6Status];
 
         // Continue button (bottom right, initially disabled)
         sContinueButton = [[NSButton alloc] initWithFrame:NSMakeRect(w - pad - 120, 16, 120, 32)];
@@ -215,7 +229,7 @@ void populateSetupDevices(const char **deviceNames, int count, int defaultIndex)
 
 void updateSetupDownloadProgress(double progress, long long bytesDownloaded, long long bytesTotal) {
     dispatch_async(dispatch_get_main_queue(), ^{
-        sStep4Indicator.stringValue = @"\u2B07\uFE0F";
+        sStep5Indicator.stringValue = @"\u2B07\uFE0F";
         sProgressBar.doubleValue = progress;
         long long mb_done = bytesDownloaded / (1024 * 1024);
         long long mb_total = bytesTotal / (1024 * 1024);
@@ -226,30 +240,30 @@ void updateSetupDownloadProgress(double progress, long long bytesDownloaded, lon
 
 void updateSetupDownloadComplete(void) {
     dispatch_async(dispatch_get_main_queue(), ^{
-        sStep4Indicator.stringValue = @"\u2705";
+        sStep5Indicator.stringValue = @"\u2705";
         sProgressBar.doubleValue = 1.0;
         sProgressLabel.stringValue = @"Download complete";
-        sStep4Status.stringValue = @"Model ready";
-        sStep4Status.textColor = [NSColor systemGreenColor];
+        sStep5Status.stringValue = @"Model ready";
+        sStep5Status.textColor = [NSColor systemGreenColor];
     });
 }
 
 void updateSetupDownloadFailed(const char *errorMsg) {
     NSString *msg = [NSString stringWithUTF8String:errorMsg];
     dispatch_async(dispatch_get_main_queue(), ^{
-        sStep4Indicator.stringValue = @"\u274C";
+        sStep5Indicator.stringValue = @"\u274C";
         sProgressBar.doubleValue = 0;
         sProgressLabel.stringValue = msg;
-        sStep4Status.stringValue = @"Download failed \u2014 restart to retry";
-        sStep4Status.textColor = [NSColor systemRedColor];
+        sStep5Status.stringValue = @"Download failed \u2014 restart to retry";
+        sStep5Status.textColor = [NSColor systemRedColor];
     });
 }
 
 void updateSetupReady(void) {
     dispatch_async(dispatch_get_main_queue(), ^{
-        sStep5Indicator.stringValue = @"\u2705";
-        sStep5Status.stringValue = @"All set!";
-        sStep5Status.textColor = [NSColor systemGreenColor];
+        sStep6Indicator.stringValue = @"\u2705";
+        sStep6Status.stringValue = @"All set!";
+        sStep6Status.textColor = [NSColor systemGreenColor];
         sContinueButton.title = @"Start JoiceTyper";
         sContinueButton.enabled = YES;
     });
@@ -277,6 +291,38 @@ const char *getSelectedDevice(void) {
     memcpy(sSelectedDeviceBuffer, utf8, len);
     sSelectedDeviceBuffer[len] = '\0';
     return sSelectedDeviceBuffer;
+}
+
+void populateSettingsLanguages(const char **codes, const char **names, int count, int defaultIndex) {
+    [sLangDropdown removeAllItems];
+    for (int i = 0; i < count; i++) {
+        NSString *title = [NSString stringWithUTF8String:names[i]];
+        [sLangDropdown addItemWithTitle:title];
+        [sLangDropdown lastItem].representedObject = [NSString stringWithUTF8String:codes[i]];
+    }
+    if (defaultIndex >= 0 && defaultIndex < count) {
+        [sLangDropdown selectItemAtIndex:defaultIndex];
+    }
+}
+
+const char *getSelectedLanguage(void) {
+    if (sLangDropdown == nil || sLangDropdown.selectedItem == nil) {
+        sSelectedLangBuffer[0] = '\0';
+        return sSelectedLangBuffer;
+    }
+    NSString *code = sLangDropdown.selectedItem.representedObject;
+    const char *utf8 = [code UTF8String];
+    if (utf8 == NULL) {
+        sSelectedLangBuffer[0] = '\0';
+        return sSelectedLangBuffer;
+    }
+    size_t len = strlen(utf8);
+    if (len >= sizeof(sSelectedLangBuffer)) {
+        len = sizeof(sSelectedLangBuffer) - 1;
+    }
+    memcpy(sSelectedLangBuffer, utf8, len);
+    sSelectedLangBuffer[len] = '\0';
+    return sSelectedLangBuffer;
 }
 
 void runSetupEventLoop(void) {

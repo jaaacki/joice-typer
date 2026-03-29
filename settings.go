@@ -79,7 +79,10 @@ func RunSetupWizard(logger *slog.Logger) (string, error) {
 	// Step 3: Populate mic list (synchronous — no dispatch_async issue)
 	populateMicList(l)
 
-	// Step 3: Model download in background goroutine
+	// Step 4: Populate language list
+	populateLanguageList("en")
+
+	// Step 5: Model download in background goroutine
 	go func() {
 		const setupModelSize = "small"
 		modelPath, pathErr := DefaultModelPath(setupModelSize)
@@ -125,8 +128,11 @@ func RunSetupWizard(logger *slog.Logger) (string, error) {
 	cDevice := C.getSelectedDevice()
 	selectedDevice := C.GoString(cDevice)
 
+	// Read selected language
+	selectedLang := C.GoString(C.getSelectedLanguage())
+
 	// Write config
-	if err := writeSetupConfig(selectedDevice, l); err != nil {
+	if err := writeSetupConfig(selectedDevice, selectedLang, l); err != nil {
 		return "", fmt.Errorf("setup.RunSetupWizard: %w", err)
 	}
 
@@ -159,7 +165,27 @@ func populateMicList(l *slog.Logger) {
 	}
 }
 
-func writeSetupConfig(deviceName string, l *slog.Logger) error {
+func populateLanguageList(selectedCode string) {
+	codes := make([]*C.char, len(WhisperLanguages))
+	names := make([]*C.char, len(WhisperLanguages))
+	defaultIdx := 0
+	for i, lang := range WhisperLanguages {
+		codes[i] = C.CString(lang.Code)
+		names[i] = C.CString(lang.Name)
+		if lang.Code == selectedCode {
+			defaultIdx = i
+		}
+	}
+	C.populateSettingsLanguages(&codes[0], &names[0], C.int(len(WhisperLanguages)), C.int(defaultIdx))
+	for _, c := range codes {
+		C.free(unsafe.Pointer(c))
+	}
+	for _, n := range names {
+		C.free(unsafe.Pointer(n))
+	}
+}
+
+func writeSetupConfig(deviceName string, language string, l *slog.Logger) error {
 	cfgPath, err := DefaultConfigPath()
 	if err != nil {
 		return fmt.Errorf("writeSetupConfig: %w", err)
@@ -168,7 +194,7 @@ func writeSetupConfig(deviceName string, l *slog.Logger) error {
 	cfg := Config{
 		TriggerKey:    []string{"fn", "shift"},
 		ModelSize:     "small",
-		Language:      "",
+		Language:      language,
 		SampleRate:    16000,
 		SoundFeedback: true,
 		InputDevice:   deviceName,
