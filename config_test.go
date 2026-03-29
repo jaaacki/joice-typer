@@ -241,6 +241,31 @@ func TestLoadConfig_RejectsUnknownFields(t *testing.T) {
 	}
 }
 
+func TestAtomicWriteFile_PartialWriteCleanup(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "test.yaml")
+
+	// Write initial valid content
+	if err := atomicWriteFile(path, []byte("original"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Verify the .tmp file doesn't linger after successful write
+	tmpPath := path + ".tmp"
+	if _, err := os.Stat(tmpPath); !os.IsNotExist(err) {
+		t.Error("tmp file should not exist after successful write")
+	}
+
+	// Verify content
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "original" {
+		t.Errorf("expected 'original', got %q", string(data))
+	}
+}
+
 func TestLoadConfig_DefaultTypeMode(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.yaml")
