@@ -8,16 +8,12 @@
 void ensureNSApp(void);
 
 // checkAccessibility returns 1 if accessibility is granted, 0 if not.
-// If prompt is 1, shows the macOS permission dialog.
-int checkAccessibility(int prompt);
+// Silent check only — never shows a system dialog.
+int checkAccessibility(void);
 
 // checkInputMonitoring returns 1 if Input Monitoring is granted, 0 if not.
-// If prompt is 1, shows the macOS permission dialog.
-int checkInputMonitoring(int prompt);
-
-// dispatch_permission_prompts triggers permission dialogs on the main queue.
-// Must be called after [NSApp run] starts so the dialogs can process events.
-void dispatch_permission_prompts(void);
+// Silent check only — never shows a system dialog.
+int checkInputMonitoring(void);
 
 // probeEventTap tries to create and immediately destroy a CGEvent tap.
 // Returns 1 if creation succeeds (permissions are sufficient), 0 if not.

@@ -613,8 +613,8 @@ void updateSetupDownloadFailed(const char *errorMsg) {
 void setPrefsPermissionState(void) {
     // Check ACTUAL permission state — don't assume granted just because
     // the app is running. Preferences is reachable during StateNoPermission.
-    int accGranted = checkAccessibility(0);
-    int inpGranted = checkInputMonitoring(0);
+    int accGranted = checkAccessibility();
+    int inpGranted = checkInputMonitoring();
 
     dispatch_async(dispatch_get_main_queue(), ^{
         // Accessibility

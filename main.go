@@ -177,14 +177,19 @@ func runAppMode() {
 	)
 
 	go func() {
-		UpdateStatusBar(StateNoPermission)
-
-		// Step 1: Check permissions
+		// Step 1: Check permissions silently — never trigger system dialogs.
+		// WaitForPermissions polls silently. Our UI has "Open" buttons.
+		notified := false
 		if err := hotkey.WaitForPermissions(startupCtx, func(acc, inp bool) {
 			if acc && inp {
 				return
 			}
 			UpdateStatusBar(StateNoPermission)
+			if !notified {
+				notified = true
+				PostNotification("JoiceTyper needs permissions",
+					"Click the JoiceTyper menu bar icon → Preferences to grant Accessibility and Input Monitoring.")
+			}
 		}); err != nil {
 			initDone <- err
 			hotkey.Stop()

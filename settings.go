@@ -58,7 +58,7 @@ func RunSetupWizard(ctx context.Context, logger *slog.Logger) (string, error) {
 				return
 			default:
 			}
-			granted := C.checkAccessibility(1) == 1
+			granted := C.checkAccessibility() == 1
 			C.updateSetupAccessibility(boolToCInt(granted))
 			if granted {
 				l.Info("accessibility granted", "operation", "RunSetupWizard")
@@ -72,7 +72,7 @@ func RunSetupWizard(ctx context.Context, logger *slog.Logger) (string, error) {
 	// Uses CGPreflightListenEventAccess (via checkInputMonitoring) — the
 	// correct system API that updates in real-time, unlike IOHIDCheckAccess.
 	go func() {
-		C.checkInputMonitoring(1) // one-shot prompt
+		// No prompt — our UI guides the user via "Open" buttons
 		for {
 			select {
 			case <-done:
@@ -81,7 +81,7 @@ func RunSetupWizard(ctx context.Context, logger *slog.Logger) (string, error) {
 				return
 			default:
 			}
-			granted := C.checkInputMonitoring(0) == 1
+			granted := C.checkInputMonitoring() == 1
 			C.updateSetupInputMonitoring(boolToCInt(granted))
 			if granted {
 				l.Info("input monitoring granted", "operation", "RunSetupWizard")
@@ -329,8 +329,8 @@ func OpenPreferences() {
 				return
 			default:
 			}
-			acc := C.checkAccessibility(0) == 1
-			inp := C.checkInputMonitoring(0) == 1
+			acc := C.checkAccessibility() == 1
+			inp := C.checkInputMonitoring() == 1
 			C.updateSetupAccessibility(boolToCInt(acc))
 			C.updateSetupInputMonitoring(boolToCInt(inp))
 			if acc && inp {

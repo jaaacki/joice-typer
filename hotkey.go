@@ -154,12 +154,9 @@ func NewHotkeyListener(triggerKeys []string, logger *slog.Logger) HotkeyListener
 // and CGPreflightListenEventAccess for Input Monitoring (via checkInputMonitoring).
 // Calls onUpdate on each poll so the caller can update the UI.
 func (h *cgEventHotkeyListener) WaitForPermissions(ctx context.Context, onUpdate func(accessibility, inputMonitoring bool)) error {
-	// Dispatch permission prompts to the main queue so they execute
-	// after [NSApp run] starts. The dialogs need the run loop for their buttons.
-	C.dispatch_permission_prompts()
-
-	// Give the main run loop a moment to start before polling
-	C.usleep(500_000)
+	// Never trigger system permission dialogs — they block the app.
+	// Our settings UI has "Open" buttons that guide the user to the
+	// correct System Settings pages. We only poll silently here.
 
 	// Save binary hash on successful permission grant (for future change detection)
 	defer func() {
@@ -174,8 +171,8 @@ func (h *cgEventHotkeyListener) WaitForPermissions(ctx context.Context, onUpdate
 		default:
 		}
 
-		acc := C.checkAccessibility(0) == 1
-		inp := C.checkInputMonitoring(0) == 1
+		acc := C.checkAccessibility() == 1
+		inp := C.checkInputMonitoring() == 1
 		onUpdate(acc, inp)
 
 		if acc && inp {

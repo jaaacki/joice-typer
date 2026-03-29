@@ -10,17 +10,14 @@
 extern void hotkeyCallback(int eventType);
 extern void hotkeyFlagsChanged(uint64_t flags);
 
-int checkAccessibility(int prompt) {
-    NSDictionary *options = @{(__bridge id)kAXTrustedCheckOptionPrompt: @(prompt ? YES : NO)};
+int checkAccessibility(void) {
+    // Silent check only — never shows a system dialog.
+    // Our settings UI guides the user via "Open" buttons.
+    NSDictionary *options = @{(__bridge id)kAXTrustedCheckOptionPrompt: @NO};
     return AXIsProcessTrustedWithOptions((__bridge CFDictionaryRef)options) ? 1 : 0;
 }
 
-int checkInputMonitoring(int prompt) {
-    // Use the correct CoreGraphics API — not IOHIDCheckAccess which
-    // returns stale/cached results after reinstall.
-    if (prompt) {
-        CGRequestListenEventAccess();
-    }
+int checkInputMonitoring(void) {
     return CGPreflightListenEventAccess() ? 1 : 0;
 }
 
@@ -43,16 +40,6 @@ int probeEventTap(void) {
     }
     CFRelease(tap);
     return 1;
-}
-
-void dispatch_permission_prompts(void) {
-    // Dispatch permission prompts to the main queue so they execute
-    // AFTER [NSApp run] starts. The prompt dialogs are AppKit windows
-    // that need the run loop to process their buttons.
-    dispatch_async(dispatch_get_main_queue(), ^{
-        checkAccessibility(1);
-        checkInputMonitoring(1);
-    });
 }
 
 void ensureNSApp(void) {
