@@ -69,12 +69,10 @@ func RunSetupWizard(ctx context.Context, logger *slog.Logger) (string, error) {
 	}()
 
 	// Step 2: Input Monitoring polling in background goroutine.
-	// IOHIDCheckAccess returns stale/cached results after reinstall, so
-	// we use probeEventTap() as the ground truth. The probe only works
-	// after Accessibility is granted, so we wait for that first.
+	// Uses CGPreflightListenEventAccess (via checkInputMonitoring) — the
+	// correct system API that updates in real-time, unlike IOHIDCheckAccess.
 	go func() {
-		// One-shot prompt to trigger the system dialog
-		C.checkInputMonitoring(1)
+		C.checkInputMonitoring(1) // one-shot prompt
 		for {
 			select {
 			case <-done:
@@ -83,17 +81,11 @@ func RunSetupWizard(ctx context.Context, logger *slog.Logger) (string, error) {
 				return
 			default:
 			}
-			// probeEventTap is the real test — it creates a CGEvent tap.
-			// If Accessibility isn't granted yet, the probe fails regardless,
-			// so we check Accessibility first.
-			acc := C.checkAccessibility(0) == 1
-			if acc {
-				granted := C.probeEventTap() == 1
-				C.updateSetupInputMonitoring(boolToCInt(granted))
-				if granted {
-					l.Info("input monitoring granted", "operation", "RunSetupWizard")
-					return
-				}
+			granted := C.checkInputMonitoring(0) == 1
+			C.updateSetupInputMonitoring(boolToCInt(granted))
+			if granted {
+				l.Info("input monitoring granted", "operation", "RunSetupWizard")
+				return
 			}
 			time.Sleep(2 * time.Second)
 		}
@@ -338,7 +330,7 @@ func OpenPreferences() {
 			default:
 			}
 			acc := C.checkAccessibility(0) == 1
-			inp := C.probeEventTap() == 1
+			inp := C.checkInputMonitoring(0) == 1
 			C.updateSetupAccessibility(boolToCInt(acc))
 			C.updateSetupInputMonitoring(boolToCInt(inp))
 			if acc && inp {

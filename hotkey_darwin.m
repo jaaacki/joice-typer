@@ -3,7 +3,8 @@
 #import <CoreGraphics/CoreGraphics.h>
 #import <Carbon/Carbon.h>
 #import <ApplicationServices/ApplicationServices.h>
-#import <IOKit/hidsystem/IOHIDLib.h>
+// CGPreflightListenEventAccess / CGRequestListenEventAccess are in CGEvent.h
+// (included via CoreGraphics.framework)
 
 // Defined in hotkey.go via //export
 extern void hotkeyCallback(int eventType);
@@ -15,10 +16,12 @@ int checkAccessibility(int prompt) {
 }
 
 int checkInputMonitoring(int prompt) {
+    // Use the correct CoreGraphics API — not IOHIDCheckAccess which
+    // returns stale/cached results after reinstall.
     if (prompt) {
-        IOHIDRequestAccess(kIOHIDRequestTypeListenEvent);
+        CGRequestListenEventAccess();
     }
-    return IOHIDCheckAccess(kIOHIDRequestTypeListenEvent) == kIOHIDAccessTypeGranted ? 1 : 0;
+    return CGPreflightListenEventAccess() ? 1 : 0;
 }
 
 static CGEventRef probeCallback(CGEventTapProxy p, CGEventType t, CGEventRef e, void *u) {
@@ -62,8 +65,14 @@ static CGEventRef eventTapCallback(
     CGEventRef event,
     void *userInfo
 ) {
-    // Re-enable tap if it gets disabled by the system (timeout)
+    // Re-enable tap if it gets disabled by the system.
+    // CRITICAL: if we were in "pressed" state, synthesize a release to
+    // prevent stranded recording. A lost release is worse than a spurious one.
     if (type == kCGEventTapDisabledByTimeout || type == kCGEventTapDisabledByUserInput) {
+        if (sTriggered) {
+            sTriggered = 0;
+            hotkeyCallback(1);  // Synthesize TriggerReleased
+        }
         if (sEventTap != NULL) {
             CGEventTapEnable(sEventTap, true);
         }

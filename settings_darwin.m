@@ -614,7 +614,7 @@ void setPrefsPermissionState(void) {
     // Check ACTUAL permission state — don't assume granted just because
     // the app is running. Preferences is reachable during StateNoPermission.
     int accGranted = checkAccessibility(0);
-    int inpGranted = probeEventTap();
+    int inpGranted = checkInputMonitoring(0);
 
     dispatch_async(dispatch_get_main_queue(), ^{
         // Accessibility

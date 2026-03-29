@@ -1,7 +1,7 @@
 package main
 
 /*
-#cgo LDFLAGS: -framework CoreGraphics -framework Carbon -framework Cocoa -framework IOKit
+#cgo LDFLAGS: -framework CoreGraphics -framework Carbon -framework Cocoa
 #include <unistd.h>
 #include "hotkey_darwin.h"
 */
@@ -150,24 +150,14 @@ func NewHotkeyListener(triggerKeys []string, logger *slog.Logger) HotkeyListener
 	}
 }
 
-// WaitForPermissions polls Accessibility until granted (real-time API),
-// then attempts to create a CGEvent tap to validate full permission.
-// Input Monitoring cannot be reliably polled — IOHIDCheckAccess does not
-// update for a running process. The tap creation is the true test.
+// WaitForPermissions polls both Accessibility and Input Monitoring using
+// the correct system APIs until both are granted. Does NOT use probeEventTap
+// as the truth source — uses AXIsProcessTrustedWithOptions for Accessibility
+// and CGPreflightListenEventAccess for Input Monitoring (via checkInputMonitoring).
 // Calls onUpdate on each poll so the caller can update the UI.
 func (h *cgEventHotkeyListener) WaitForPermissions(ctx context.Context, onUpdate func(accessibility, inputMonitoring bool)) error {
-	// Fast path: if the event tap already works, skip everything.
-	if C.probeEventTap() == 1 {
-		h.logger.Info("permissions already valid", "operation", "WaitForPermissions")
-		onUpdate(true, true)
-		saveBinaryHash(h.logger)
-		return nil
-	}
-
-	// Tap failed. Check if this is a new binary (reinstall) vs first install.
+	// Check if this is a reinstall — clear stale TCC entries
 	if binaryHashChanged(h.logger) {
-		// New binary — old TCC entries are stale and confusing. Clear them
-		// so the user sees a clean slate instead of a ghost toggle.
 		h.logger.Info("binary changed — resetting stale TCC entries",
 			"operation", "WaitForPermissions")
 		tccCtx, tccCancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -176,29 +166,33 @@ func (h *cgEventHotkeyListener) WaitForPermissions(ctx context.Context, onUpdate
 		tccCancel()
 	}
 
-	// Prompt once — shows the macOS dialog. Will not repeat on subsequent polls.
+	// Prompt once — triggers system dialogs. No-op if already decided.
 	C.checkAccessibility(1)
 	C.checkInputMonitoring(1)
 
-	// Poll silently until the event tap succeeds.
+	// Poll both permissions independently using their correct APIs.
 	for {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		default:
 		}
-		if C.probeEventTap() == 1 {
-			h.logger.Info("permissions verified via event tap probe",
+
+		acc := C.checkAccessibility(0) == 1
+		inp := C.checkInputMonitoring(0) == 1
+		onUpdate(acc, inp)
+
+		if acc && inp {
+			h.logger.Info("both permissions granted",
 				"operation", "WaitForPermissions")
-			onUpdate(true, true)
 			saveBinaryHash(h.logger)
 			return nil
 		}
-		acc := C.checkAccessibility(0) == 1
-		onUpdate(acc, false)
+
 		h.logger.Info("waiting for permissions",
 			"operation", "WaitForPermissions",
-			"accessibility", acc)
+			"accessibility", acc,
+			"input_monitoring", inp)
 		C.usleep(2_000_000)
 	}
 }
