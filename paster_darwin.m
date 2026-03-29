@@ -55,19 +55,22 @@ int pasteText(const char* text) {
         CFRelease(keyDown);
         CFRelease(keyUp);
 
-        // Restore original clipboard after a delay (let the paste complete first)
+        // Restore original clipboard after a delay (let the paste complete first).
+        // Build the full item array first, then write atomically in one call.
         NSArray *restoreItems = [savedItems copy];
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(200 * NSEC_PER_MSEC)),
                        dispatch_get_main_queue(), ^{
             if (restoreItems.count > 0) {
-                [pb clearContents];
+                NSMutableArray<NSPasteboardItem *> *itemsToRestore = [NSMutableArray array];
                 for (NSDictionary<NSPasteboardType, NSData *> *itemData in restoreItems) {
                     NSPasteboardItem *newItem = [[NSPasteboardItem alloc] init];
                     for (NSPasteboardType type in itemData) {
                         [newItem setData:itemData[type] forType:type];
                     }
-                    [pb writeObjects:@[newItem]];
+                    [itemsToRestore addObject:newItem];
                 }
+                [pb clearContents];
+                [pb writeObjects:itemsToRestore];
             }
         });
 

@@ -282,7 +282,9 @@ func validateCachedModel(modelPath string, modelSize string, logger *slog.Logger
 	}
 
 	// Hash matches — update sidecar cache
-	os.WriteFile(hashPath, []byte(currentHash), 0644)
+	if err := os.WriteFile(hashPath, []byte(currentHash), 0644); err != nil {
+		l.Warn("failed to write hash cache", "error", err)
+	}
 	l.Info("model verified", "model_size", modelSize)
 	return true
 }

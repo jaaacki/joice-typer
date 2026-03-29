@@ -254,8 +254,13 @@ func runAppMode() {
 			// Recreate transcriber if language changed.
 			// Create new BEFORE closing old — if creation fails, keep the working one.
 			if oldCfg.Language != cfg.Language {
-				modelPath, _ := DefaultModelPath(cfg.ModelSize)
-				newTranscriber, tErr := NewTranscriber(context.Background(), modelPath, cfg.ModelSize, cfg.Language, cfg.SampleRate, logger)
+				newModelPath, pathErr := DefaultModelPath(cfg.ModelSize)
+				if pathErr != nil {
+					logger.Error("failed to resolve model path for transcriber reload",
+						"component", "main", "operation", "runAppMode", "error", pathErr)
+					continue
+				}
+				newTranscriber, tErr := NewTranscriber(context.Background(), newModelPath, cfg.ModelSize, cfg.Language, cfg.SampleRate, logger)
 				if tErr != nil {
 					logger.Error("failed to recreate transcriber, keeping old",
 						"component", "main", "operation", "runAppMode", "error", tErr)
