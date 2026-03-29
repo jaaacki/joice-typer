@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"math/rand"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -25,10 +26,15 @@ import (
 )
 
 const (
-	maxTranscribeSeconds  = 60                // reject audio longer than 60s
-	maxTranscribeSegments = 500               // cap whisper segments to prevent runaway
-	maxTranscribeBytes    = 50000             // cap output text to ~50KB
-	transcribeTimeout     = 30 * time.Second  // hard deadline for whisper_full
+	maxTranscribeSeconds  = 60               // reject audio longer than 60s
+	maxTranscribeSegments = 500              // cap whisper segments to prevent runaway
+	maxTranscribeBytes    = 50000            // cap output text to ~50KB
+	transcribeTimeout     = 30 * time.Second // hard deadline for whisper_full
+
+	downloadMaxRetries    = 3
+	downloadRetryBaseWait = 2 * time.Second
+	downloadMaxRedirects  = 5
+	maxDownloadBytes      = 2 * 1024 * 1024 * 1024 // 2GB safety cap
 )
 
 // modelSpec defines expected properties for each whisper model size.
@@ -314,16 +320,11 @@ func downloadModelWithProgress(modelPath string, modelSize string, onProgress Do
 
 	dir := filepath.Dir(modelPath)
 	if err := os.MkdirAll(dir, 0755); err != nil {
-		return fmt.Errorf("transcriber.downloadModelWithProgress: create dir: %w", err)
+		return fmt.Errorf("transcriber.downloadModel: create dir: %w", err)
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
-
-	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
-	if err != nil {
-		return fmt.Errorf("transcriber.downloadModelWithProgress: create request: %w", err)
-	}
 
 	transport := &http.Transport{
 		TLSHandshakeTimeout:   10 * time.Second,
@@ -332,88 +333,101 @@ func downloadModelWithProgress(modelPath string, modelSize string, onProgress Do
 	client := &http.Client{
 		Transport: transport,
 		Timeout:   10 * time.Minute,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if len(via) >= downloadMaxRedirects {
+				return fmt.Errorf("too many redirects (%d)", len(via))
+			}
+			return nil
+		},
 	}
-	resp, err := client.Do(req)
+
+	// HEAD preflight — verify remote file exists and get expected size
+	headReq, err := http.NewRequestWithContext(ctx, "HEAD", url, nil)
 	if err != nil {
-		return fmt.Errorf("transcriber.downloadModelWithProgress: download failed: %w", err)
+		return fmt.Errorf("transcriber.downloadModel: HEAD request: %w", err)
 	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("transcriber.downloadModelWithProgress: HTTP %d", resp.StatusCode)
+	headResp, err := client.Do(headReq)
+	if err != nil {
+		return &ErrDependencyUnavailable{Component: "transcriber", Operation: "downloadModel", Wrapped: err}
 	}
-
-	// Reject non-binary content types: HTML error pages, JSON errors, proxied junk
-	ct := resp.Header.Get("Content-Type")
-	if strings.HasPrefix(ct, "text/") || strings.Contains(ct, "application/json") {
-		return fmt.Errorf("transcriber.downloadModelWithProgress: unexpected content type %q", ct)
+	headResp.Body.Close()
+	if headResp.StatusCode != http.StatusOK {
+		return &ErrDependencyUnavailable{
+			Component: "transcriber",
+			Operation: "downloadModel",
+			Wrapped:   fmt.Errorf("HEAD returned %d", headResp.StatusCode),
+		}
+	}
+	expectedSize := headResp.ContentLength
+	if expectedSize > maxDownloadBytes {
+		return &ErrBadPayload{
+			Component: "transcriber",
+			Operation: "downloadModel",
+			Detail:    fmt.Sprintf("remote file too large: %d bytes, max %d", expectedSize, maxDownloadBytes),
+		}
 	}
 
 	tmpPath := modelPath + ".tmp"
-	os.Remove(tmpPath) // clean up any stale temp from a previous failed download
 
-	f, err := os.Create(tmpPath)
+	// Retry loop with jittered exponential backoff
+	var lastErr error
+	for attempt := 0; attempt <= downloadMaxRetries; attempt++ {
+		if attempt > 0 {
+			// Jittered exponential backoff
+			wait := downloadRetryBaseWait * time.Duration(1<<(attempt-1))
+			jitter := time.Duration(rand.Int63n(int64(wait / 2)))
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(wait + jitter):
+			}
+			logger.Info("retrying download",
+				"component", "transcriber", "operation", "downloadModel",
+				"attempt", attempt+1, "max", downloadMaxRetries+1)
+		}
+
+		lastErr = doDownload(ctx, client, url, tmpPath, expectedSize, onProgress, logger)
+		if lastErr == nil {
+			break // success
+		}
+		logger.Warn("download attempt failed",
+			"component", "transcriber", "operation", "downloadModel",
+			"attempt", attempt+1, "error", lastErr)
+	}
+	if lastErr != nil {
+		os.Remove(tmpPath)
+		return fmt.Errorf("transcriber.downloadModel: all %d attempts failed: %w", downloadMaxRetries+1, lastErr)
+	}
+
+	// Hash the completed download for integrity verification
+	tmpFile, err := os.Open(tmpPath)
 	if err != nil {
-		return fmt.Errorf("transcriber.downloadModelWithProgress: create file: %w", err)
+		os.Remove(tmpPath)
+		return fmt.Errorf("transcriber.downloadModel: open for hash: %w", err)
 	}
-
-	// Cap download at 2GB to prevent abuse
-	const maxDownloadBytes = 2 * 1024 * 1024 * 1024
-	limitedBody := io.LimitReader(resp.Body, maxDownloadBytes)
-
-	// Hash during download for integrity verification
 	hashWriter := sha256.New()
-	teedBody := io.TeeReader(limitedBody, hashWriter)
-
-	pr := &callbackProgressReader{
-		reader:     teedBody,
-		total:      resp.ContentLength,
-		onProgress: onProgress,
-	}
-
-	written, copyErr := io.Copy(f, pr)
-	if syncErr := f.Sync(); syncErr != nil && copyErr == nil {
-		copyErr = syncErr
-	}
-	closeErr := f.Close()
-
-	if copyErr != nil {
+	written, err := io.Copy(hashWriter, tmpFile)
+	tmpFile.Close()
+	if err != nil {
 		os.Remove(tmpPath)
-		return fmt.Errorf("transcriber.downloadModelWithProgress: write: %w", copyErr)
+		return fmt.Errorf("transcriber.downloadModel: hash: %w", err)
 	}
-	if closeErr != nil {
-		os.Remove(tmpPath)
-		return fmt.Errorf("transcriber.downloadModelWithProgress: close: %w", closeErr)
-	}
-
-	// Validate Content-Length match (detects truncation)
-	if resp.ContentLength > 0 && written != resp.ContentLength {
-		os.Remove(tmpPath)
-		return fmt.Errorf("transcriber.downloadModelWithProgress: truncated: got %d bytes, expected %d", written, resp.ContentLength)
-	}
-
-	// Detect hitting the 2GB safety cap (oversized stream or upstream lies about length)
-	if written >= maxDownloadBytes {
-		os.Remove(tmpPath)
-		return fmt.Errorf("transcriber.downloadModelWithProgress: exceeded %d byte limit", maxDownloadBytes)
-	}
-
 	hash := hex.EncodeToString(hashWriter.Sum(nil))
 
 	// Verify downloaded content against pinned manifest (trusted root)
 	if spec, ok := modelManifest[modelSize]; ok {
 		if written != spec.exactLen {
 			os.Remove(tmpPath)
-			return fmt.Errorf("transcriber.downloadModelWithProgress: size mismatch: got %d bytes, expected %d", written, spec.exactLen)
+			return fmt.Errorf("transcriber.downloadModel: size mismatch: got %d bytes, expected %d", written, spec.exactLen)
 		}
 		if hash != spec.sha256 {
 			os.Remove(tmpPath)
-			return fmt.Errorf("transcriber.downloadModelWithProgress: sha256 mismatch: got %s, expected %s", hash, spec.sha256)
+			return fmt.Errorf("transcriber.downloadModel: sha256 mismatch: got %s, expected %s", hash, spec.sha256)
 		}
 	}
 
 	if err := os.Rename(tmpPath, modelPath); err != nil {
-		return fmt.Errorf("transcriber.downloadModelWithProgress: rename: %w", err)
+		return fmt.Errorf("transcriber.downloadModel: rename: %w", err)
 	}
 
 	// Cache hash for fast-path verification on future startups
@@ -425,6 +439,98 @@ func downloadModelWithProgress(modelPath string, modelSize string, onProgress Do
 
 	logger.Info("model downloaded and verified", "operation", "downloadModelWithProgress",
 		"bytes", written, "sha256", hash)
+	return nil
+}
+
+// doDownload performs a single GET download attempt with range resume support.
+// It writes to tmpPath and verifies the size matches expectedSize.
+func doDownload(ctx context.Context, client *http.Client, url string, tmpPath string, expectedSize int64, onProgress DownloadProgressFunc, logger *slog.Logger) error {
+	var startByte int64
+	if info, err := os.Stat(tmpPath); err == nil {
+		startByte = info.Size()
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	if err != nil {
+		return err
+	}
+	if startByte > 0 {
+		req.Header.Set("Range", fmt.Sprintf("bytes=%d-", startByte))
+		logger.Info("resuming download", "component", "transcriber", "operation", "doDownload", "from_byte", startByte)
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	// Accept 200 (full) or 206 (partial)
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusPartialContent {
+		return fmt.Errorf("GET returned %d", resp.StatusCode)
+	}
+
+	// Reject non-binary content types: HTML error pages, JSON errors, proxied junk
+	ct := resp.Header.Get("Content-Type")
+	if strings.HasPrefix(ct, "text/") || strings.Contains(ct, "application/json") {
+		return fmt.Errorf("unexpected content type %q", ct)
+	}
+
+	// If server doesn't support range and returns full body, start from scratch
+	if startByte > 0 && resp.StatusCode == http.StatusOK {
+		startByte = 0
+	}
+
+	var f *os.File
+	if startByte > 0 && resp.StatusCode == http.StatusPartialContent {
+		f, err = os.OpenFile(tmpPath, os.O_WRONLY|os.O_APPEND, 0644)
+	} else {
+		f, err = os.Create(tmpPath)
+	}
+	if err != nil {
+		return err
+	}
+
+	// Cap download at maxDownloadBytes to prevent abuse
+	limitedBody := io.LimitReader(resp.Body, maxDownloadBytes-startByte)
+
+	totalSize := expectedSize
+	if totalSize <= 0 {
+		totalSize = resp.ContentLength
+	}
+
+	pr := &callbackProgressReader{
+		reader:     limitedBody,
+		total:      totalSize,
+		written:    startByte,
+		onProgress: onProgress,
+	}
+
+	n, copyErr := io.Copy(f, pr)
+	if syncErr := f.Sync(); syncErr != nil && copyErr == nil {
+		copyErr = syncErr
+	}
+	closeErr := f.Close()
+
+	if copyErr != nil {
+		return fmt.Errorf("write: %w", copyErr)
+	}
+	if closeErr != nil {
+		return fmt.Errorf("close: %w", closeErr)
+	}
+
+	totalWritten := startByte + n
+
+	// Validate total size matches expected (detects truncation)
+	if expectedSize > 0 && totalWritten != expectedSize {
+		return fmt.Errorf("truncated: got %d bytes, expected %d", totalWritten, expectedSize)
+	}
+
+	// Detect hitting the safety cap
+	if totalWritten >= maxDownloadBytes {
+		return fmt.Errorf("exceeded %d byte limit", maxDownloadBytes)
+	}
+
 	return nil
 }
 
