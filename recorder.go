@@ -49,12 +49,24 @@ func TerminateAudio() error {
 // and re-warms the stream for instant recording.
 func (r *portaudioRecorder) RefreshDevices() error {
 	r.mu.Lock()
+	if r.recording {
+		r.mu.Unlock()
+		return fmt.Errorf("recorder.RefreshDevices: cannot refresh while recording")
+	}
+	// Close warm stream properly
 	if r.warmStream != nil {
-		r.warmStream.Close()
+		if err := r.warmStream.Close(); err != nil {
+			r.logger.Warn("failed to close warm stream during refresh",
+				"component", "recorder", "operation", "RefreshDevices", "error", err)
+		}
 		r.warmStream = nil
 	}
+	// activeStream should be nil if not recording, but clean up defensively
 	if r.activeStream != nil {
-		r.activeStream.Abort()
+		if err := r.activeStream.Abort(); err != nil {
+			r.logger.Warn("failed to abort active stream during refresh",
+				"component", "recorder", "operation", "RefreshDevices", "error", err)
+		}
 		r.activeStream = nil
 	}
 	r.mu.Unlock()
@@ -369,7 +381,10 @@ func (r *portaudioRecorder) Close() error {
 	defer r.mu.Unlock()
 	r.logger.Info("closing", "operation", "Close")
 	if r.warmStream != nil {
-		r.warmStream.Close()
+		if err := r.warmStream.Close(); err != nil {
+			r.logger.Warn("failed to close warm stream",
+				"component", "recorder", "operation", "Close", "error", err)
+		}
 		r.warmStream = nil
 	}
 	// Active stream cleanup is handled by readLoop's defer.

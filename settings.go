@@ -189,7 +189,14 @@ func populateModelList(selectedSize string) {
 	for i, m := range ModelOptions {
 		sizes[i] = C.CString(m.Size)
 		// Fast check: file exists? Full hash is verified at startup anyway.
-		modelPath, _ := DefaultModelPath(m.Size)
+		modelPath, pathErr := DefaultModelPath(m.Size)
+		if pathErr != nil {
+			descs[i] = C.CString(m.Description)
+			if m.Size == selectedSize {
+				defaultIdx = i
+			}
+			continue // skip models with unresolvable paths
+		}
 		cached := ""
 		if _, err := os.Stat(modelPath); err == nil {
 			cached = " \u2713"
@@ -288,7 +295,12 @@ func signalHotkeyRestart() {
 	h := activeHotkey
 	activeHotkeyMu.Unlock()
 	if h != nil {
-		h.Stop()
+		if err := h.Stop(); err != nil {
+			if settingsLogger != nil {
+				settingsLogger.Warn("failed to stop hotkey for restart",
+					"component", "settings", "operation", "signalHotkeyRestart", "error", err)
+			}
+		}
 	}
 }
 

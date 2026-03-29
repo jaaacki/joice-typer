@@ -594,7 +594,7 @@ func doDownload(ctx context.Context, client *http.Client, url string, tmpPath st
 			startByte = 0
 			req2, err2 := http.NewRequestWithContext(ctx, "GET", url, nil)
 			if err2 != nil {
-				return fmt.Errorf("restart GET: %w", err2)
+				return fmt.Errorf("transcriber.doDownload: restart request: %w", err2)
 			}
 			resp, err = client.Do(req2)
 			if err != nil {

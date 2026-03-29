@@ -25,8 +25,12 @@ func SetupLogger(logDir string) (*slog.Logger, func(), error) {
 		return nil, nil, fmt.Errorf("logger.SetupLogger: open log file: %w", err)
 	}
 
+	level := slog.LevelInfo
+	if os.Getenv("JOICE_DEBUG") != "" {
+		level = slog.LevelDebug
+	}
 	handler := slog.NewJSONHandler(f, &slog.HandlerOptions{
-		Level: slog.LevelInfo,
+		Level: level,
 	})
 
 	logger := slog.New(handler)

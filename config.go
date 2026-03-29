@@ -227,25 +227,25 @@ func atomicWriteFile(path string, data []byte, perm os.FileMode) error {
 	tmp := path + ".tmp"
 	f, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, perm)
 	if err != nil {
-		return fmt.Errorf("atomicWriteFile: create tmp: %w", err)
+		return fmt.Errorf("config.atomicWriteFile: create tmp: %w", err)
 	}
 	if _, err := f.Write(data); err != nil {
 		f.Close()
 		os.Remove(tmp)
-		return fmt.Errorf("atomicWriteFile: write: %w", err)
+		return fmt.Errorf("config.atomicWriteFile: write: %w", err)
 	}
 	if err := f.Sync(); err != nil {
 		f.Close()
 		os.Remove(tmp)
-		return fmt.Errorf("atomicWriteFile: fsync: %w", err)
+		return fmt.Errorf("config.atomicWriteFile: fsync: %w", err)
 	}
 	if err := f.Close(); err != nil {
 		os.Remove(tmp)
-		return fmt.Errorf("atomicWriteFile: close: %w", err)
+		return fmt.Errorf("config.atomicWriteFile: close: %w", err)
 	}
 	if err := os.Rename(tmp, path); err != nil {
 		os.Remove(tmp)
-		return fmt.Errorf("atomicWriteFile: rename: %w", err)
+		return fmt.Errorf("config.atomicWriteFile: rename: %w", err)
 	}
 	return nil
 }

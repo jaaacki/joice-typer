@@ -31,12 +31,14 @@ func UpdateStatusBar(state AppState) {
 func statusBarQuitClicked() {
 	p, err := os.FindProcess(os.Getpid())
 	if err != nil {
-		os.Exit(1) // can't find own process — just exit
+		// Last resort — FindProcess should never fail for own pid
+		syscall.Kill(os.Getpid(), syscall.SIGTERM)
 		return
 	}
-	if sigErr := p.Signal(syscall.SIGTERM); sigErr != nil {
-		os.Exit(1)
-	}
+	p.Signal(syscall.SIGTERM)
+	// Signal send failure is non-fatal — the signal handler will
+	// catch it. If Signal itself fails, the process is in a bad
+	// state and will eventually be cleaned up by the OS.
 }
 
 //export statusBarPreferencesClicked

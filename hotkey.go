@@ -198,6 +198,8 @@ func saveBinaryHash(logger *slog.Logger) {
 	}
 	dir, err := DefaultConfigDir()
 	if err != nil {
+		logger.Warn("failed to resolve config dir for hash save",
+			"operation", "saveBinaryHash", "error", err)
 		return
 	}
 	if err := os.WriteFile(filepath.Join(dir, ".binary-hash"), []byte(hash), 0644); err != nil {

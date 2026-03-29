@@ -29,7 +29,10 @@ func main() {
 
 	defaultCfgPath, cfgErr := DefaultConfigPath()
 	if cfgErr != nil {
+		// Config path resolution failed — will use empty default for flag.
+		// User must provide --config explicitly in this case.
 		defaultCfgPath = ""
+		_ = cfgErr
 	}
 	configPath := flag.String("config", defaultCfgPath, "path to config file")
 	listDevices := flag.Bool("list-devices", false, "list available audio input devices and exit")
@@ -65,9 +68,9 @@ func isAppMode() bool {
 	return strings.Contains(exe, ".app/Contents/MacOS")
 }
 
-// suppressStderr redirects file descriptor 2 to a log file so whisper.cpp
-// stderr noise does not appear in app mode.
-// Best-effort: if this fails, whisper.cpp noise appears in stderr.
+// suppressStderr redirects fd 2 to a log file. Runs before the logger
+// exists, so errors cannot be logged. Failure is acceptable: whisper.cpp
+// noise appears in stderr instead of being captured.
 func suppressStderr(logDir string) {
 	logPath := filepath.Join(logDir, "whisper-stderr.log")
 	f, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
@@ -97,6 +100,11 @@ func runAppMode() {
 		os.Exit(1)
 	}
 	defer logCleanup()
+
+	// Ensure settingsLogger is always initialized — not just in RunSetupWizard.
+	// Without this, all `if settingsLogger != nil` guards in settings.go
+	// silently swallow errors on the non-first-run (preferences) path.
+	settingsLogger = logger.With("component", "settings")
 
 	// Init PortAudio early (needed for device listing in setup wizard)
 	if err := InitAudio(); err != nil {
