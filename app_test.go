@@ -450,14 +450,12 @@ func TestApp_ClipboardMode_ReleaseWithoutPress(t *testing.T) {
 }
 
 func TestApp_TranscriberTimeout_DoesNotHang(t *testing.T) {
+	// Simulate a NON-COOPERATIVE hung CGO call — ignores ctx entirely,
+	// blocks for 120 seconds. This is what a real stuck whisper_full does.
 	hangingTranscriber := &mockTranscriber{
-		transcribeFn: func(ctx context.Context, audio []float32) (string, error) {
-			select {
-			case <-ctx.Done():
-				return "", ctx.Err()
-			case <-time.After(60 * time.Second):
-				return "should not reach", nil
-			}
+		transcribeFn: func(_ context.Context, audio []float32) (string, error) {
+			time.Sleep(120 * time.Second) // does NOT check ctx.Done()
+			return "should not reach", nil
 		},
 	}
 
@@ -475,10 +473,11 @@ func TestApp_TranscriberTimeout_DoesNotHang(t *testing.T) {
 	time.Sleep(50 * time.Millisecond)
 	events <- TriggerReleased
 
-	// Wait a bit for the transcription goroutine to start
-	time.Sleep(100 * time.Millisecond)
+	// Wait for the transcription goroutine to start and get stuck
+	time.Sleep(200 * time.Millisecond)
 
-	// Shutdown should not hang — it has a 10s timeout
+	// Shutdown should NOT hang forever — app.Shutdown has a 10s wg timeout
+	// and transcriber.Close has a 5s TryLock timeout. Total worst case ~15s.
 	done := make(chan struct{})
 	go func() {
 		close(events)
@@ -488,8 +487,8 @@ func TestApp_TranscriberTimeout_DoesNotHang(t *testing.T) {
 
 	select {
 	case <-done:
-		// Good — shutdown completed
-	case <-time.After(15 * time.Second):
+		// Good — shutdown completed despite non-cooperative transcriber
+	case <-time.After(20 * time.Second):
 		t.Fatal("Shutdown hung with hanging transcriber — expected timeout")
 	}
 }

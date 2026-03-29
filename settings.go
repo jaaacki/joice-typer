@@ -102,7 +102,7 @@ func RunSetupWizard(ctx context.Context, logger *slog.Logger) (string, error) {
 		modelPath, pathErr := DefaultModelPath(setupModelSize)
 		if pathErr != nil {
 			l.Error("failed to resolve model path", "operation", "RunSetupWizard", "error", pathErr)
-			cErr := C.CString(pathErr.Error())
+			cErr := C.CString("Failed to locate model directory. Check disk permissions.")
 			C.updateSetupDownloadFailed(cErr)
 			C.free(unsafe.Pointer(cErr))
 			return
@@ -118,7 +118,7 @@ func RunSetupWizard(ctx context.Context, logger *slog.Logger) (string, error) {
 		}, l)
 		if dlErr != nil {
 			l.Error("model download failed", "operation", "RunSetupWizard", "error", dlErr)
-			cErr := C.CString(dlErr.Error())
+			cErr := C.CString("Download failed — check your internet connection and restart.")
 			C.updateSetupDownloadFailed(cErr)
 			C.free(unsafe.Pointer(cErr))
 			return

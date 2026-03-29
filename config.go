@@ -195,15 +195,31 @@ func DefaultModelPath(modelSize string) (string, error) {
 	return filepath.Join(dir, "models", "ggml-"+modelSize+".bin"), nil
 }
 
-// atomicWriteFile writes data to a temporary file then renames it to path.
-// This prevents partial writes from corrupting the config on crash/power loss.
+// atomicWriteFile writes data to a temporary file, fsyncs it, then renames
+// to the final path. The fsync ensures data reaches stable storage before
+// the rename makes it visible — surviving both crashes and power loss.
 func atomicWriteFile(path string, data []byte, perm os.FileMode) error {
 	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, data, perm); err != nil {
-		return fmt.Errorf("atomicWriteFile: write tmp: %w", err)
+	f, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, perm)
+	if err != nil {
+		return fmt.Errorf("atomicWriteFile: create tmp: %w", err)
+	}
+	if _, err := f.Write(data); err != nil {
+		f.Close()
+		os.Remove(tmp)
+		return fmt.Errorf("atomicWriteFile: write: %w", err)
+	}
+	if err := f.Sync(); err != nil {
+		f.Close()
+		os.Remove(tmp)
+		return fmt.Errorf("atomicWriteFile: fsync: %w", err)
+	}
+	if err := f.Close(); err != nil {
+		os.Remove(tmp)
+		return fmt.Errorf("atomicWriteFile: close: %w", err)
 	}
 	if err := os.Rename(tmp, path); err != nil {
-		os.Remove(tmp) // best-effort cleanup
+		os.Remove(tmp)
 		return fmt.Errorf("atomicWriteFile: rename: %w", err)
 	}
 	return nil
