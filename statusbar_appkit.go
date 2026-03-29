@@ -7,7 +7,6 @@ package main
 import "C"
 
 import (
-	"os"
 	"syscall"
 )
 
@@ -29,16 +28,9 @@ func UpdateStatusBar(state AppState) {
 
 //export statusBarQuitClicked
 func statusBarQuitClicked() {
-	p, err := os.FindProcess(os.Getpid())
-	if err != nil {
-		// Last resort — FindProcess should never fail for own pid
-		syscall.Kill(os.Getpid(), syscall.SIGTERM)
-		return
-	}
-	p.Signal(syscall.SIGTERM)
-	// Signal send failure is non-fatal — the signal handler will
-	// catch it. If Signal itself fails, the process is in a bad
-	// state and will eventually be cleaned up by the OS.
+	// Direct syscall to self — always triggers the signal handler for
+	// orderly shutdown. syscall.Kill to own pid cannot fail on macOS.
+	syscall.Kill(syscall.Getpid(), syscall.SIGTERM)
 }
 
 //export statusBarPreferencesClicked

@@ -296,10 +296,8 @@ func signalHotkeyRestart() {
 	activeHotkeyMu.Unlock()
 	if h != nil {
 		if err := h.Stop(); err != nil {
-			if settingsLogger != nil {
-				settingsLogger.Warn("failed to stop hotkey for restart",
-					"component", "settings", "operation", "signalHotkeyRestart", "error", err)
-			}
+			settingsLogger.Warn("failed to stop hotkey for restart",
+				"operation", "signalHotkeyRestart", "error", err)
 		}
 	}
 }
@@ -309,16 +307,12 @@ func signalHotkeyRestart() {
 func OpenPreferences() {
 	cfgPath, err := DefaultConfigPath()
 	if err != nil {
-		if settingsLogger != nil {
-			settingsLogger.Error("failed to resolve config path", "operation", "OpenPreferences", "error", err)
-		}
+		settingsLogger.Error("failed to resolve config path", "operation", "OpenPreferences", "error", err)
 		return
 	}
 	cfg, err := LoadConfig(cfgPath)
 	if err != nil {
-		if settingsLogger != nil {
-			settingsLogger.Error("failed to load config", "operation", "OpenPreferences", "error", err)
-		}
+		settingsLogger.Error("failed to load config", "operation", "OpenPreferences", "error", err)
 		return
 	}
 
@@ -353,7 +347,7 @@ func OpenPreferences() {
 	// Uses the recorder's RefreshDevices to safely close warm/active streams
 	// before re-initializing PortAudio — prevents dangling stream handles.
 	if settingsRecorder != nil {
-		if refreshErr := settingsRecorder.RefreshDevices(); refreshErr != nil && settingsLogger != nil {
+		if refreshErr := settingsRecorder.RefreshDevices(); refreshErr != nil {
 			settingsLogger.Warn("failed to refresh audio devices", "operation", "OpenPreferences", "error", refreshErr)
 		}
 	}
@@ -410,23 +404,17 @@ func OpenPreferences() {
 	}
 
 	if err := cfg.Validate(); err != nil {
-		if settingsLogger != nil {
-			settingsLogger.Error("invalid settings from UI, not saving", "operation", "OpenPreferences", "error", err)
-		}
+		settingsLogger.Error("invalid settings from UI, not saving", "operation", "OpenPreferences", "error", err)
 		return
 	}
 
 	data, marshalErr := yaml.Marshal(&cfg)
 	if marshalErr != nil {
-		if settingsLogger != nil {
-			settingsLogger.Error("failed to marshal config", "operation", "OpenPreferences", "error", marshalErr)
-		}
+		settingsLogger.Error("failed to marshal config", "operation", "OpenPreferences", "error", marshalErr)
 		return
 	}
 	if writeErr := atomicWriteFile(cfgPath, data, 0644); writeErr != nil {
-		if settingsLogger != nil {
-			settingsLogger.Error("failed to write config", "operation", "OpenPreferences", "error", writeErr)
-		}
+		settingsLogger.Error("failed to write config", "operation", "OpenPreferences", "error", writeErr)
 		return
 	}
 

@@ -49,25 +49,34 @@ func TerminateAudio() error {
 // and re-warms the stream for instant recording.
 func (r *portaudioRecorder) RefreshDevices() error {
 	r.mu.Lock()
+	// Reject if recording is active
 	if r.recording {
 		r.mu.Unlock()
 		return fmt.Errorf("recorder.RefreshDevices: cannot refresh while recording")
 	}
-	// Close warm stream properly
+	// Wait for any in-flight session cleanup to complete.
+	// Stop() clears r.recording before done is closed, so checking
+	// recording alone is insufficient — readLoop cleanup may still
+	// be in flight.
+	done := r.done
+	r.mu.Unlock()
+
+	if done != nil {
+		select {
+		case <-done:
+			// Previous session fully exited
+		case <-time.After(2 * time.Second):
+			return fmt.Errorf("recorder.RefreshDevices: previous session still cleaning up")
+		}
+	}
+
+	r.mu.Lock()
 	if r.warmStream != nil {
 		if err := r.warmStream.Close(); err != nil {
 			r.logger.Warn("failed to close warm stream during refresh",
-				"component", "recorder", "operation", "RefreshDevices", "error", err)
+				"operation", "RefreshDevices", "error", err)
 		}
 		r.warmStream = nil
-	}
-	// activeStream should be nil if not recording, but clean up defensively
-	if r.activeStream != nil {
-		if err := r.activeStream.Abort(); err != nil {
-			r.logger.Warn("failed to abort active stream during refresh",
-				"component", "recorder", "operation", "RefreshDevices", "error", err)
-		}
-		r.activeStream = nil
 	}
 	r.mu.Unlock()
 
@@ -152,12 +161,12 @@ func (r *portaudioRecorder) Warm() {
 	stream, err := r.openStream(buf)
 	if err != nil {
 		r.logger.Warn("failed to pre-warm audio stream",
-			"component", "recorder", "operation", "Warm", "error", err)
+			"operation", "Warm", "error", err)
 		return
 	}
 	r.warmStream = stream
 	r.buffer = buf
-	r.logger.Info("audio stream pre-warmed", "component", "recorder", "operation", "Warm")
+	r.logger.Info("audio stream pre-warmed", "operation", "Warm")
 }
 
 func (r *portaudioRecorder) Start(ctx context.Context) error {
@@ -262,7 +271,7 @@ func (r *portaudioRecorder) readLoop(stream *portaudio.Stream, buffer []float32,
 			// normal path
 		case <-time.After(5 * time.Second):
 			r.logger.Error("stream.Read() hung for 5s, aborting recording",
-				"component", "recorder", "operation", "readLoop")
+				"operation", "readLoop")
 			stream.Abort()
 			return
 		}
@@ -383,7 +392,7 @@ func (r *portaudioRecorder) Close() error {
 	if r.warmStream != nil {
 		if err := r.warmStream.Close(); err != nil {
 			r.logger.Warn("failed to close warm stream",
-				"component", "recorder", "operation", "Close", "error", err)
+				"operation", "Close", "error", err)
 		}
 		r.warmStream = nil
 	}

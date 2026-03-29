@@ -27,13 +27,8 @@ func main() {
 	// The main goroutine must stay on the main OS thread for macOS CFRunLoop.
 	runtime.LockOSThread()
 
-	defaultCfgPath, cfgErr := DefaultConfigPath()
-	if cfgErr != nil {
-		// Config path resolution failed — will use empty default for flag.
-		// User must provide --config explicitly in this case.
-		defaultCfgPath = ""
-		_ = cfgErr
-	}
+	// Error is non-fatal: flag default will be empty, user can override with --config
+	defaultCfgPath, _ := DefaultConfigPath()
 	configPath := flag.String("config", defaultCfgPath, "path to config file")
 	listDevices := flag.Bool("list-devices", false, "list available audio input devices and exit")
 	flag.Parse()
@@ -207,7 +202,10 @@ func runAppMode() {
 			}
 		}); err != nil {
 			initDone <- err
-			hotkey.Stop()
+			if stopErr := hotkey.Stop(); stopErr != nil {
+				logger.Error("failed to stop bare run loop after permission error",
+					"component", "main", "operation", "runAppMode", "error", stopErr)
+			}
 			return
 		}
 
@@ -217,7 +215,10 @@ func runAppMode() {
 		transcriber, tErr = NewTranscriber(startupCtx, modelPath, cfg.ModelSize, cfg.Language, cfg.SampleRate, logger)
 		if tErr != nil {
 			initDone <- tErr
-			hotkey.Stop()
+			if stopErr := hotkey.Stop(); stopErr != nil {
+				logger.Error("failed to stop bare run loop after transcriber error",
+					"component", "main", "operation", "runAppMode", "error", stopErr)
+			}
 			return
 		}
 
@@ -251,7 +252,10 @@ func runAppMode() {
 		logger.Info("ready", "component", "main", "operation", "runAppMode", "trigger_key", cfg.TriggerKey)
 
 		initDone <- nil
-		hotkey.Stop() // exit bare run loop → main thread enters hotkey start loop
+		if stopErr := hotkey.Stop(); stopErr != nil {
+			logger.Error("failed to stop bare run loop",
+				"component", "main", "operation", "runAppMode", "error", stopErr)
+		}
 	}()
 
 	// Main thread: run bare [NSApp run] to stay responsive during init.

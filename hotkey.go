@@ -271,15 +271,15 @@ func parseHotkey(keys []string) (uint64, int, error) {
 			flags |= f
 		} else if kc, ok := keyToKeycode[k]; ok {
 			if keycode >= 0 {
-				return 0, -1, fmt.Errorf("parseHotkey: only one regular key allowed, got %q and existing key", k)
+				return 0, -1, fmt.Errorf("hotkey.parseHotkey: only one regular key allowed, got %q and existing key", k)
 			}
 			keycode = kc
 		} else {
-			return 0, -1, fmt.Errorf("parseHotkey: unknown key %q", k)
+			return 0, -1, fmt.Errorf("hotkey.parseHotkey: unknown key %q", k)
 		}
 	}
 	if flags == 0 && keycode < 0 {
-		return 0, -1, fmt.Errorf("parseHotkey: at least one key required")
+		return 0, -1, fmt.Errorf("hotkey.parseHotkey: at least one key required")
 	}
 	return flags, keycode, nil
 }
