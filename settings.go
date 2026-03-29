@@ -379,6 +379,15 @@ func OpenPreferences() {
 	// Stop permission polling goroutine
 	close(prefsDone)
 
+	// Re-check permissions and update status bar icon.
+	// If permissions were revoked/granted while prefs was open, the
+	// status bar should reflect the current state.
+	if C.probeEventTap() == 1 {
+		UpdateStatusBar(StateReady)
+	} else {
+		UpdateStatusBar(StateNoPermission)
+	}
+
 	if C.isSetupComplete() == 0 {
 		return // cancelled
 	}
