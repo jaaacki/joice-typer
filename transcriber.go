@@ -59,6 +59,7 @@ type whisperTranscriber struct {
 	mu         sync.Mutex
 	ctx        *C.struct_whisper_context
 	lang       string
+	vocab      string
 	sampleRate int
 	logger     *slog.Logger
 	inflight   chan struct{} // semaphore: capacity 1
@@ -101,7 +102,7 @@ func NewTranscriber(ctx context.Context, modelPath string, modelSize string, lan
 	l.Info("model loaded", "operation", "NewTranscriber")
 	return &whisperTranscriber{
 		ctx: wctx, lang: language, sampleRate: sampleRate, logger: l,
-		inflight: make(chan struct{}, 1),
+		inflight: make(chan struct{}, 1), vocab: "",
 	}, nil
 }
 
@@ -193,6 +194,12 @@ func (t *whisperTranscriber) transcribeBlocking(audio []float32) (string, error)
 		params.language = cLang
 	}
 
+	if t.vocab != "" {
+		cPrompt := C.CString(t.vocab)
+		defer C.free(unsafe.Pointer(cPrompt))
+		params.initial_prompt = cPrompt
+	}
+
 	result := C.whisper_full(t.ctx, params, (*C.float)(unsafe.Pointer(&audio[0])), C.int(len(audio)))
 	if result != 0 {
 		return "", fmt.Errorf("transcriber.Transcribe: whisper_full returned %d", result)
@@ -248,6 +255,12 @@ func (t *whisperTranscriber) IsInflight() bool {
 	default:
 		return true
 	}
+}
+
+func (t *whisperTranscriber) SetVocabulary(vocab string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.vocab = vocab
 }
 
 func (t *whisperTranscriber) Close() error {
@@ -398,10 +411,11 @@ func downloadModelWithProgress(ctx context.Context, modelPath string, modelSize 
 	}
 	// Allowlisted redirect hosts — only Hugging Face and its CDN
 	allowedHosts := map[string]bool{
-		"huggingface.co":         true,
-		"cdn-lfs.huggingface.co": true,
+		"huggingface.co":              true,
+		"cdn-lfs.huggingface.co":      true,
 		"cdn-lfs-us-1.huggingface.co": true,
 		"cdn-lfs-eu-1.huggingface.co": true,
+		"cas-bridge.xethub.hf.co":     true,
 	}
 	client := &http.Client{
 		Transport: transport,

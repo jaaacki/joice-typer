@@ -25,6 +25,7 @@ func (s *sequenceTranscriber) Transcribe(ctx context.Context, audio []float32) (
 	return text, nil
 }
 
+func (s *sequenceTranscriber) SetVocabulary(_ string) {}
 func (s *sequenceTranscriber) Close() error { return nil }
 
 func TestStreamer_WhisperOwnsContent(t *testing.T) {

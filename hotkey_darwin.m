@@ -3,8 +3,6 @@
 #import <CoreGraphics/CoreGraphics.h>
 #import <Carbon/Carbon.h>
 #import <ApplicationServices/ApplicationServices.h>
-// CGPreflightListenEventAccess / CGRequestListenEventAccess are in CGEvent.h
-// (included via CoreGraphics.framework)
 
 // Defined in hotkey.go via //export
 extern void hotkeyCallback(int eventType);
@@ -18,34 +16,10 @@ int checkAccessibility(void) {
 }
 
 int checkInputMonitoring(void) {
-    // CGPreflightListenEventAccess is unreliable for ad-hoc signed binaries —
-    // returns stale/false even after the user grants Input Monitoring.
-    // The only reliable check: actually create a CGEvent tap and see if it works.
-    // This requires Accessibility to be granted first (tap creation needs it).
-    // If Accessibility isn't granted, this returns false (which is correct —
-    // both permissions are needed).
-    return probeEventTap();
-}
-
-static CGEventRef probeCallback(CGEventTapProxy p, CGEventType t, CGEventRef e, void *u) {
-    return e;
-}
-
-int probeEventTap(void) {
-    CGEventMask mask = CGEventMaskBit(kCGEventFlagsChanged) | CGEventMaskBit(kCGEventKeyDown);
-    CFMachPortRef tap = CGEventTapCreate(
-        kCGSessionEventTap,
-        kCGHeadInsertEventTap,
-        kCGEventTapOptionListenOnly,
-        mask,
-        probeCallback,
-        NULL
-    );
-    if (tap == NULL) {
-        return 0;
-    }
-    CFRelease(tap);
-    return 1;
+    // Official macOS API for Input Monitoring permission check.
+    // CGEventTapCreate probe is NOT reliable — it can return false positives
+    // (succeeds even without permission due to stale TCC entries or ad-hoc signing).
+    return CGPreflightListenEventAccess() ? 1 : 0;
 }
 
 void ensureNSApp(void) {

@@ -2,7 +2,6 @@ package main
 
 /*
 #cgo LDFLAGS: -framework CoreGraphics -framework Carbon -framework Cocoa
-#include <unistd.h>
 #include "hotkey_darwin.h"
 */
 import "C"
@@ -16,6 +15,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"time"
 )
 
 func (e HotkeyEvent) String() string {
@@ -148,10 +148,9 @@ func NewHotkeyListener(triggerKeys []string, logger *slog.Logger) HotkeyListener
 	}
 }
 
-// WaitForPermissions polls both Accessibility and Input Monitoring using
-// the correct system APIs until both are granted. Does NOT use probeEventTap
-// as the truth source — uses AXIsProcessTrustedWithOptions for Accessibility
-// and CGPreflightListenEventAccess for Input Monitoring (via checkInputMonitoring).
+// WaitForPermissions polls both Accessibility and Input Monitoring until
+// both are granted. Uses AXIsProcessTrustedWithOptions for Accessibility
+// and CGPreflightListenEventAccess for Input Monitoring.
 // Calls onUpdate on each poll so the caller can update the UI.
 func (h *cgEventHotkeyListener) WaitForPermissions(ctx context.Context, onUpdate func(accessibility, inputMonitoring bool)) error {
 	// Never trigger system permission dialogs — they block the app.
@@ -164,11 +163,19 @@ func (h *cgEventHotkeyListener) WaitForPermissions(ctx context.Context, onUpdate
 	}()
 
 	// Poll both permissions independently using their correct APIs.
-	for {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+
+	// Check immediately on first iteration, then every 2s.
+	for first := true; ; first = false {
+		if !first {
+			select {
+			case <-ctx.Done():
+				h.logger.Info("permission polling cancelled",
+					"operation", "WaitForPermissions", "reason", ctx.Err())
+				return ctx.Err()
+			case <-ticker.C:
+			}
 		}
 
 		acc := C.checkAccessibility() == 1
@@ -185,7 +192,6 @@ func (h *cgEventHotkeyListener) WaitForPermissions(ctx context.Context, onUpdate
 			"operation", "WaitForPermissions",
 			"accessibility", acc,
 			"input_monitoring", inp)
-		C.usleep(2_000_000)
 	}
 }
 

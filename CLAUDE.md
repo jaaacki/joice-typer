@@ -32,7 +32,7 @@ Run a single test:
 go test -v -count=1 -run TestFunctionName ./...
 ```
 
-The binary requires Accessibility permission on macOS (System Settings > Privacy & Security > Accessibility).
+The binary requires Accessibility and Input Monitoring permissions on macOS (System Settings > Privacy & Security). Permission checks use `AXIsProcessTrustedWithOptions` (Accessibility) and `CGPreflightListenEventAccess` (Input Monitoring).
 
 ## Architecture
 
@@ -43,20 +43,19 @@ Flat `package main`. All Go files in root. No sub-packages.
 `HotkeyListener` -> `App` -> `Recorder` -> `Transcriber` -> `Paster`/`Typer`
 
 - **contracts.go** — All component interfaces (`HotkeyListener`, `Recorder`, `Transcriber`, `Paster`, `Typer`). This is the source of truth for component boundaries.
-- **app.go** — Orchestrator. Wires hotkey events to the record->transcribe->paste pipeline. Manages state transitions (`StateLoading`/`StateReady`/`StateRecording`/`StateTranscribing`). Two code paths: `handleReleaseClipboard()` (async transcribe+paste) and `handleReleaseStream()` (live streaming).
+- **app.go** — Orchestrator. Wires hotkey events to the record->transcribe->paste pipeline. Manages state transitions (`StateLoading`/`StateReady`/`StateRecording`/`StateTranscribing`). Includes timing instrumentation (DEBUG) for press-to-record latency.
 - **main.go** — Entry point. Two modes: `runAppMode()` (inside .app bundle, with status bar + setup wizard) and `runTerminalMode()` (CLI). Main goroutine is locked to OS thread for macOS CFRunLoop.
 
 ### Components
 
 - **hotkey.go** — CGEvent tap via cgo. The `Start()` call blocks on CFRunLoop (must be main thread). Uses package-level `hotkeyEvents` channel for C->Go callback bridge. Release events are never dropped; press events are dropped if channel full.
-- **recorder.go** — PortAudio capture. Each session gets a unique `sessionID` to prevent zombie goroutine interference. `readLoop` owns its stream by value and closes on exit. Max 30s recording. `Snapshot()` returns a copy of audio captured so far (used by streaming mode).
-- **transcriber.go** — whisper.cpp via cgo. Thread-safe (mutex). Also handles model download, SHA-256 verification against pinned manifest, and quarantine of corrupt models.
-- **streamer.go** — Periodic (1s interval) transcription loop for stream mode. Takes audio snapshots, transcribes, and uses Typer to update cursor position via backspace+retype.
-- **paster.go** — NSPasteboard + simulated Cmd+V (clipboard mode).
-- **typer.go** — CGEvent keyboard simulation, rune-by-rune with 1ms delay. Handles BMP and supplementary Unicode via UTF-16 surrogate pairs. Clears modifier flags to prevent Fn/Shift leaking into typed text.
+- **recorder.go** — PortAudio capture (256-sample buffer for 16ms first-batch latency). Each session gets a unique `sessionID` to prevent zombie goroutine interference. `readLoop` owns its stream by value and closes on exit. Max 30s recording. `Warm()` pre-opens the stream for near-instant `Start()`. Timing instrumentation (DEBUG) for stream.Start() and cold/warm path.
+- **transcriber.go** — whisper.cpp via cgo. Thread-safe (mutex). Supports `SetVocabulary()` to set whisper's `initial_prompt` for biasing toward user-specified words. Also handles model download (with `cas-bridge.xethub.hf.co` in allowlist), SHA-256 verification against pinned manifest, and quarantine of corrupt models.
+- **streamer.go** — Periodic (1s interval) transcription loop for stream mode. Takes audio snapshots, transcribes, and uses Typer to update cursor position via backspace+retype. (Experimental, may be removed.)
+- **paster.go** — NSPasteboard + simulated Cmd+V (clipboard mode). Zero pre-paste delay, 50ms async clipboard restore with changeCount guard.
 - **config.go** — YAML config at `~/Library/Application Support/JoiceTyper/config.yaml`. Auto-creates default on first run. Migrates from old `~/.config/voicetype/` path.
 - **statusbar.go** / **statusbar_appkit.go** — Menu bar icon (app mode only).
-- **settings.go** / **settings_darwin.m** — Unified onboarding + preferences window. Language dropdown, hotkey recorder, mic selection. Opens as modal (onboarding) or from menu bar (preferences).
+- **settings.go** / **settings_darwin.m** — Unified onboarding + preferences window. Language dropdown, hotkey recorder, mic selection, model management (download/use/delete with confirmation), vocabulary text box. Opens as modal (onboarding) or non-modal via semaphore (preferences — keeps main event loop responsive).
 - **sound.go** — Audio feedback via macOS system sounds (`afplay`). Max 3 concurrent.
 
 ### cgo / Objective-C
@@ -80,7 +79,8 @@ macOS platform code lives in `*_darwin.m` files with corresponding `*_darwin.h` 
 - **Submodule**: `third_party/whisper.cpp` (clone with `--recurse-submodules`)
 - **Config**: `~/Library/Application Support/JoiceTyper/config.yaml`
 - **Default hotkey**: Fn+Shift (push-to-talk)
-- **Type modes**: `clipboard` (paste via Cmd+V) or `stream` (live CGEvent keystrokes)
+- **Type modes**: `clipboard` (paste via Cmd+V) or `stream` (live CGEvent keystrokes, experimental)
+- **Vocabulary**: User-defined words/phrases in config, passed as whisper `initial_prompt` to bias recognition
 
 ## Engineering Standards
 
@@ -97,5 +97,6 @@ macOS platform code lives in `*_darwin.m` files with corresponding `*_darwin.h` 
 - **v1.5** (done): .app bundle, menu bar icon, setup wizard
 - **v2** (done): Streaming type mode (experimental, default off)
 - **v2.5** (done): Settings UI — language, hotkey recorder, preferences menu
-- **v3**: Custom dictionary (whisper prompt + post-processing replacement)
-- **v4**: Menu bar UI (Wails) for full settings management
+- **v3** (done): Vocabulary (whisper prompt biasing), model management UI, non-modal preferences, latency optimizations
+- **v4**: Post-processing replacements (heard → want mappings)
+- **v5**: Menu bar UI (Wails) for full settings management

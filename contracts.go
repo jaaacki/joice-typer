@@ -49,6 +49,7 @@ type Recorder interface {
 // Transcriber converts audio samples to text using whisper.cpp.
 type Transcriber interface {
 	Transcribe(ctx context.Context, audio []float32) (string, error)
+	SetVocabulary(vocab string)
 	Close() error
 }
 

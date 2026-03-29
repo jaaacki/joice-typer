@@ -73,9 +73,7 @@ int pasteText(const char* text) {
         NSInteger postWriteChangeCount = [pb changeCount];
 
         // --- Simulate Cmd+V ---
-        // Reduced pre-paste delay: 10ms is enough for the pasteboard to settle.
-        // The old 50ms was unnecessarily conservative.
-        usleep(10000); // 10ms
+        // No pre-paste delay — [pb setString:] is synchronous.
 
         CGEventRef keyDown = CGEventCreateKeyboardEvent(NULL, 0x09, true); // V key
         if (keyDown == NULL) return 3;
@@ -95,13 +93,12 @@ int pasteText(const char* text) {
         CFRelease(keyUp);
 
         // --- Restore clipboard after paste completes ---
-        // 100ms is enough for the target app to consume the paste.
-        // The old 200ms was overly conservative.
+        // 50ms for the target app to consume the paste event.
         NSArray *restoreComplex = [savedItems copy];
         NSString *restoreText = [savedText copy];
         ClipboardKind restoreKind = kind;
 
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(100 * NSEC_PER_MSEC)),
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(50 * NSEC_PER_MSEC)),
                        dispatch_get_main_queue(), ^{
             // Only restore if nobody else touched the clipboard
             if ([pb changeCount] != postWriteChangeCount) return;

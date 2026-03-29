@@ -21,6 +21,7 @@ type Config struct {
 	SoundFeedback bool     `yaml:"sound_feedback"`
 	InputDevice   string   `yaml:"input_device"`
 	TypeMode      string   `yaml:"type_mode"`
+	Vocabulary    string   `yaml:"vocabulary"`
 }
 
 var validModelSizes = map[string]bool{

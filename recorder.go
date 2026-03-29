@@ -157,7 +157,7 @@ func (r *portaudioRecorder) Warm() {
 		return // already warmed
 	}
 
-	buf := make([]float32, 512)
+	buf := make([]float32, 256)
 	stream, err := r.openStream(buf)
 	if err != nil {
 		r.logger.Warn("failed to pre-warm audio stream",
@@ -173,6 +173,8 @@ func (r *portaudioRecorder) Start(ctx context.Context) error {
 	if ctx.Err() != nil {
 		return ctx.Err()
 	}
+
+	startTime := time.Now()
 
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -206,19 +208,22 @@ func (r *portaudioRecorder) Start(ctx context.Context) error {
 	if r.warmStream != nil {
 		stream = r.warmStream
 		r.warmStream = nil
-		r.logger.Debug("using pre-warmed stream", "operation", "Start")
+		r.logger.Debug("using pre-warmed stream", "operation", "Start",
+			"elapsed_us", time.Since(startTime).Microseconds())
 	} else {
 		// Cold path: open stream now (slow — can take 1-2 seconds)
+		coldStart := time.Now()
 		r.buffer = make([]float32, 512)
 		stream, err = r.openStream(r.buffer)
 		if err != nil {
 			r.recording = false
 			return &ErrDependencyUnavailable{Component: "recorder", Operation: "Start", Wrapped: fmt.Errorf("open stream: %w", err)}
 		}
+		r.logger.Debug("cold stream opened", "operation", "Start",
+			"open_ms", time.Since(coldStart).Milliseconds())
 	}
 
-	r.stream = stream
-
+	streamStartTime := time.Now()
 	if err := stream.Start(); err != nil {
 		r.recording = false
 		if closeErr := stream.Close(); closeErr != nil {
@@ -227,18 +232,18 @@ func (r *portaudioRecorder) Start(ctx context.Context) error {
 		}
 		return &ErrDependencyUnavailable{Component: "recorder", Operation: "Start", Wrapped: fmt.Errorf("start stream: %w", err)}
 	}
+	r.logger.Debug("stream started", "operation", "Start",
+		"stream_start_ms", time.Since(streamStartTime).Milliseconds())
 
-	// Store stream reference so Stop can force-abort on timeout.
+	r.stream = stream
 	r.activeStream = stream
 
-	// Pass session state by value — readLoop owns its own stream, buffer,
-	// and done channel. A zombie readLoop from a timed-out Stop cannot
-	// interfere with a future session's resources.
 	done := make(chan struct{})
 	r.done = done
 	go r.readLoop(stream, r.buffer, done, r.sessionID)
 
-	r.logger.Debug("recording started", "operation", "Start")
+	r.logger.Debug("recording started", "operation", "Start",
+		"total_start_ms", time.Since(startTime).Milliseconds())
 	return nil
 }
 
@@ -376,7 +381,8 @@ func (r *portaudioRecorder) Stop() ([]float32, error) {
 	for _, chunk := range chunks {
 		audio = append(audio, chunk...)
 	}
-	r.logger.Debug("recording stopped", "operation", "Stop", "samples", len(audio),
+	r.logger.Debug("recording stopped", "operation", "Stop",
+		"samples", len(audio),
 		"duration_sec", float64(len(audio))/r.sampleRate)
 
 	// Re-warm the stream in background so next recording starts instantly

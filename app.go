@@ -88,6 +88,7 @@ func (a *App) emitState(state AppState) {
 }
 
 func (a *App) handlePress() {
+	pressTime := time.Now()
 	if atomic.LoadInt32(&a.busy) == 1 {
 		a.logger.Warn("still transcribing, ignoring press",
 			"operation", "handlePress")
@@ -105,6 +106,10 @@ func (a *App) handlePress() {
 		a.emitState(StateReady)
 		return
 	}
+
+	a.logger.Debug("recording started after press",
+		"operation", "handlePress",
+		"press_to_record_ms", time.Since(pressTime).Milliseconds())
 
 	atomic.StoreInt32(&a.recording, 1)
 

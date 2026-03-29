@@ -12,12 +12,8 @@ void ensureNSApp(void);
 int checkAccessibility(void);
 
 // checkInputMonitoring returns 1 if Input Monitoring is granted, 0 if not.
-// Silent check only — never shows a system dialog.
+// Uses CGPreflightListenEventAccess — the official macOS API.
 int checkInputMonitoring(void);
-
-// probeEventTap tries to create and immediately destroy a CGEvent tap.
-// Returns 1 if creation succeeds (permissions are sufficient), 0 if not.
-int probeEventTap(void);
 
 // startHotkeyListener creates a CGEvent tap monitoring modifier flags and optionally a key.
 // targetFlags: bitmask of modifier flags that must all be held.

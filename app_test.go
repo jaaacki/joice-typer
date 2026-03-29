@@ -77,6 +77,7 @@ func (m *mockTranscriber) Transcribe(ctx context.Context, audio []float32) (stri
 	defer m.mu.Unlock()
 	return m.text, m.err
 }
+func (m *mockTranscriber) SetVocabulary(_ string) {}
 func (m *mockTranscriber) Close() error {
 	m.mu.Lock()
 	defer m.mu.Unlock()

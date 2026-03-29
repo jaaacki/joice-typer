@@ -70,8 +70,7 @@ func RunSetupWizard(ctx context.Context, logger *slog.Logger) (string, error) {
 	}()
 
 	// Step 2: Input Monitoring polling in background goroutine.
-	// Uses CGPreflightListenEventAccess (via checkInputMonitoring) — the
-	// correct system API that updates in real-time, unlike IOHIDCheckAccess.
+	// Uses CGPreflightListenEventAccess via checkInputMonitoring.
 	go func() {
 		// No prompt — our UI guides the user via "Open" buttons
 		for {
@@ -99,6 +98,7 @@ func RunSetupWizard(ctx context.Context, logger *slog.Logger) (string, error) {
 	populateLanguageList("en")
 
 	// Step 5.5: Populate model list (default to small for onboarding)
+	prefsActiveModel = "small"
 	populateModelList("small")
 
 	// Model download happens AFTER the user clicks Continue — not before.
@@ -182,133 +182,135 @@ func populateMicList(selectedDevice string, l *slog.Logger) {
 	}
 }
 
-//export modelActionButtonClicked
-func modelActionButtonClicked() {
-	selectedModel := C.GoString(C.getSelectedModel())
-	if selectedModel == "" {
+// prefsActiveModel tracks the in-use model for the current preferences session.
+var prefsActiveModel string
+
+// deleteConfirmPending tracks whether the delete confirmation is showing.
+var deleteConfirmPending bool
+
+//export modelBtn1Clicked
+func modelBtn1Clicked() {
+	selected := C.GoString(C.getDropdownModel())
+	if selected == "" {
 		return
 	}
 
-	modelPath, err := DefaultModelPath(selectedModel)
+	if deleteConfirmPending {
+		// "Confirm?" was clicked — actually delete
+		deleteConfirmPending = false
+		modelPath, err := DefaultModelPath(selected)
+		if err != nil {
+			return
+		}
+		if removeErr := os.Remove(modelPath); removeErr != nil {
+			settingsLogger.Error("failed to delete model", "operation", "modelBtn1Clicked", "error", removeErr)
+			return
+		}
+		os.Remove(modelPath + ".sha256")
+		settingsLogger.Info("model deleted", "operation", "modelBtn1Clicked", "model", selected)
+		populateModelList("")
+		return
+	}
+
+	modelPath, err := DefaultModelPath(selected)
 	if err != nil {
 		return
 	}
 
 	if _, statErr := os.Stat(modelPath); os.IsNotExist(statErr) {
 		// Not downloaded — start download
-		go downloadModelInPreferences(selectedModel, modelPath)
+		settingsLogger.Info("model download started", "operation", "modelBtn1Clicked", "model", selected)
+		C.updateModelButtons(3) // downloading state
+		go func() {
+			dlErr := downloadModelWithProgress(context.Background(), modelPath, selected, func(progress float64, downloaded, total int64) {
+				C.updateDownloadProgress(C.double(progress), C.longlong(downloaded), C.longlong(total))
+			}, settingsLogger)
+			if dlErr != nil {
+				settingsLogger.Error("model download failed", "operation", "modelBtn1Clicked", "error", dlErr)
+				C.updateModelButtons(4) // download failed
+				return
+			}
+			settingsLogger.Info("model downloaded", "operation", "modelBtn1Clicked", "model", selected)
+			C.updateSetupDownloadComplete()
+			populateModelList("")
+		}()
+	} else if prefsActiveModel == selected {
+		// Active — "In Use" button, shouldn't be clickable but ignore
+		return
 	} else {
-		// Downloaded — check if this is the currently active model
-		cfgPath, _ := DefaultConfigPath()
-		cfg, _ := LoadConfig(cfgPath)
-		if cfg.ModelSize == selectedModel {
-			cStatus := C.CString("Cannot delete the active model")
-			C.updateSettingsModelStatus(cStatus)
-			C.free(unsafe.Pointer(cStatus))
-			return
-		}
-		if removeErr := os.Remove(modelPath); removeErr != nil {
-			settingsLogger.Error("failed to delete model", "operation", "modelActionButtonClicked", "error", removeErr)
-			return
-		}
-		// Also remove the sidecar
-		os.Remove(modelPath + ".sha256")
-		// Update UI
-		cTitle := C.CString("Download")
-		C.updateModelActionButton(cTitle, 1)
-		C.free(unsafe.Pointer(cTitle))
-		cStatus := C.CString("Model deleted")
-		C.updateSettingsModelStatus(cStatus)
-		C.free(unsafe.Pointer(cStatus))
-		// Refresh the model list to remove the checkmark
-		populateModelList(selectedModel)
+		// Downloaded, not active — "Use" clicked
+		settingsLogger.Info("model use clicked", "operation", "modelBtn1Clicked", "model", selected)
+		prefsActiveModel = selected
+		cSize := C.CString(selected)
+		C.setActiveModelSize(cSize)
+		C.free(unsafe.Pointer(cSize))
+		populateModelList(prefsActiveModel)
 	}
 }
 
-func downloadModelInPreferences(modelSize string, modelPath string) {
-	cTitle := C.CString("Downloading...")
-	C.updateModelActionButton(cTitle, 0)
-	C.free(unsafe.Pointer(cTitle))
-
-	// Show progress bar
-	dlErr := downloadModelWithProgress(context.Background(), modelPath, modelSize, func(progress float64, downloaded, total int64) {
-		C.updateSetupDownloadProgress(C.double(progress), C.longlong(downloaded), C.longlong(total))
-	}, settingsLogger)
-
-	if dlErr != nil {
-		settingsLogger.Error("model download failed", "operation", "downloadModelInPreferences", "error", dlErr)
-		cFail := C.CString("Download")
-		C.updateModelActionButton(cFail, 1)
-		C.free(unsafe.Pointer(cFail))
-		cStatus := C.CString("Download failed — try again")
-		C.updateSettingsModelStatus(cStatus)
-		C.free(unsafe.Pointer(cStatus))
+//export modelBtn2Clicked
+func modelBtn2Clicked() {
+	if deleteConfirmPending {
+		// "Cancel" clicked — revert to normal state
+		deleteConfirmPending = false
+		updateModelButtonState()
 		return
 	}
 
-	// Success
-	C.updateSetupDownloadComplete()
-	cDone := C.CString("Delete")
-	C.updateModelActionButton(cDone, 1)
-	C.free(unsafe.Pointer(cDone))
-	// Refresh model list to add checkmark
-	populateModelList(modelSize)
+	// "Delete" clicked — show confirmation
+	deleteConfirmPending = true
+	C.updateModelButtons(5) // delete confirm state
 }
 
 //export modelDropdownChanged
 func modelDropdownChanged() {
-	selectedModel := C.GoString(C.getSelectedModel())
-	if selectedModel != "" {
-		updateModelButton(selectedModel)
-	}
+	deleteConfirmPending = false
+	updateModelButtonState()
 }
 
-func updateModelButton(selectedSize string) {
-	modelPath, err := DefaultModelPath(selectedSize)
+func updateModelButtonState() {
+	selected := C.GoString(C.getDropdownModel())
+	if selected == "" {
+		return
+	}
+	modelPath, err := DefaultModelPath(selected)
 	if err != nil {
 		return
 	}
 	if _, statErr := os.Stat(modelPath); os.IsNotExist(statErr) {
-		cTitle := C.CString("Download")
-		C.updateModelActionButton(cTitle, 1)
-		C.free(unsafe.Pointer(cTitle))
+		C.updateModelButtons(0) // not downloaded
+	} else if prefsActiveModel == selected {
+		C.updateModelButtons(1) // active
 	} else {
-		// Check if it's the active model
-		cfgPath, _ := DefaultConfigPath()
-		cfg, _ := LoadConfig(cfgPath)
-		if cfg.ModelSize == selectedSize {
-			cTitle := C.CString("In Use")
-			C.updateModelActionButton(cTitle, 0)
-			C.free(unsafe.Pointer(cTitle))
-		} else {
-			cTitle := C.CString("Delete")
-			C.updateModelActionButton(cTitle, 1)
-			C.free(unsafe.Pointer(cTitle))
-		}
+		C.updateModelButtons(2) // downloaded, not active
 	}
 }
 
-func populateModelList(selectedSize string) {
+// populateModelList rebuilds the dropdown. selectSize controls which model
+// is selected in the dropdown (pass "" to keep current selection).
+func populateModelList(selectSize string) {
+	if selectSize == "" {
+		selectSize = C.GoString(C.getDropdownModel())
+	}
+
+	cSize := C.CString(prefsActiveModel)
+	C.setActiveModelSize(cSize)
+	C.free(unsafe.Pointer(cSize))
+
 	sizes := make([]*C.char, len(ModelOptions))
 	descs := make([]*C.char, len(ModelOptions))
 	defaultIdx := 0
 	for i, m := range ModelOptions {
 		sizes[i] = C.CString(m.Size)
-		// Fast check: file exists? Full hash is verified at startup anyway.
 		modelPath, pathErr := DefaultModelPath(m.Size)
-		if pathErr != nil {
-			descs[i] = C.CString(m.Description)
-			if m.Size == selectedSize {
-				defaultIdx = i
-			}
-			continue // skip models with unresolvable paths
-		}
 		cached := ""
-		if _, err := os.Stat(modelPath); err == nil {
-			cached = " \u2713"
+		if pathErr == nil {
+			if _, err := os.Stat(modelPath); err == nil {
+				cached = " \u2713"
+			}
 		}
 		descs[i] = C.CString(m.Description + cached)
-		if m.Size == selectedSize {
+		if m.Size == selectSize {
 			defaultIdx = i
 		}
 	}
@@ -319,7 +321,7 @@ func populateModelList(selectedSize string) {
 	for _, d := range descs {
 		C.free(unsafe.Pointer(d))
 	}
-	updateModelButton(selectedSize)
+	updateModelButtonState()
 }
 
 func populateLanguageList(selectedCode string) {
@@ -355,6 +357,7 @@ func writeSetupConfig(deviceName string, language string, modelSize string, trig
 		SampleRate:    16000,
 		SoundFeedback: true,
 		InputDevice:   deviceName,
+		Vocabulary:    C.GoString(C.getVocabularyText()),
 	}
 
 	if err := cfg.Validate(); err != nil {
@@ -394,6 +397,7 @@ var hotkeyRestartCh = make(chan struct{}, 1)
 // [NSApp stop:] which will cause [NSApp run] to exit on the next event
 // loop iteration (after this call returns to Cocoa).
 func signalHotkeyRestart() {
+	settingsLogger.Info("signalling hotkey restart", "operation", "signalHotkeyRestart")
 	select {
 	case hotkeyRestartCh <- struct{}{}:
 	default:
@@ -410,8 +414,12 @@ func signalHotkeyRestart() {
 }
 
 // OpenPreferences opens the settings window in preferences mode.
-// Called from statusbar callback goroutine. Blocks until window closes.
+// OpenPreferences opens the settings window in preferences mode.
+// Called from the main thread (statusbar callback). Sets up the UI on the
+// main thread, then moves to a goroutine so [NSApp run] stays responsive.
 func OpenPreferences() {
+	settingsLogger.Info("preferences opened", "operation", "OpenPreferences")
+
 	cfgPath, err := DefaultConfigPath()
 	if err != nil {
 		settingsLogger.Error("failed to resolve config path", "operation", "OpenPreferences", "error", err)
@@ -423,13 +431,42 @@ func OpenPreferences() {
 		return
 	}
 
+	settingsLogger.Info("showing settings window", "operation", "OpenPreferences")
 	C.showSettingsWindow(0)
 
-	// Set permission indicators from actual current state — don't assume
-	// granted just because the app is running (prefs is reachable during
-	// StateNoPermission via the status bar menu).
+	settingsLogger.Info("setting permission state", "operation", "OpenPreferences")
 	C.setPrefsPermissionState()
 
+	// Refresh audio devices to pick up newly connected mics (e.g. Bluetooth).
+	if settingsRecorder != nil {
+		if refreshErr := settingsRecorder.RefreshDevices(); refreshErr != nil {
+			settingsLogger.Warn("failed to refresh audio devices", "operation", "OpenPreferences", "error", refreshErr)
+		}
+	}
+
+	settingsLogger.Info("populating UI fields", "operation", "OpenPreferences")
+	populateLanguageList(cfg.Language)
+	prefsActiveModel = cfg.ModelSize
+	populateModelList(cfg.ModelSize)
+	populateMicList(cfg.InputDevice, settingsLogger)
+
+	display := formatHotkeyDisplay(cfg.TriggerKey)
+	cDisplay := C.CString(display)
+	C.setSettingsHotkey(cDisplay)
+	C.free(unsafe.Pointer(cDisplay))
+
+	settingsLogger.Info("setting vocabulary", "operation", "OpenPreferences", "length", len(cfg.Vocabulary))
+	cVocab := C.CString(cfg.Vocabulary)
+	C.setVocabularyText(cVocab)
+	C.free(unsafe.Pointer(cVocab))
+
+	settingsLogger.Info("UI setup complete, starting wait goroutine", "operation", "OpenPreferences")
+	go openPreferencesWait(cfg, cfgPath)
+}
+
+// openPreferencesWait blocks until the preferences window closes, then
+// saves config and signals a hotkey restart. Runs on a background goroutine.
+func openPreferencesWait(cfg Config, cfgPath string) {
 	// Poll permissions in background so UI updates if user grants them
 	prefsDone := make(chan struct{})
 	go func() {
@@ -450,46 +487,29 @@ func OpenPreferences() {
 		}
 	}()
 
-	// Refresh audio devices to pick up newly connected mics (e.g. Bluetooth).
-	// Uses the recorder's RefreshDevices to safely close warm/active streams
-	// before re-initializing PortAudio — prevents dangling stream handles.
-	if settingsRecorder != nil {
-		if refreshErr := settingsRecorder.RefreshDevices(); refreshErr != nil {
-			settingsLogger.Warn("failed to refresh audio devices", "operation", "OpenPreferences", "error", refreshErr)
-		}
-	}
-
-	// Pre-populate from current config
-	populateLanguageList(cfg.Language)
-	populateModelList(cfg.ModelSize)
-	populateMicList(cfg.InputDevice, settingsLogger)
-
-	// Set current hotkey display
-	display := formatHotkeyDisplay(cfg.TriggerKey)
-	cDisplay := C.CString(display)
-	C.setSettingsHotkey(cDisplay)
-	C.free(unsafe.Pointer(cDisplay))
-
-	// Block until user clicks Save or closes
+	// Block until user closes the window
+	settingsLogger.Info("waiting for window close", "operation", "openPreferencesWait")
 	C.runSetupEventLoop()
+
+	settingsLogger.Info("window closed", "operation", "openPreferencesWait")
 
 	// Stop permission polling goroutine
 	close(prefsDone)
 
 	// Re-check permissions and update status bar icon.
-	// If permissions were revoked/granted while prefs was open, the
-	// status bar should reflect the current state.
-	if C.probeEventTap() == 1 {
+	if C.checkAccessibility() == 1 && C.checkInputMonitoring() == 1 {
 		UpdateStatusBar(StateReady)
 	} else {
 		UpdateStatusBar(StateNoPermission)
 	}
 
 	if C.isSetupComplete() == 0 {
-		return // cancelled
+		settingsLogger.Info("preferences cancelled", "operation", "openPreferencesWait")
+		return
 	}
 
 	// Read selections
+	settingsLogger.Info("reading selections", "operation", "openPreferencesWait")
 	selectedDevice := C.GoString(C.getSelectedDevice())
 	selectedLang := C.GoString(C.getSelectedLanguage())
 	selectedModel := C.GoString(C.getSelectedModel())
@@ -506,6 +526,7 @@ func OpenPreferences() {
 	cfg.InputDevice = selectedDevice
 	cfg.Language = selectedLang
 	cfg.TriggerKey = triggerKeys
+	cfg.Vocabulary = C.GoString(C.getVocabularyText())
 	if selectedModel != "" {
 		cfg.ModelSize = selectedModel
 	}
@@ -515,17 +536,21 @@ func OpenPreferences() {
 		return
 	}
 
+	settingsLogger.Info("saving config", "operation", "openPreferencesWait",
+		"device", cfg.InputDevice, "language", cfg.Language,
+		"model", cfg.ModelSize, "vocabulary_length", len(cfg.Vocabulary))
+
 	data, marshalErr := yaml.Marshal(&cfg)
 	if marshalErr != nil {
-		settingsLogger.Error("failed to marshal config", "operation", "OpenPreferences", "error", marshalErr)
+		settingsLogger.Error("failed to marshal config", "operation", "openPreferencesWait", "error", marshalErr)
 		return
 	}
 	if writeErr := atomicWriteFile(cfgPath, data, 0644); writeErr != nil {
-		settingsLogger.Error("failed to write config", "operation", "OpenPreferences", "error", writeErr)
+		settingsLogger.Error("failed to write config", "operation", "openPreferencesWait", "error", writeErr)
 		return
 	}
 
-	// Signal hotkey restart
+	settingsLogger.Info("config saved", "operation", "openPreferencesWait")
 	signalHotkeyRestart()
 }
 

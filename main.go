@@ -108,6 +108,7 @@ func runAppMode() {
 	defer logCleanup()
 
 	settingsLogger = logger.With("component", "settings")
+	logger.Info("app starting", "component", "main", "operation", "runAppMode")
 
 	// Init PortAudio early (needed for device listing in setup wizard)
 	if err := InitAudio(); err != nil {
@@ -143,6 +144,7 @@ func runAppMode() {
 
 	// First-run: show setup wizard
 	firstRun := IsFirstRun()
+	logger.Info("first run check", "component", "main", "operation", "runAppMode", "first_run", firstRun)
 	if firstRun {
 		selectedDevice, setupErr := RunSetupWizard(startupCtx, logger)
 		if setupErr != nil {
@@ -230,6 +232,11 @@ func runAppMode() {
 			return
 		}
 
+		// Set vocabulary for whisper prompt biasing
+		if cfg.Vocabulary != "" {
+			transcriber.SetVocabulary(cfg.Vocabulary)
+		}
+
 		// Step 3: Create app components
 		recorder = NewRecorder(cfg.SampleRate, cfg.InputDevice, logger)
 		settingsRecorder = recorder // expose to settings.go for safe device refresh
@@ -269,17 +276,31 @@ func runAppMode() {
 	}()
 
 	// Main thread: run bare [NSApp run] to stay responsive during init.
-	hotkey.RunMainLoopOnly()
-
-	// Init goroutine finished — check result
-	if err := <-initDone; err != nil {
-		logger.Error("startup failed", "component", "main", "operation", "runAppMode", "error", err)
-		hotkeyMu.Lock()
-		hotkeyEvents = nil
-		hotkeyMu.Unlock()
-		close(events)
-		return
+	// Re-enter if [NSApp run] exits spuriously (e.g. Preferences closed
+	// during init calls [NSApp stop:] via signalHotkeyRestart).
+	for {
+		logger.Info("entering event loop", "component", "main", "operation", "runAppMode", "phase", "init")
+		hotkey.RunMainLoopOnly()
+		logger.Info("event loop exited", "component", "main", "operation", "runAppMode", "phase", "init")
+		select {
+		case err := <-initDone:
+			if err != nil {
+				logger.Error("startup failed", "component", "main", "operation", "runAppMode", "error", err)
+				hotkeyMu.Lock()
+				hotkeyEvents = nil
+				hotkeyMu.Unlock()
+				close(events)
+				return
+			}
+			goto initFinished
+		default:
+			// Init not done yet — [NSApp run] was stopped by something else
+			// (e.g. signalHotkeyRestart from Preferences). Re-enter.
+			logger.Info("re-entering event loop (init still in progress)",
+				"component", "main", "operation", "runAppMode")
+		}
 	}
+initFinished:
 
 	// Hotkey start/restart loop.
 	for {
@@ -351,12 +372,19 @@ func runAppMode() {
 				} else {
 					oldTranscriber := transcriber
 					transcriber = newTranscriber
+					newTranscriber.SetVocabulary(cfg.Vocabulary)
 					app.SetTranscriber(newTranscriber)
 					logger.Info("transcriber updated", "component", "main", "operation", "runAppMode", "language", cfg.Language)
 					if closeErr := oldTranscriber.Close(); closeErr != nil {
 						logger.Error("failed to close old transcriber", "component", "main", "operation", "runAppMode", "error", closeErr)
 					}
 				}
+			}
+
+			// Update vocabulary if changed
+			if oldCfg.Vocabulary != cfg.Vocabulary {
+				transcriber.SetVocabulary(cfg.Vocabulary)
+				logger.Info("vocabulary updated", "component", "main", "operation", "runAppMode")
 			}
 
 			hotkeyDisplay := formatHotkeyDisplay(cfg.TriggerKey)

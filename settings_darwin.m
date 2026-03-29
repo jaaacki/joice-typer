@@ -10,13 +10,16 @@ static NSTextField *sStep2Status = nil;
 static NSPopUpButton *sMicDropdown = nil;
 static NSPopUpButton *sLangDropdown = nil;
 static char sSelectedLangBuffer[8] = {0};
+static NSPopUpButton *sModelDropdown = nil;
+static NSButton *sModelBtn1 = nil;      // "In Use" / "Use" / "Download"
+static NSButton *sModelBtn2 = nil;      // "Delete" / "Confirm?" / "Cancel"
 static NSProgressIndicator *sProgressBar = nil;
 static NSTextField *sProgressLabel = nil;
-static NSPopUpButton *sModelDropdown = nil;
-static NSTextField *sModelStatus = nil;
-static NSButton *sModelActionBtn = nil;
 static char sSelectedModelBuffer[32] = {0};
+static char sActiveModelSize[32] = {0};
 static NSTextField *sStep7Status = nil;
+static NSScrollView *sVocabScrollView = nil;
+static NSTextView *sVocabTextView = nil;
 static NSButton *sContinueButton = nil;
 static BOOL sSetupComplete = NO;
 static NSTextField *sStep1Indicator = nil;
@@ -24,13 +27,13 @@ static NSTextField *sStep2Indicator = nil;
 static NSTextField *sStep3Indicator = nil;
 static NSTextField *sStep4Indicator = nil;
 static NSTextField *sStep6Indicator = nil;
-static NSTextField *sStep7Indicator = nil;
 static char sSelectedDeviceBuffer[512] = {0};
 
 static BOOL sAccessibilityGranted = NO;
 static BOOL sInputMonitoringGranted = NO;
 static BOOL sDownloadComplete = NO;
 static BOOL sIsOnboarding = YES;
+static dispatch_semaphore_t sWindowDone = NULL;
 
 static NSTextField *sHotkeyLabel = nil;
 static NSButton *sHotkeyChangeBtn = nil;
@@ -95,32 +98,16 @@ static NSString *buildHotkeyDisplayString(uint64_t flags, int keycode) {
 }
 
 static void refreshContinueState(void) {
-    if (!sIsOnboarding) {
-        // Prefs mode: no Save button. Step 7 shows permission status only.
-        BOOL allPerms = sAccessibilityGranted && sInputMonitoringGranted;
-        if (allPerms) {
-            sStep7Indicator.stringValue = @"\u2705";
-            sStep7Status.stringValue = @"Settings auto-save when you close this window";
-            sStep7Status.textColor = [NSColor systemGreenColor];
-        } else {
-            sStep7Indicator.stringValue = @"\u26A0\uFE0F";
-            sStep7Status.stringValue = @"Grant all permissions above first";
-            sStep7Status.textColor = [NSColor systemOrangeColor];
-        }
-        return;
-    }
-    // In onboarding, Continue requires only permissions — model download
-    // happens AFTER the user clicks Continue with their selected model.
-    BOOL ready = sAccessibilityGranted && sInputMonitoringGranted;
-    sContinueButton.enabled = ready;
-    if (ready) {
-        sStep7Indicator.stringValue = @"\u2705";
-        sStep7Status.stringValue = @"All set! Model will be downloaded after you continue.";
+    BOOL allPerms = sAccessibilityGranted && sInputMonitoringGranted;
+    if (allPerms) {
+        sStep7Status.stringValue = @"Ready";
         sStep7Status.textColor = [NSColor systemGreenColor];
     } else {
-        sStep7Indicator.stringValue = @"\u23F3";
-        sStep7Status.stringValue = @"Waiting for permissions...";
-        sStep7Status.textColor = [NSColor secondaryLabelColor];
+        sStep7Status.stringValue = @"Not Ready";
+        sStep7Status.textColor = [NSColor systemOrangeColor];
+    }
+    if (sIsOnboarding) {
+        sContinueButton.enabled = allPerms;
     }
 }
 
@@ -158,7 +145,8 @@ static CGEventRef recorderTapCallback(
     return event;
 }
 
-extern void modelActionButtonClicked(void);
+extern void modelBtn1Clicked(void);
+extern void modelBtn2Clicked(void);
 extern void modelDropdownChanged(void);
 
 @interface SetupDelegate : NSObject <NSWindowDelegate>
@@ -168,7 +156,8 @@ extern void modelDropdownChanged(void);
 - (void)hotkeyConfirmClicked:(id)sender;
 - (void)openAccessibilitySettings:(id)sender;
 - (void)openInputMonitoringSettings:(id)sender;
-- (void)modelActionClicked:(id)sender;
+- (void)modelBtn1Clicked:(id)sender;
+- (void)modelBtn2Clicked:(id)sender;
 - (void)modelSelectionChanged:(id)sender;
 - (void)stopRecorder;
 @end
@@ -179,8 +168,12 @@ extern void modelDropdownChanged(void);
     // In preferences mode, closing via red X saves (auto-save on close).
     // In onboarding mode, closing via red X cancels (user must click Start).
     sSetupComplete = !sIsOnboarding;
-    [NSApp stopModal];
     [sSetupWindow orderOut:nil];
+    if (sWindowDone) {
+        dispatch_semaphore_signal(sWindowDone);
+    } else {
+        [NSApp stopModal];
+    }
     return NO;
 }
 
@@ -188,7 +181,11 @@ extern void modelDropdownChanged(void);
     [self stopRecorder];
     sSetupComplete = YES;
     [sSetupWindow orderOut:nil];
-    [NSApp stopModal];
+    if (sWindowDone) {
+        dispatch_semaphore_signal(sWindowDone);
+    } else {
+        [NSApp stopModal];
+    }
 }
 
 - (void)hotkeyChangeClicked:(id)sender {
@@ -262,8 +259,12 @@ extern void modelDropdownChanged(void);
     [[NSWorkspace sharedWorkspace] openURL:[NSURL URLWithString:@"x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent"]];
 }
 
-- (void)modelActionClicked:(id)sender {
-    modelActionButtonClicked();
+- (void)modelBtn1Clicked:(id)sender {
+    modelBtn1Clicked();
+}
+
+- (void)modelBtn2Clicked:(id)sender {
+    modelBtn2Clicked();
 }
 
 - (void)modelSelectionChanged:(id)sender {
@@ -321,25 +322,13 @@ void showSettingsWindow(int onboarding) {
             sStep2Status.stringValue = @"Checking...";
             sStep2Status.textColor = [NSColor secondaryLabelColor];
             sStep6Indicator.stringValue = @"\u23F3";
-            if (sModelStatus != nil) {
-                sModelStatus.stringValue = @"";
-            }
-            if (sProgressBar != nil) {
-                sProgressBar.hidden = YES;
-                sProgressBar.doubleValue = 0;
-            }
-            if (sProgressLabel != nil) {
-                sProgressLabel.hidden = YES;
-                sProgressLabel.stringValue = @"";
-            }
-            if (sModelActionBtn != nil) {
-                sModelActionBtn.title = @"Download";
-                sModelActionBtn.enabled = YES;
-            }
+            sProgressBar.hidden = YES;
+            sProgressBar.doubleValue = 0;
+            sProgressLabel.hidden = YES;
+            sProgressLabel.stringValue = @"";
 
-            sStep7Indicator.stringValue = @"\u23F3";
-            sStep7Status.stringValue = @"Waiting...";
-            sStep7Status.textColor = [NSColor secondaryLabelColor];
+            sStep7Status.stringValue = @"Not Ready";
+            sStep7Status.textColor = [NSColor systemOrangeColor];
 
             // Reset hotkey display
             sHotkeyChangeBtn.hidden = NO;
@@ -352,7 +341,7 @@ void showSettingsWindow(int onboarding) {
         }
 
         // First-time window creation
-        CGFloat w = 480, h = 750;
+        CGFloat w = 480, h = 880;
         NSRect frame = NSMakeRect(0, 0, w, h);
         sSetupWindow = [[NSWindow alloc]
             initWithContentRect:frame
@@ -379,11 +368,18 @@ void showSettingsWindow(int onboarding) {
         y -= 22;
 
         // Subtitle
-        NSTextField *subtitle = makeLabel(@"Hold a key, speak, text appears at your cursor.", 12, NO,
+        NSTextField *subtitle = makeLabel(@"You Speak, Joice Types", 12, NO,
             [NSColor secondaryLabelColor], NSMakeRect(pad, y, innerW, 18));
         subtitle.alignment = NSTextAlignmentCenter;
         [content addSubview:subtitle];
-        y -= 40;
+        y -= 24;
+
+        // Ready status (below tagline, bigger font)
+        sStep7Status = makeLabel(@"Not Ready", 14, YES,
+            [NSColor systemOrangeColor], NSMakeRect(pad, y, innerW, 20));
+        sStep7Status.alignment = NSTextAlignmentCenter;
+        [content addSubview:sStep7Status];
+        y -= 30;
 
         // Step 1: Accessibility
         sStep1Indicator = makeLabel(@"\u23F3", 16, NO, [NSColor labelColor], NSMakeRect(pad, y, 24, 24));
@@ -405,8 +401,8 @@ void showSettingsWindow(int onboarding) {
         s1OpenBtn.action = @selector(openAccessibilitySettings:);
         [content addSubview:s1OpenBtn];
 
-        NSTextField *s1Help = makeLabel(@"If toggled on but showing denied: remove entry (\u2212) and re-add it", 9, NO,
-            [NSColor tertiaryLabelColor], NSMakeRect(pad + 28, y - 14, innerW - 90, 14));
+        NSTextField *s1Help = makeLabel(@"If toggled on but showing denied: remove entry (\u2212) and re-add it", 11, NO,
+            [NSColor tertiaryLabelColor], NSMakeRect(pad + 28, y - 14, innerW - 90, 16));
         [content addSubview:s1Help];
         y -= 50;
 
@@ -430,8 +426,8 @@ void showSettingsWindow(int onboarding) {
         s2OpenBtn.action = @selector(openInputMonitoringSettings:);
         [content addSubview:s2OpenBtn];
 
-        NSTextField *s2Help = makeLabel(@"If toggled on but showing denied: remove entry (\u2212) and re-add it", 9, NO,
-            [NSColor tertiaryLabelColor], NSMakeRect(pad + 28, y - 14, innerW - 90, 14));
+        NSTextField *s2Help = makeLabel(@"If toggled on but showing denied: remove entry (\u2212) and re-add it", 11, NO,
+            [NSColor tertiaryLabelColor], NSMakeRect(pad + 28, y - 14, innerW - 90, 16));
         [content addSubview:s2Help];
         y -= 50;
 
@@ -505,26 +501,28 @@ void showSettingsWindow(int onboarding) {
         sModelDropdown.target = sSetupDelegate;
         sModelDropdown.action = @selector(modelSelectionChanged:);
         [content addSubview:sModelDropdown];
-        y -= 20;
-        sModelStatus = makeLabel(@"", 10, NO,
-            [NSColor secondaryLabelColor], NSMakeRect(pad + 28, y, innerW - 28, 14));
-        [content addSubview:sModelStatus];
-        y -= 22;
-
-        sModelActionBtn = [[NSButton alloc] initWithFrame:NSMakeRect(pad + 28, y, 120, 24)];
-        sModelActionBtn.title = @"Download";
-        sModelActionBtn.bezelStyle = NSBezelStyleRounded;
-        sModelActionBtn.target = sSetupDelegate;
-        sModelActionBtn.action = @selector(modelActionClicked:);
-        [content addSubview:sModelActionBtn];
         y -= 28;
 
-        // Keep progress bar for downloads
-        sProgressBar = [[NSProgressIndicator alloc] initWithFrame:NSMakeRect(pad + 28, y, innerW - 28, 8)];
+        // Buttons row: btn1 (left) and btn2 (right of btn1)
+        sModelBtn1 = [[NSButton alloc] initWithFrame:NSMakeRect(pad + 28, y, 90, 24)];
+        sModelBtn1.bezelStyle = NSBezelStyleRounded;
+        sModelBtn1.target = sSetupDelegate;
+        sModelBtn1.action = @selector(modelBtn1Clicked:);
+        [content addSubview:sModelBtn1];
+
+        sModelBtn2 = [[NSButton alloc] initWithFrame:NSMakeRect(pad + 28 + 94, y, 80, 24)];
+        sModelBtn2.bezelStyle = NSBezelStyleRounded;
+        sModelBtn2.target = sSetupDelegate;
+        sModelBtn2.action = @selector(modelBtn2Clicked:);
+        sModelBtn2.hidden = YES;
+        [content addSubview:sModelBtn2];
+        y -= 28;
+
+        // Progress bar for downloads
+        sProgressBar = [[NSProgressIndicator alloc] initWithFrame:NSMakeRect(pad + 28, y + 4, innerW - 28, 8)];
         sProgressBar.style = NSProgressIndicatorStyleBar;
         sProgressBar.minValue = 0;
         sProgressBar.maxValue = 1.0;
-        sProgressBar.doubleValue = 0;
         sProgressBar.indeterminate = NO;
         sProgressBar.hidden = YES;
         [content addSubview:sProgressBar];
@@ -533,18 +531,48 @@ void showSettingsWindow(int onboarding) {
             [NSColor secondaryLabelColor], NSMakeRect(pad + 28, y, innerW - 28, 14));
         sProgressLabel.hidden = YES;
         [content addSubview:sProgressLabel];
-        y -= 36;
+        y -= 28;
 
-        // Step 7: Ready
-        sStep7Indicator = makeLabel(@"\u23F3", 16, NO, [NSColor labelColor], NSMakeRect(pad, y, 24, 24));
-        [content addSubview:sStep7Indicator];
-        NSTextField *s7title = makeLabel(@"7. Ready", 13, YES,
+        // Step 7: Words You Use Often
+        NSTextField *s7VocabIndicator = makeLabel(@"\U0001F4AC", 16, NO, [NSColor labelColor], NSMakeRect(pad, y, 24, 24));
+        [content addSubview:s7VocabIndicator];
+        NSTextField *s7title = makeLabel(@"7. Words You Use Often", 13, YES,
             [NSColor labelColor], NSMakeRect(pad + 28, y, innerW - 28, 20));
         [content addSubview:s7title];
-        y -= 20;
-        sStep7Status = makeLabel(@"Waiting...", 11, NO,
-            [NSColor secondaryLabelColor], NSMakeRect(pad + 28, y, innerW - 28, 16));
-        [content addSubview:sStep7Status];
+        y -= 22;
+
+        // Text box (scrollable)
+        sVocabScrollView = [[NSScrollView alloc] initWithFrame:NSMakeRect(pad + 28, y - 50, innerW - 28, 50)];
+        sVocabScrollView.hasVerticalScroller = YES;
+        sVocabScrollView.borderType = NSBezelBorder;
+        sVocabTextView = [[NSTextView alloc] initWithFrame:NSMakeRect(0, 0, innerW - 28 - 16, 50)];
+        sVocabTextView.font = [NSFont systemFontOfSize:12];
+        sVocabTextView.textColor = [NSColor labelColor];
+        sVocabTextView.backgroundColor = [NSColor textBackgroundColor];
+        sVocabTextView.minSize = NSMakeSize(0, 50);
+        sVocabTextView.maxSize = NSMakeSize(CGFLOAT_MAX, CGFLOAT_MAX);
+        sVocabTextView.verticallyResizable = YES;
+        sVocabTextView.horizontallyResizable = NO;
+        sVocabTextView.textContainer.widthTracksTextView = YES;
+        sVocabScrollView.documentView = sVocabTextView;
+        [content addSubview:sVocabScrollView];
+        y -= 56;
+
+        NSTextField *vocabHelp = makeLabel(@"Separate words or phrases with commas. These help the speech model recognise your terminology.", 11, NO,
+            [NSColor tertiaryLabelColor], NSMakeRect(pad + 28, y, innerW - 28, 28));
+        vocabHelp.maximumNumberOfLines = 2;
+        [content addSubview:vocabHelp];
+        y -= 32;
+
+        // Save button (preferences mode only — right-aligned, below vocabulary)
+        NSButton *saveBtn = [[NSButton alloc] initWithFrame:NSMakeRect(w - pad - 80, y, 80, 28)];
+        saveBtn.title = @"Save";
+        saveBtn.bezelStyle = NSBezelStyleRounded;
+        saveBtn.target = sSetupDelegate;
+        saveBtn.action = @selector(continueClicked:);
+        saveBtn.hidden = sIsOnboarding;
+        [content addSubview:saveBtn];
+        y -= 36;
 
         // Continue button (bottom right, initially disabled)
         sContinueButton = [[NSButton alloc] initWithFrame:NSMakeRect(w - pad - 120, 16, 120, 32)];
@@ -610,37 +638,10 @@ void populateSetupDevices(const char **deviceNames, int count, int defaultIndex)
     }
 }
 
-void updateSetupDownloadProgress(double progress, long long bytesDownloaded, long long bytesTotal) {
-    dispatch_async(dispatch_get_main_queue(), ^{
-        sStep6Indicator.stringValue = @"\u2B07\uFE0F";
-        sProgressBar.hidden = NO;
-        sProgressBar.doubleValue = progress;
-        long long mb_done = bytesDownloaded / (1024 * 1024);
-        long long mb_total = bytesTotal / (1024 * 1024);
-        sProgressLabel.hidden = NO;
-        sProgressLabel.stringValue = [NSString stringWithFormat:@"%lld MB / %lld MB \u2014 %d%%",
-            mb_done, mb_total, (int)(progress * 100)];
-    });
-}
-
 void updateSetupDownloadComplete(void) {
     dispatch_async(dispatch_get_main_queue(), ^{
         sDownloadComplete = YES;
         sStep6Indicator.stringValue = @"\u2705";
-        sProgressBar.doubleValue = 1.0;
-        sProgressBar.hidden = YES;
-        sProgressLabel.hidden = YES;
-        if (sModelStatus != nil) sModelStatus.stringValue = @"Model ready";
-    });
-}
-
-void updateSetupDownloadFailed(const char *errorMsg) {
-    NSString *msg = [NSString stringWithUTF8String:errorMsg];
-    dispatch_async(dispatch_get_main_queue(), ^{
-        sStep6Indicator.stringValue = @"\u274C";
-        sProgressBar.hidden = YES;
-        sProgressLabel.hidden = YES;
-        if (sModelStatus != nil) sModelStatus.stringValue = msg;
     });
 }
 
@@ -681,17 +682,6 @@ void setPrefsPermissionState(void) {
         sDownloadComplete = YES;
         sStep6Indicator.stringValue = @"\u2705";
 
-        // Ready step — reflects actual permission state
-        if (accGranted && inpGranted) {
-            sStep7Indicator.stringValue = @"\u2705";
-            sStep7Status.stringValue = @"Edit settings and click Save";
-            sStep7Status.textColor = [NSColor systemGreenColor];
-        } else {
-            sStep7Indicator.stringValue = @"\u26A0\uFE0F";
-            sStep7Status.stringValue = @"Grant all permissions above first";
-            sStep7Status.textColor = [NSColor systemOrangeColor];
-        }
-
         refreshContinueState();
     });
 }
@@ -699,9 +689,6 @@ void setPrefsPermissionState(void) {
 void updateSetupReady(void) {
     dispatch_async(dispatch_get_main_queue(), ^{
         sDownloadComplete = YES;
-        sStep7Indicator.stringValue = @"\u2705";
-        sStep7Status.stringValue = @"All set!";
-        sStep7Status.textColor = [NSColor systemGreenColor];
         sContinueButton.title = @"Start JoiceTyper";
         refreshContinueState();
     });
@@ -729,6 +716,43 @@ const char *getSelectedDevice(void) {
     memcpy(sSelectedDeviceBuffer, utf8, len);
     sSelectedDeviceBuffer[len] = '\0';
     return sSelectedDeviceBuffer;
+}
+
+void setVocabularyText(const char *text) {
+    if (sVocabTextView == nil) return;
+    // Copy string before dispatch — caller may free immediately.
+    NSString *str = [NSString stringWithUTF8String:text];
+    dispatch_async(dispatch_get_main_queue(), ^{
+        sVocabTextView.string = str;
+    });
+}
+
+static char sVocabBuffer[4096] = {0};
+
+const char *getVocabularyText(void) {
+    if (sVocabTextView == nil) {
+        sVocabBuffer[0] = '\0';
+        return sVocabBuffer;
+    }
+    // Read NSTextView on main thread — required for AppKit thread safety.
+    __block NSString *text = nil;
+    if ([NSThread isMainThread]) {
+        text = [sVocabTextView.string copy];
+    } else {
+        dispatch_sync(dispatch_get_main_queue(), ^{
+            text = [sVocabTextView.string copy];
+        });
+    }
+    const char *utf8 = [text UTF8String];
+    if (utf8 == NULL) {
+        sVocabBuffer[0] = '\0';
+        return sVocabBuffer;
+    }
+    size_t len = strlen(utf8);
+    if (len >= sizeof(sVocabBuffer)) len = sizeof(sVocabBuffer) - 1;
+    memcpy(sVocabBuffer, utf8, len);
+    sVocabBuffer[len] = '\0';
+    return sVocabBuffer;
 }
 
 void populateSettingsLanguages(const char **codes, const char **names, int count, int defaultIndex) {
@@ -785,11 +809,18 @@ int getSettingsHotkeyKeycode(void) {
 }
 
 void runSetupEventLoop(void) {
-    // Ensure NSApplication singleton exists (idempotent, safe to call many times).
-    ensureNSApp();
-    // Run as modal session — does NOT call [NSApp run].
-    // The single [NSApp run] happens later in hotkey's runMainLoop().
-    [NSApp runModalForWindow:sSetupWindow];
+    if (sIsOnboarding) {
+        // Onboarding: no [NSApp run] yet — use modal to get an event loop.
+        ensureNSApp();
+        [NSApp runModalForWindow:sSetupWindow];
+    } else {
+        // Preferences: called from a background goroutine. Block on a
+        // semaphore until the window closes. The main thread's [NSApp run]
+        // stays responsive — menu bar clicks, macOS termination, etc. work.
+        sWindowDone = dispatch_semaphore_create(0);
+        dispatch_semaphore_wait(sWindowDone, DISPATCH_TIME_FOREVER);
+        sWindowDone = NULL;
+    }
 }
 
 void populateSettingsModels(const char **sizes, const char **descriptions, int count, int defaultIndex) {
@@ -805,6 +836,11 @@ void populateSettingsModels(const char **sizes, const char **descriptions, int c
 }
 
 const char *getSelectedModel(void) {
+    // Return the active model (set by Go side via sActiveModelSize)
+    return sActiveModelSize;
+}
+
+const char *getDropdownModel(void) {
     if (sModelDropdown == nil || sModelDropdown.selectedItem == nil) {
         sSelectedModelBuffer[0] = '\0';
         return sSelectedModelBuffer;
@@ -816,29 +852,97 @@ const char *getSelectedModel(void) {
         return sSelectedModelBuffer;
     }
     size_t len = strlen(utf8);
-    if (len >= sizeof(sSelectedModelBuffer)) {
-        len = sizeof(sSelectedModelBuffer) - 1;
-    }
+    if (len >= sizeof(sSelectedModelBuffer)) len = sizeof(sSelectedModelBuffer) - 1;
     memcpy(sSelectedModelBuffer, utf8, len);
     sSelectedModelBuffer[len] = '\0';
     return sSelectedModelBuffer;
 }
 
-void updateSettingsModelStatus(const char *status) {
-    NSString *statusStr = [NSString stringWithUTF8String:status];
+void setActiveModelSize(const char *size) {
+    strlcpy(sActiveModelSize, size, sizeof(sActiveModelSize));
+}
+
+// Update the buttons below the dropdown for the currently selected model.
+// state: 0=not downloaded, 1=active, 2=downloaded not active,
+//        3=downloading, 4=download failed, 5=delete confirm
+void updateModelButtons(int state) {
     dispatch_async(dispatch_get_main_queue(), ^{
-        if (sModelStatus != nil) {
-            sModelStatus.stringValue = statusStr;
+        switch (state) {
+        case 0: // Not downloaded
+            sModelBtn1.title = @"Download";
+            sModelBtn1.enabled = YES;
+            sModelBtn1.contentTintColor = nil;
+            sModelBtn1.hidden = NO;
+            sModelBtn2.hidden = YES;
+            sProgressBar.hidden = YES;
+            sProgressLabel.hidden = YES;
+            break;
+        case 1: // Active (in use)
+            sModelBtn1.title = @"In Use";
+            sModelBtn1.enabled = NO;
+            sModelBtn1.contentTintColor = nil;
+            sModelBtn1.hidden = NO;
+            sModelBtn2.hidden = YES;
+            sProgressBar.hidden = YES;
+            sProgressLabel.hidden = YES;
+            break;
+        case 2: // Downloaded, not active
+            sModelBtn1.title = @"Use";
+            sModelBtn1.enabled = YES;
+            sModelBtn1.contentTintColor = nil;
+            sModelBtn1.hidden = NO;
+            sModelBtn2.title = @"Delete";
+            sModelBtn2.contentTintColor = [NSColor systemRedColor];
+            sModelBtn2.enabled = YES;
+            sModelBtn2.hidden = NO;
+            sProgressBar.hidden = YES;
+            sProgressLabel.hidden = YES;
+            break;
+        case 3: // Downloading
+            sModelBtn1.title = @"Downloading...";
+            sModelBtn1.enabled = NO;
+            sModelBtn1.contentTintColor = nil;
+            sModelBtn1.hidden = NO;
+            sModelBtn2.hidden = YES;
+            sProgressBar.hidden = NO;
+            sProgressBar.doubleValue = 0;
+            sProgressLabel.hidden = NO;
+            sProgressLabel.stringValue = @"Starting...";
+            break;
+        case 4: // Download failed
+            sModelBtn1.title = @"Download";
+            sModelBtn1.enabled = YES;
+            sModelBtn1.contentTintColor = nil;
+            sModelBtn1.hidden = NO;
+            sModelBtn2.hidden = YES;
+            sProgressBar.hidden = YES;
+            sProgressLabel.hidden = NO;
+            sProgressLabel.stringValue = @"Download failed — try again";
+            break;
+        case 5: // Delete confirmation
+            sModelBtn1.title = @"Confirm?";
+            sModelBtn1.enabled = YES;
+            sModelBtn1.contentTintColor = [NSColor systemRedColor];
+            sModelBtn1.hidden = NO;
+            sModelBtn2.title = @"Cancel";
+            sModelBtn2.contentTintColor = nil;
+            sModelBtn2.enabled = YES;
+            sModelBtn2.hidden = NO;
+            sProgressBar.hidden = YES;
+            sProgressLabel.hidden = YES;
+            break;
         }
     });
 }
 
-void updateModelActionButton(const char *title, int enabled) {
-    // Copy the string before dispatching — the caller may free it immediately.
-    NSString *titleStr = [NSString stringWithUTF8String:title];
+void updateDownloadProgress(double progress, long long downloaded, long long total) {
     dispatch_async(dispatch_get_main_queue(), ^{
-        if (sModelActionBtn == nil) return;
-        sModelActionBtn.title = titleStr;
-        sModelActionBtn.enabled = (enabled != 0);
+        sProgressBar.hidden = NO;
+        sProgressBar.doubleValue = progress;
+        sProgressLabel.hidden = NO;
+        if (total > 0) {
+            sProgressLabel.stringValue = [NSString stringWithFormat:@"%.0f MB / %.0f MB",
+                (double)downloaded / 1048576.0, (double)total / 1048576.0];
+        }
     });
 }
