@@ -103,12 +103,14 @@ static CGEventRef recorderTapCallback(
 
 @implementation SetupDelegate
 - (BOOL)windowShouldClose:(NSWindow *)sender {
+    [self stopRecorder];
     sSetupComplete = NO;
     [NSApp stopModal];
     return YES;
 }
 
 - (void)continueClicked:(id)sender {
+    [self stopRecorder];
     sSetupComplete = YES;
     [sSetupWindow close];
     [NSApp stopModal];
@@ -433,6 +435,39 @@ void updateSetupDownloadFailed(const char *errorMsg) {
         sProgressLabel.stringValue = msg;
         sStep6Status.stringValue = @"Download failed \u2014 restart to retry";
         sStep6Status.textColor = [NSColor systemRedColor];
+    });
+}
+
+void setPrefsPermissionsGranted(void) {
+    dispatch_async(dispatch_get_main_queue(), ^{
+        // In preferences mode, the app is already running — permissions are granted.
+        // Set indicators to "Granted" state and hide the download step.
+        sAccessibilityGranted = YES;
+        sStep1Indicator.stringValue = @"\u2705";
+        sStep1Status.stringValue = @"Granted";
+        sStep1Status.textColor = [NSColor systemGreenColor];
+
+        sInputMonitoringGranted = YES;
+        sStep2Indicator.stringValue = @"\u2705";
+        sStep2Status.stringValue = @"Granted";
+        sStep2Status.textColor = [NSColor systemGreenColor];
+
+        sStep3Indicator.stringValue = @"\U0001F3A4";
+
+        // Download step: mark as complete (model already loaded)
+        sDownloadComplete = YES;
+        sStep6Indicator.stringValue = @"\u2705";
+        sStep6Status.stringValue = @"Model loaded";
+        sStep6Status.textColor = [NSColor systemGreenColor];
+        sProgressBar.hidden = YES;
+        sProgressLabel.hidden = YES;
+
+        // Ready step
+        sStep7Indicator.stringValue = @"\u2705";
+        sStep7Status.stringValue = @"Edit settings and click Save";
+        sStep7Status.textColor = [NSColor systemGreenColor];
+
+        refreshContinueState();
     });
 }
 

@@ -301,6 +301,10 @@ func OpenPreferences() {
 
 	C.showSettingsWindow(0)
 
+	// In preferences mode, permissions are already granted (app is running).
+	// Set indicators to "Granted" and hide download step.
+	C.setPrefsPermissionsGranted()
+
 	// Pre-populate from current config
 	populateLanguageList(cfg.Language)
 	populateMicList(cfg.InputDevice, settingsLogger)
