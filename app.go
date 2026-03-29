@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"log/slog"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -127,23 +128,64 @@ func (a *App) handleRelease() {
 }
 
 func (a *App) handleReleaseStream() {
+	if !a.recording {
+		a.logger.Debug("not recording, ignoring release", "operation", "handleReleaseStream")
+		return
+	}
+	a.recording = false
+	a.sound.PlayStop()
+
+	// Get streamer's last text before stopping
+	lastText := ""
 	if a.streamer != nil {
+		lastText = a.streamer.LastText()
 		a.streamer.Stop()
+		a.streamer = nil
 	}
 
-	_, err := a.recorder.Stop()
-	a.recording = false
+	// Stop recorder and get full audio
+	audio, err := a.recorder.Stop()
 	if err != nil {
-		a.logger.Error("failed to stop recording",
-			"operation", "handleReleaseStream", "error", err)
-		a.sound.PlayError()
+		a.logger.Error("failed to stop recorder", "component", "app", "operation", "handleReleaseStream", "error", err)
 		a.emitState(StateReady)
-		a.streamer = nil
 		return
 	}
 
-	a.sound.PlayStop()
-	a.streamer = nil
+	if len(audio) == 0 {
+		a.logger.Warn("no audio captured", "component", "app", "operation", "handleReleaseStream")
+		a.emitState(StateReady)
+		return
+	}
+
+	// Final transcription of complete audio
+	a.emitState(StateTranscribing)
+	finalText, transcribeErr := a.transcriber.Transcribe(context.Background(), audio)
+	if transcribeErr != nil {
+		a.logger.Error("final transcription failed", "component", "app", "operation", "handleReleaseStream", "error", transcribeErr)
+		a.emitState(StateReady)
+		return
+	}
+
+	finalText = strings.TrimSpace(finalText)
+	if finalText == "" {
+		a.logger.Warn("no speech detected in final transcription", "component", "app", "operation", "handleReleaseStream")
+		a.emitState(StateReady)
+		return
+	}
+
+	// Replace streamer's partial text with the complete transcription
+	if a.typer != nil && lastText != "" {
+		if err := a.typer.ReplaceAll(len([]rune(lastText)), finalText); err != nil {
+			a.logger.Error("failed to replace with final text", "component", "app", "operation", "handleReleaseStream", "error", err)
+		}
+	} else if a.typer != nil {
+		if err := a.typer.Type(finalText); err != nil {
+			a.logger.Error("failed to type final text", "component", "app", "operation", "handleReleaseStream", "error", err)
+		}
+	}
+
+	a.logger.Info("stream complete", "component", "app", "operation", "handleReleaseStream",
+		"text_length", len(finalText))
 	a.emitState(StateReady)
 }
 
@@ -210,6 +252,18 @@ func (a *App) transcribeAndPaste(audio []float32) {
 	a.logger.Info("text pasted", "operation", "transcribeAndPaste",
 		"text_length", len(text))
 	a.emitState(StateReady)
+}
+
+// SetRecorder replaces the recorder used by the app.
+// Must only be called when no recording is in progress.
+func (a *App) SetRecorder(r Recorder) {
+	a.recorder = r
+}
+
+// SetTranscriber replaces the transcriber used by the app.
+// Must only be called when no transcription is in progress.
+func (a *App) SetTranscriber(t Transcriber) {
+	a.transcriber = t
 }
 
 // Shutdown gracefully closes all components.

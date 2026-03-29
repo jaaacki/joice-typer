@@ -111,19 +111,22 @@ func (r *portaudioRecorder) Start(ctx context.Context) error {
 	if r.deviceName != "" {
 		device, devErr := findInputDevice(r.deviceName)
 		if devErr != nil {
-			r.recording = false
-			return fmt.Errorf("recorder.Start: %w", devErr)
+			r.logger.Warn("configured device not found, using default input",
+				"operation", "Start",
+				"device", r.deviceName, "error", devErr)
+			stream, err = portaudio.OpenDefaultStream(1, 0, r.sampleRate, len(r.buffer), r.buffer)
+		} else {
+			params := portaudio.StreamParameters{
+				Input: portaudio.StreamDeviceParameters{
+					Device:   device,
+					Channels: 1,
+					Latency:  device.DefaultLowInputLatency,
+				},
+				SampleRate:      r.sampleRate,
+				FramesPerBuffer: len(r.buffer),
+			}
+			stream, err = portaudio.OpenStream(params, r.buffer)
 		}
-		params := portaudio.StreamParameters{
-			Input: portaudio.StreamDeviceParameters{
-				Device:   device,
-				Channels: 1,
-				Latency:  device.DefaultLowInputLatency,
-			},
-			SampleRate:      r.sampleRate,
-			FramesPerBuffer: len(r.buffer),
-		}
-		stream, err = portaudio.OpenStream(params, r.buffer)
 	} else {
 		stream, err = portaudio.OpenDefaultStream(1, 0, r.sampleRate, len(r.buffer), r.buffer)
 	}
@@ -216,15 +219,15 @@ func (r *portaudioRecorder) Snapshot() []float32 {
 
 func (r *portaudioRecorder) Stop() ([]float32, error) {
 	r.mu.Lock()
-	if !r.recording {
-		r.mu.Unlock()
-		return nil, fmt.Errorf("recorder.Stop: not recording")
-	}
 	r.recording = false
 	chunks := r.chunks
 	r.chunks = nil
 	done := r.done
 	r.mu.Unlock()
+
+	if done == nil {
+		return nil, fmt.Errorf("recorder.Stop: not recording")
+	}
 
 	r.logger.Debug("stopping", "operation", "Stop")
 

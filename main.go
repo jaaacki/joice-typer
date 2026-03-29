@@ -229,6 +229,7 @@ func runAppMode() {
 		case <-hotkeyRestartCh:
 			logger.Info("restarting hotkey with new config", "component", "main", "operation", "runAppMode")
 			// Reload config and recreate listener
+			oldCfg := cfg
 			cfg, err = LoadConfig(cfgPath)
 			if err != nil {
 				logger.Error("failed to reload config, keeping current hotkey",
@@ -239,6 +240,32 @@ func runAppMode() {
 			activeHotkeyMu.Lock()
 			activeHotkey = hotkey
 			activeHotkeyMu.Unlock()
+
+			// Recreate recorder if input device changed
+			if oldCfg.InputDevice != cfg.InputDevice {
+				if closeErr := recorder.Close(); closeErr != nil {
+					logger.Error("failed to close old recorder", "component", "main", "operation", "runAppMode", "error", closeErr)
+				}
+				recorder = NewRecorder(cfg.SampleRate, cfg.InputDevice, logger)
+				app.SetRecorder(recorder)
+				logger.Info("recorder updated", "component", "main", "operation", "runAppMode", "device", cfg.InputDevice)
+			}
+
+			// Recreate transcriber if language changed
+			if oldCfg.Language != cfg.Language {
+				if closeErr := transcriber.Close(); closeErr != nil {
+					logger.Error("failed to close old transcriber", "component", "main", "operation", "runAppMode", "error", closeErr)
+				}
+				modelPath, _ := DefaultModelPath(cfg.ModelSize)
+				transcriber, err = NewTranscriber(context.Background(), modelPath, cfg.ModelSize, cfg.Language, cfg.SampleRate, logger)
+				if err != nil {
+					logger.Error("failed to recreate transcriber", "component", "main", "operation", "runAppMode", "error", err)
+				} else {
+					app.SetTranscriber(transcriber)
+					logger.Info("transcriber updated", "component", "main", "operation", "runAppMode", "language", cfg.Language)
+				}
+			}
+
 			UpdateStatusBar(StateReady)
 			continue
 		default:

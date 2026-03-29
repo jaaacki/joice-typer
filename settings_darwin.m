@@ -24,6 +24,11 @@ static NSTextField *sStep6Indicator = nil;
 static NSTextField *sStep7Indicator = nil;
 static char sSelectedDeviceBuffer[512] = {0};
 
+static BOOL sAccessibilityGranted = NO;
+static BOOL sInputMonitoringGranted = NO;
+static BOOL sDownloadComplete = NO;
+static BOOL sIsOnboarding = YES;
+
 static NSTextField *sHotkeyLabel = nil;
 static NSButton *sHotkeyChangeBtn = nil;
 static NSButton *sHotkeyCancelBtn = nil;
@@ -55,6 +60,14 @@ static NSString *flagsToDisplayString(uint64_t flags) {
     if (flags & 0x100000) [parts addObject:@"Cmd"];
     if (parts.count == 0) return @"Press keys...";
     return [parts componentsJoinedByString:@" + "];
+}
+
+static void refreshContinueState(void) {
+    if (!sIsOnboarding) {
+        sContinueButton.enabled = YES;
+        return;
+    }
+    sContinueButton.enabled = (sAccessibilityGranted && sInputMonitoringGranted && sDownloadComplete);
 }
 
 static CGEventRef recorderTapCallback(
@@ -159,7 +172,6 @@ static CGEventRef recorderTapCallback(
 @end
 
 static SetupDelegate *sSetupDelegate = nil;
-static BOOL sIsOnboarding = YES;
 
 void showSettingsWindow(int onboarding) {
     @autoreleasepool {
@@ -172,6 +184,11 @@ void showSettingsWindow(int onboarding) {
         // Reset stale hotkey recorder state
         sConfirmedFlags = 0;
         sRecordedFlags = 0;
+
+        // Reset permission/download tracking for onboarding gate
+        sAccessibilityGranted = NO;
+        sInputMonitoringGranted = NO;
+        sDownloadComplete = NO;
 
         sIsOnboarding = (onboarding != 0);
         CGFloat w = 480, h = 640;
@@ -326,19 +343,14 @@ void showSettingsWindow(int onboarding) {
 
         // Continue button (bottom right, initially disabled)
         sContinueButton = [[NSButton alloc] initWithFrame:NSMakeRect(w - pad - 120, 16, 120, 32)];
-        sContinueButton.title = sIsOnboarding ? @"Continue" : @"Save";
+        sContinueButton.title = sIsOnboarding ? @"Start JoiceTyper" : @"Save";
         sContinueButton.bezelStyle = NSBezelStyleRounded;
-        sContinueButton.enabled = NO;
+        sContinueButton.enabled = !sIsOnboarding; // only auto-enable in prefs mode
         sContinueButton.target = sSetupDelegate;
         sContinueButton.action = @selector(continueClicked:);
         [content addSubview:sContinueButton];
 
         sSetupComplete = NO;
-
-        // In preferences mode, Save is always available (no download gate)
-        if (!sIsOnboarding) {
-            sContinueButton.enabled = YES;
-        }
 
         [sSetupWindow makeKeyAndOrderFront:nil];
         [NSApp activateIgnoringOtherApps:YES];
@@ -348,29 +360,35 @@ void showSettingsWindow(int onboarding) {
 void updateSetupAccessibility(int granted) {
     dispatch_async(dispatch_get_main_queue(), ^{
         if (granted) {
+            sAccessibilityGranted = YES;
             sStep1Indicator.stringValue = @"\u2705";
             sStep1Status.stringValue = @"Granted";
             sStep1Status.textColor = [NSColor systemGreenColor];
         } else {
+            sAccessibilityGranted = NO;
             sStep1Indicator.stringValue = @"\u23F3";
             sStep1Status.stringValue = @"System Settings \u2192 Privacy & Security \u2192 Accessibility";
             sStep1Status.textColor = [NSColor systemOrangeColor];
         }
+        refreshContinueState();
     });
 }
 
 void updateSetupInputMonitoring(int granted) {
     dispatch_async(dispatch_get_main_queue(), ^{
         if (granted) {
+            sInputMonitoringGranted = YES;
             sStep2Indicator.stringValue = @"\u2705";
             sStep2Status.stringValue = @"Granted";
             sStep2Status.textColor = [NSColor systemGreenColor];
             sStep3Indicator.stringValue = @"\U0001F3A4";
         } else {
+            sInputMonitoringGranted = NO;
             sStep2Indicator.stringValue = @"\u23F3";
             sStep2Status.stringValue = @"System Settings \u2192 Privacy & Security \u2192 Input Monitoring";
             sStep2Status.textColor = [NSColor systemOrangeColor];
         }
+        refreshContinueState();
     });
 }
 
@@ -420,11 +438,12 @@ void updateSetupDownloadFailed(const char *errorMsg) {
 
 void updateSetupReady(void) {
     dispatch_async(dispatch_get_main_queue(), ^{
+        sDownloadComplete = YES;
         sStep7Indicator.stringValue = @"\u2705";
         sStep7Status.stringValue = @"All set!";
         sStep7Status.textColor = [NSColor systemGreenColor];
         sContinueButton.title = @"Start JoiceTyper";
-        sContinueButton.enabled = YES;
+        refreshContinueState();
     });
 }
 
