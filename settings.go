@@ -82,7 +82,7 @@ func RunSetupWizard(logger *slog.Logger) (string, error) {
 	// Step 4: Populate language list
 	populateLanguageList("en")
 
-	// Step 5: Model download in background goroutine
+	// Step 6: Model download in background goroutine
 	go func() {
 		const setupModelSize = "small"
 		modelPath, pathErr := DefaultModelPath(setupModelSize)
@@ -113,6 +113,11 @@ func RunSetupWizard(logger *slog.Logger) (string, error) {
 		C.updateSetupReady()
 	}()
 
+	// Set default hotkey display
+	cDefaultHotkey := C.CString("Fn + Shift")
+	C.setSettingsHotkey(cDefaultHotkey)
+	C.free(unsafe.Pointer(cDefaultHotkey))
+
 	// Block here — [NSApp run] processes events until Continue is clicked
 	C.runSetupEventLoop()
 
@@ -131,8 +136,17 @@ func RunSetupWizard(logger *slog.Logger) (string, error) {
 	// Read selected language
 	selectedLang := C.GoString(C.getSelectedLanguage())
 
+	// Read hotkey flags
+	hotkeyFlags := uint64(C.getSettingsHotkeyFlags())
+	var triggerKeys []string
+	if hotkeyFlags != 0 {
+		triggerKeys = flagsToKeys(hotkeyFlags)
+	} else {
+		triggerKeys = []string{"fn", "shift"}
+	}
+
 	// Write config
-	if err := writeSetupConfig(selectedDevice, selectedLang, l); err != nil {
+	if err := writeSetupConfig(selectedDevice, selectedLang, triggerKeys, l); err != nil {
 		return "", fmt.Errorf("setup.RunSetupWizard: %w", err)
 	}
 
@@ -185,14 +199,14 @@ func populateLanguageList(selectedCode string) {
 	}
 }
 
-func writeSetupConfig(deviceName string, language string, l *slog.Logger) error {
+func writeSetupConfig(deviceName string, language string, triggerKeys []string, l *slog.Logger) error {
 	cfgPath, err := DefaultConfigPath()
 	if err != nil {
 		return fmt.Errorf("writeSetupConfig: %w", err)
 	}
 
 	cfg := Config{
-		TriggerKey:    []string{"fn", "shift"},
+		TriggerKey:    triggerKeys,
 		ModelSize:     "small",
 		Language:      language,
 		SampleRate:    16000,

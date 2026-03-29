@@ -1,12 +1,17 @@
 #ifndef SETTINGS_DARWIN_H
 #define SETTINGS_DARWIN_H
 
+#include <stdint.h>
+
 void showSetupWindow(void);
 void updateSetupAccessibility(int granted);
 void updateSetupInputMonitoring(int granted);
 void populateSetupDevices(const char **deviceNames, int count, int defaultIndex);
 void populateSettingsLanguages(const char **codes, const char **names, int count, int defaultIndex);
 const char *getSelectedLanguage(void);
+void setSettingsHotkey(const char *displayText);
+const char *getSettingsHotkey(void);
+uint64_t getSettingsHotkeyFlags(void);
 void updateSetupDownloadProgress(double progress, long long bytesDownloaded, long long bytesTotal);
 void updateSetupDownloadComplete(void);
 void updateSetupDownloadFailed(const char *errorMsg);
