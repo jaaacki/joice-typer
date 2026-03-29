@@ -81,6 +81,9 @@ int pasteText(const char* text) {
                 }
                 [pb clearContents];
                 [pb writeObjects:itemsToRestore];
+            } else {
+                // Clipboard was empty before paste — restore that empty state
+                [pb clearContents];
             }
         });
 

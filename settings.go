@@ -98,13 +98,17 @@ func RunSetupWizard(ctx context.Context, logger *slog.Logger) (string, error) {
 	populateModelList("small")
 
 	// Step 6: Model download in background goroutine
+	// Uses the currently selected model from the dropdown (default: small)
+	setupModelSize := C.GoString(C.getSelectedModel())
+	if setupModelSize == "" {
+		setupModelSize = "small"
+	}
 	go func() {
 		select {
 		case <-wizardCtx.Done():
 			return
 		default:
 		}
-		const setupModelSize = "small"
 		modelPath, pathErr := DefaultModelPath(setupModelSize)
 		if pathErr != nil {
 			l.Error("failed to resolve model path", "operation", "RunSetupWizard", "error", pathErr)

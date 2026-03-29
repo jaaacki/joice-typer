@@ -270,9 +270,9 @@ func runAppMode() {
 				logger.Info("recorder updated", "component", "main", "operation", "runAppMode", "device", cfg.InputDevice)
 			}
 
-			// Recreate transcriber if language changed.
+			// Recreate transcriber if language or model changed.
 			// Create new BEFORE closing old — if creation fails, keep the working one.
-			if oldCfg.Language != cfg.Language {
+			if oldCfg.Language != cfg.Language || oldCfg.ModelSize != cfg.ModelSize {
 				newModelPath, pathErr := DefaultModelPath(cfg.ModelSize)
 				if pathErr != nil {
 					logger.Error("failed to resolve model path for transcriber reload",
