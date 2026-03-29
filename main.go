@@ -153,29 +153,11 @@ func runAppMode() {
 		os.Exit(1)
 	}
 
-	// Init status bar
+	// Init status bar and start [NSApp run] IMMEDIATELY so the app is
+	// responsive. All heavy work (model loading, permission checks)
+	// happens in goroutines after the run loop is active.
 	InitStatusBar()
 	UpdateStatusBar(StateLoading)
-
-	transcriber, err := NewTranscriber(startupCtx, modelPath, cfg.ModelSize, cfg.Language, cfg.SampleRate, logger)
-	if err != nil {
-		logger.Error("failed to initialize transcriber", "component", "main", "operation", "runAppMode", "error", err)
-		os.Exit(1)
-	}
-
-	recorder := NewRecorder(cfg.SampleRate, cfg.InputDevice, logger)
-	paster := NewPaster(logger)
-	sound := NewSound(cfg.SoundFeedback, logger)
-
-	var typer Typer
-	if cfg.TypeMode == "stream" {
-		typer = NewTyper(logger)
-	}
-
-	app := NewApp(recorder, transcriber, paster, typer, sound, cfg.TypeMode, logger)
-	app.SetStateCallback(func(state AppState) {
-		UpdateStatusBar(state)
-	})
 
 	events := make(chan HotkeyEvent, 10)
 	hotkey := NewHotkeyListener(cfg.TriggerKey, logger)
@@ -184,19 +166,21 @@ func runAppMode() {
 	activeHotkey = hotkey
 	activeHotkeyMu.Unlock()
 
-	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		app.Run(events)
-		app.Shutdown()
-	}()
+	// Launch all heavy init work in a background goroutine.
+	// This goroutine does: permissions → model load → ready.
+	// When done, it stops the bare run loop so the main thread
+	// can enter the real hotkey start loop.
+	initDone := make(chan error, 1)
+	var (
+		app         *App
+		recorder    Recorder
+		transcriber Transcriber
+		sound       *Sound
+		wg          sync.WaitGroup
+	)
 
-	// Check permissions in a background goroutine so the main thread can
-	// proceed to [NSApp run] immediately (keeps the app responsive).
-	// Once permissions are granted, the goroutine signals via a channel.
-	permReady := make(chan struct{})
 	go func() {
+		// Step 1: Check permissions
 		UpdateStatusBar(StateNoPermission)
 		if err := hotkey.WaitForPermissions(startupCtx, func(acc, inp bool) {
 			if acc && inp {
@@ -204,58 +188,64 @@ func runAppMode() {
 			}
 			UpdateStatusBar(StateNoPermission)
 		}); err != nil {
-			logger.Error("permission wait cancelled", "component", "main", "operation", "runAppMode", "error", err)
+			initDone <- err
+			hotkey.Stop()
 			return
 		}
-		close(permReady)
-	}()
 
-	// Start the [NSApp run] event loop immediately — this keeps the app
-	// responsive while permissions are being checked. The hotkey listener
-	// is started once permissions are granted.
-	//
-	// We run [NSApp run] via hotkey.Start(), but hotkey.Start() also creates
-	// the event tap which needs permissions. So we split the flow:
-	// 1. Start [NSApp run] without the event tap (just for UI responsiveness)
-	// 2. Wait for permissions in background
-	// 3. When granted, stop the bare [NSApp run] and restart with the event tap
-
-	// Phase 1: Run bare [NSApp run] until permissions are granted or shutdown
-	go func() {
-		select {
-		case <-permReady:
-			// Permissions granted — stop the bare run loop so we can start the real one
+		// Step 2: Load model (may download on first run)
+		UpdateStatusBar(StateLoading)
+		var tErr error
+		transcriber, tErr = NewTranscriber(startupCtx, modelPath, cfg.ModelSize, cfg.Language, cfg.SampleRate, logger)
+		if tErr != nil {
+			initDone <- tErr
 			hotkey.Stop()
-		case <-startupCtx.Done():
-			hotkey.Stop()
+			return
 		}
+
+		// Step 3: Create app components
+		recorder = NewRecorder(cfg.SampleRate, cfg.InputDevice, logger)
+		paster := NewPaster(logger)
+		sound = NewSound(cfg.SoundFeedback, logger)
+
+		var typer Typer
+		if cfg.TypeMode == "stream" {
+			typer = NewTyper(logger)
+		}
+
+		app = NewApp(recorder, transcriber, paster, typer, sound, cfg.TypeMode, logger)
+		app.SetStateCallback(func(state AppState) {
+			UpdateStatusBar(state)
+		})
+
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			app.Run(events)
+			app.Shutdown()
+		}()
+
+		UpdateStatusBar(StateReady)
+		sound.PlayReady()
+		PostNotification("JoiceTyper is ready", "Hold Fn+Shift to dictate.")
+		logger.Info("ready", "component", "main", "operation", "runAppMode", "trigger_key", cfg.TriggerKey)
+
+		initDone <- nil
+		hotkey.Stop() // exit bare run loop → main thread enters hotkey start loop
 	}()
 
-	// This starts [NSApp run] without an event tap — just keeps the app alive.
-	// hotkey.Start() normally does ensureNSApp + startListener + runMainLoop,
-	// but here we just need the run loop for UI responsiveness.
-	// RunMainLoopOnly() does ensureNSApp + runMainLoop without the listener.
+	// Main thread: run bare [NSApp run] to stay responsive during init.
 	hotkey.RunMainLoopOnly()
 
-	// Check if we're here because of shutdown or permissions ready
-	select {
-	case <-startupCtx.Done():
+	// Init goroutine finished — check result
+	if err := <-initDone; err != nil {
+		logger.Error("startup failed", "component", "main", "operation", "runAppMode", "error", err)
 		hotkeyMu.Lock()
 		hotkeyEvents = nil
 		hotkeyMu.Unlock()
 		close(events)
-		wg.Wait()
 		return
-	case <-permReady:
-		// Continue to start the hotkey listener
 	}
-
-	UpdateStatusBar(StateReady)
-	sound.PlayReady()
-
-	PostNotification("JoiceTyper is ready", "Hold Fn+Shift to dictate.")
-
-	logger.Info("ready", "component", "main", "operation", "runAppMode", "trigger_key", cfg.TriggerKey)
 
 	// Hotkey start/restart loop.
 	for {
