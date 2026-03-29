@@ -254,8 +254,10 @@ func runAppMode() {
 				time.Sleep(100 * time.Millisecond)
 			}
 			if !app.IsIdle() {
-				logger.Warn("app not idle during dependency swap, proceeding anyway",
+				logger.Error("app not idle after 5s, skipping dependency swap",
 					"component", "main", "operation", "runAppMode")
+				UpdateStatusBar(StateReady)
+				continue // re-enter hotkey loop with existing config
 			}
 
 			// Recreate recorder if input device changed
@@ -277,7 +279,9 @@ func runAppMode() {
 						"component", "main", "operation", "runAppMode", "error", pathErr)
 					continue
 				}
-				newTranscriber, tErr := NewTranscriber(context.Background(), newModelPath, cfg.ModelSize, cfg.Language, cfg.SampleRate, logger)
+				reloadCtx, reloadCancel := context.WithTimeout(context.Background(), 30*time.Second)
+				newTranscriber, tErr := NewTranscriber(reloadCtx, newModelPath, cfg.ModelSize, cfg.Language, cfg.SampleRate, logger)
+				reloadCancel()
 				if tErr != nil {
 					logger.Error("failed to recreate transcriber, keeping old",
 						"component", "main", "operation", "runAppMode", "error", tErr)

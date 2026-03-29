@@ -1,8 +1,10 @@
 package main
 
 import (
+	"context"
 	"log/slog"
 	"os/exec"
+	"time"
 )
 
 type Sound struct {
@@ -28,7 +30,9 @@ func (s *Sound) Play(name string) {
 		go func() {
 			defer func() { <-s.sem }()
 			path := "/System/Library/Sounds/" + name + ".aiff"
-			cmd := exec.Command("afplay", path)
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			cmd := exec.CommandContext(ctx, "afplay", path)
 			if err := cmd.Run(); err != nil {
 				s.logger.Error("failed to play sound",
 					"operation", "Play",

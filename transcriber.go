@@ -22,6 +22,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
+	"unicode/utf8"
 	"unsafe"
 )
 
@@ -214,10 +216,26 @@ func (t *whisperTranscriber) transcribeBlocking(audio []float32) (string, error)
 		}
 	}
 
-	text := strings.TrimSpace(sb.String())
+	text := sanitizeTranscript(strings.TrimSpace(sb.String()))
 	t.logger.Info("transcribed", "operation", "Transcribe",
 		"segments", n, "text_length", len(text))
 	return text, nil
+}
+
+// sanitizeTranscript ensures the output is valid UTF-8 with no control characters.
+func sanitizeTranscript(s string) string {
+	if !utf8.ValidString(s) {
+		s = strings.ToValidUTF8(s, "\uFFFD")
+	}
+	// Strip C0/C1 control characters except whitespace (tab, newline, carriage return)
+	var b strings.Builder
+	b.Grow(len(s))
+	for _, r := range s {
+		if r == '\t' || r == '\n' || r == '\r' || !unicode.IsControl(r) {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
 }
 
 // IsInflight returns true if a transcription is currently running (bulkhead occupied).

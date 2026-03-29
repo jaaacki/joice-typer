@@ -17,6 +17,7 @@ import (
 	osExec "os/exec"
 	"path/filepath"
 	"sync"
+	"time"
 )
 
 func (e HotkeyEvent) String() string {
@@ -76,9 +77,16 @@ func hotkeyCallback(eventType C.int) {
 		hotkeyLogger.Info("hotkey event", "operation", "hotkeyCallback", "event", event.String())
 	}
 	if event == TriggerReleased {
-		// Release is critical control traffic — must never be lost.
-		// Block if necessary; the consumer processes events quickly.
-		ch <- event
+		// Release is critical — try hard but don't block the OS thread forever
+		select {
+		case ch <- event:
+		default:
+			// Channel full — should never happen, but don't hang the OS callback
+			if hotkeyLogger != nil {
+				hotkeyLogger.Error("release event dropped, channel full",
+					"operation", "hotkeyCallback")
+			}
+		}
 	} else {
 		select {
 		case ch <- event:
@@ -165,8 +173,10 @@ func (h *cgEventHotkeyListener) WaitForPermissions(ctx context.Context, onUpdate
 		// so the user sees a clean slate instead of a ghost toggle.
 		h.logger.Info("binary changed — resetting stale TCC entries",
 			"operation", "WaitForPermissions")
-		osExec.Command("tccutil", "reset", "Accessibility", "com.joicetyper.app").Run()
-		osExec.Command("tccutil", "reset", "ListenEvent", "com.joicetyper.app").Run()
+		tccCtx, tccCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		osExec.CommandContext(tccCtx, "tccutil", "reset", "Accessibility", "com.joicetyper.app").Run()
+		osExec.CommandContext(tccCtx, "tccutil", "reset", "ListenEvent", "com.joicetyper.app").Run()
+		tccCancel()
 	}
 
 	// Prompt once — shows the macOS dialog. Will not repeat on subsequent polls.
