@@ -167,7 +167,11 @@ func (r *portaudioRecorder) readLoop(stream *portaudio.Stream, buffer []float32,
 	defer func() {
 		stream.Close()
 		r.mu.Lock()
-		r.activeStream = nil
+		// Only clear activeStream if this session still owns it.
+		// A late zombie readLoop must not clobber a newer session's handle.
+		if r.sessionID == sessionID {
+			r.activeStream = nil
+		}
 		r.mu.Unlock()
 		close(done)
 	}()

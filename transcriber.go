@@ -375,12 +375,25 @@ func downloadModelWithProgress(ctx context.Context, modelPath string, modelSize 
 		TLSHandshakeTimeout:   10 * time.Second,
 		ResponseHeaderTimeout: 30 * time.Second,
 	}
+	// Allowlisted redirect hosts — only Hugging Face and its CDN
+	allowedHosts := map[string]bool{
+		"huggingface.co":         true,
+		"cdn-lfs.huggingface.co": true,
+		"cdn-lfs-us-1.huggingface.co": true,
+		"cdn-lfs-eu-1.huggingface.co": true,
+	}
 	client := &http.Client{
 		Transport: transport,
 		Timeout:   10 * time.Minute,
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			if len(via) >= downloadMaxRedirects {
 				return fmt.Errorf("too many redirects (%d)", len(via))
+			}
+			if req.URL.Scheme != "https" {
+				return fmt.Errorf("redirect to non-HTTPS scheme %q", req.URL.Scheme)
+			}
+			if !allowedHosts[req.URL.Hostname()] {
+				return fmt.Errorf("redirect to untrusted host %q", req.URL.Hostname())
 			}
 			return nil
 		},

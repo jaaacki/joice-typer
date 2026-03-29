@@ -275,10 +275,9 @@ func (a *App) transcribeAndPaste(audio []float32) {
 	defer a.wg.Done()
 
 	if !atomic.CompareAndSwapInt32(&a.busy, 0, 1) {
-		a.logger.Warn("transcription already in progress, dropping audio",
-			"operation", "transcribeAndPaste")
-		// handleReleaseClipboard already moved the UI into Transcribing.
-		// If we drop the job here, we must restore Ready or the app stays stuck.
+		a.logger.Warn("transcription already in progress — audio from this session discarded",
+			"component", "app", "operation", "transcribeAndPaste")
+		a.sound.PlayError()
 		a.emitState(StateReady)
 		return
 	}
