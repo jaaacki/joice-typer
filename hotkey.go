@@ -14,10 +14,8 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	osExec "os/exec"
 	"path/filepath"
 	"sync"
-	"time"
 )
 
 func (e HotkeyEvent) String() string {
@@ -156,24 +154,17 @@ func NewHotkeyListener(triggerKeys []string, logger *slog.Logger) HotkeyListener
 // and CGPreflightListenEventAccess for Input Monitoring (via checkInputMonitoring).
 // Calls onUpdate on each poll so the caller can update the UI.
 func (h *cgEventHotkeyListener) WaitForPermissions(ctx context.Context, onUpdate func(accessibility, inputMonitoring bool)) error {
-	// Check if this is a reinstall — clear stale TCC entries
-	if binaryHashChanged(h.logger) {
-		h.logger.Info("binary changed — resetting stale TCC entries",
-			"operation", "WaitForPermissions")
-		tccCtx, tccCancel := context.WithTimeout(context.Background(), 5*time.Second)
-		osExec.CommandContext(tccCtx, "tccutil", "reset", "Accessibility", "com.joicetyper.app").Run()
-		osExec.CommandContext(tccCtx, "tccutil", "reset", "ListenEvent", "com.joicetyper.app").Run()
-		tccCancel()
-	}
-
-	// Prompt once — triggers system dialogs. No-op if already decided.
-	// These MUST run after [NSApp run] starts because the prompt dialogs
-	// are AppKit windows that need the run loop to process button clicks.
-	// dispatch_async ensures they run on the main thread after the loop starts.
+	// Dispatch permission prompts to the main queue so they execute
+	// after [NSApp run] starts. The dialogs need the run loop for their buttons.
 	C.dispatch_permission_prompts()
 
 	// Give the main run loop a moment to start before polling
 	C.usleep(500_000)
+
+	// Save binary hash on successful permission grant (for future change detection)
+	defer func() {
+		saveBinaryHash(h.logger)
+	}()
 
 	// Poll both permissions independently using their correct APIs.
 	for {
@@ -190,7 +181,6 @@ func (h *cgEventHotkeyListener) WaitForPermissions(ctx context.Context, onUpdate
 		if acc && inp {
 			h.logger.Info("both permissions granted",
 				"operation", "WaitForPermissions")
-			saveBinaryHash(h.logger)
 			return nil
 		}
 
@@ -200,22 +190,6 @@ func (h *cgEventHotkeyListener) WaitForPermissions(ctx context.Context, onUpdate
 			"input_monitoring", inp)
 		C.usleep(2_000_000)
 	}
-}
-
-// binaryHashChanged returns true if the current executable's hash differs
-// from the one stored on the last successful permission grant. Returns true
-// if no stored hash exists (first install — harmless to reset nothing).
-func binaryHashChanged(logger *slog.Logger) bool {
-	stored, err := readStoredHash()
-	if err != nil {
-		return true // no stored hash → first install or error → safe to reset
-	}
-	current, err := currentBinaryHash()
-	if err != nil {
-		logger.Warn("failed to hash current binary", "operation", "binaryHashChanged", "error", err)
-		return true
-	}
-	return stored != current
 }
 
 // saveBinaryHash writes the current executable's SHA-256 to the config dir.
@@ -232,7 +206,7 @@ func saveBinaryHash(logger *slog.Logger) {
 	os.WriteFile(filepath.Join(dir, ".binary-hash"), []byte(hash), 0644)
 }
 
-func readStoredHash() (string, error) {
+func readStoredHash() (string, error) { //nolint: unused — kept for future binary change detection
 	dir, err := DefaultConfigDir()
 	if err != nil {
 		return "", err
