@@ -10,6 +10,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 )
 
@@ -103,11 +104,13 @@ func runAppMode() {
 	// Create a context cancelled by SIGTERM — used for permissions and startup
 	startupCtx, startupCancel := context.WithCancel(context.Background())
 
+	var shutdownRequested atomic.Bool
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 	go func() {
 		sig := <-sigCh
 		logger.Info("received signal", "component", "main", "operation", "signal", "signal", sig.String())
+		shutdownRequested.Store(true)
 		startupCancel() // cancel permission polling and setup wizard
 		activeHotkeyMu.Lock()
 		h := activeHotkey
@@ -224,7 +227,12 @@ func runAppMode() {
 			break
 		}
 
-		// hotkey.Start() returned — check if restart was requested
+		// hotkey.Start() returned — check why.
+		// Three cases:
+		//   1. hotkeyRestartCh has a token → preferences changed, reload config
+		//   2. sigCh fired → signal handler called Stop(), normal shutdown
+		//   3. Neither → spurious return (e.g. [NSApp stopModal] bled into
+		//      the outer [NSApp run]). Re-enter the loop.
 		select {
 		case <-hotkeyRestartCh:
 			logger.Info("restarting hotkey with new config", "component", "main", "operation", "runAppMode")
@@ -278,7 +286,15 @@ func runAppMode() {
 			UpdateStatusBar(StateReady)
 			continue
 		default:
-			// Normal shutdown (signal handler called Stop)
+			if shutdownRequested.Load() {
+				// Real shutdown — signal handler called Stop
+				break
+			}
+			// Spurious return — [NSApp stopModal] from preferences bled
+			// into the outer [NSApp run]. Re-enter the loop.
+			logger.Info("hotkey listener returned spuriously, re-entering",
+				"component", "main", "operation", "runAppMode")
+			continue
 		}
 		break
 	}
