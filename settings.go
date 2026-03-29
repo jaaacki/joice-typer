@@ -13,6 +13,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 	"unsafe"
 
@@ -37,7 +38,7 @@ func RunSetupWizard(logger *slog.Logger) (string, error) {
 	l := logger.With("component", "setup")
 	l.Info("starting setup wizard", "operation", "RunSetupWizard")
 
-	C.showSetupWindow()
+	C.showSettingsWindow(1)
 
 	// Step 1: Accessibility polling in background goroutine
 	done := make(chan struct{})
@@ -237,4 +238,112 @@ func boolToCInt(b bool) C.int {
 		return 1
 	}
 	return 0
+}
+
+var hotkeyRestartCh = make(chan struct{}, 1)
+
+func signalHotkeyRestart() {
+	select {
+	case hotkeyRestartCh <- struct{}{}:
+	default:
+	}
+}
+
+// OpenPreferences opens the settings window in preferences mode.
+// Called from statusbar callback goroutine. Blocks until window closes.
+func OpenPreferences() {
+	cfgPath, err := DefaultConfigPath()
+	if err != nil {
+		return
+	}
+	cfg, err := LoadConfig(cfgPath)
+	if err != nil {
+		return
+	}
+
+	C.showSettingsWindow(0)
+
+	// Pre-populate from current config
+	populateLanguageList(cfg.Language)
+	populateMicListWithDefault(cfg.InputDevice)
+
+	// Set current hotkey display
+	display := formatHotkeyDisplay(cfg.TriggerKey)
+	cDisplay := C.CString(display)
+	C.setSettingsHotkey(cDisplay)
+	C.free(unsafe.Pointer(cDisplay))
+
+	// Block until user clicks Save or closes
+	C.runSetupEventLoop()
+
+	if C.isSetupComplete() == 0 {
+		return // cancelled
+	}
+
+	// Read selections
+	selectedDevice := C.GoString(C.getSelectedDevice())
+	selectedLang := C.GoString(C.getSelectedLanguage())
+	hotkeyFlags := uint64(C.getSettingsHotkeyFlags())
+
+	var triggerKeys []string
+	if hotkeyFlags != 0 {
+		triggerKeys = flagsToKeys(hotkeyFlags)
+	} else {
+		triggerKeys = cfg.TriggerKey // keep existing
+	}
+
+	cfg.InputDevice = selectedDevice
+	cfg.Language = selectedLang
+	cfg.TriggerKey = triggerKeys
+
+	data, marshalErr := yaml.Marshal(&cfg)
+	if marshalErr != nil {
+		return
+	}
+	os.WriteFile(cfgPath, data, 0644)
+
+	// Signal hotkey restart
+	signalHotkeyRestart()
+}
+
+func formatHotkeyDisplay(keys []string) string {
+	nameMap := map[string]string{
+		"fn": "Fn", "shift": "Shift", "ctrl": "Ctrl",
+		"option": "Option", "cmd": "Cmd",
+	}
+	var parts []string
+	for _, k := range keys {
+		if n, ok := nameMap[k]; ok {
+			parts = append(parts, n)
+		}
+	}
+	return strings.Join(parts, " + ")
+}
+
+func populateMicListWithDefault(deviceName string) {
+	devices, err := portaudio.Devices()
+	if err != nil {
+		return
+	}
+	var inputNames []string
+	defaultIdx := 0
+	for _, d := range devices {
+		if d.MaxInputChannels > 0 {
+			if d.Name == deviceName {
+				defaultIdx = len(inputNames)
+			}
+			inputNames = append(inputNames, d.Name)
+		}
+	}
+	if len(inputNames) == 0 {
+		return
+	}
+	cNames := make([]*C.char, len(inputNames))
+	for i, name := range inputNames {
+		cNames[i] = C.CString(name)
+	}
+	C.populateSetupDevices(&cNames[0], C.int(len(inputNames)), C.int(defaultIdx))
+	for _, cn := range cNames {
+		C.free(unsafe.Pointer(cn))
+	}
 }

@@ -3,7 +3,7 @@
 
 #include <stdint.h>
 
-void showSetupWindow(void);
+void showSettingsWindow(int onboarding);
 void updateSetupAccessibility(int granted);
 void updateSetupInputMonitoring(int granted);
 void populateSetupDevices(const char **deviceNames, int count, int defaultIndex);

@@ -148,12 +148,14 @@ func runAppMode() {
 	events := make(chan HotkeyEvent, 10)
 	hotkey := NewHotkeyListener(cfg.TriggerKey, logger)
 
+	var activeHotkey HotkeyListener = hotkey
+
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 	go func() {
 		sig := <-sigCh
 		logger.Info("received signal", "component", "main", "operation", "signal", "signal", sig.String())
-		if stopErr := hotkey.Stop(); stopErr != nil {
+		if stopErr := activeHotkey.Stop(); stopErr != nil {
 			logger.Error("failed to stop hotkey", "component", "main", "operation", "signal", "error", stopErr)
 		}
 	}()
@@ -183,9 +185,31 @@ func runAppMode() {
 
 	logger.Info("ready", "component", "main", "operation", "runAppMode", "trigger_key", cfg.TriggerKey)
 
-	if err := hotkey.Start(events); err != nil {
-		logger.Error("hotkey listener failed", "component", "main", "operation", "runAppMode", "error", err)
-		os.Exit(1)
+	// Hotkey start/restart loop
+	for {
+		if err := hotkey.Start(events); err != nil {
+			logger.Error("hotkey listener failed", "component", "main", "operation", "runAppMode", "error", err)
+			break
+		}
+
+		// hotkey.Start() returned — check if restart was requested
+		select {
+		case <-hotkeyRestartCh:
+			logger.Info("restarting hotkey with new config", "component", "main", "operation", "runAppMode")
+			// Reload config and recreate listener
+			cfg, err = LoadConfig(cfgPath)
+			if err != nil {
+				logger.Error("failed to reload config", "component", "main", "error", err)
+				break
+			}
+			hotkey = NewHotkeyListener(cfg.TriggerKey, logger)
+			activeHotkey = hotkey
+			UpdateStatusBar(StateReady)
+			continue
+		default:
+			// Normal shutdown (signal handler called Stop)
+		}
+		break
 	}
 
 	hotkeyMu.Lock()

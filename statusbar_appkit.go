@@ -29,3 +29,8 @@ func statusBarQuitClicked() {
 	}
 	p.Signal(syscall.SIGTERM)
 }
+
+//export statusBarPreferencesClicked
+func statusBarPreferencesClicked() {
+	go OpenPreferences()
+}

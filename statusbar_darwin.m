@@ -4,6 +4,7 @@
 
 // Defined in statusbar_appkit.go via //export
 extern void statusBarQuitClicked(void);
+extern void statusBarPreferencesClicked(void);
 
 static NSStatusItem *sStatusItem = nil;
 static NSMenu *sMenu = nil;
@@ -75,6 +76,9 @@ static NSString *textForState(int state) {
 - (void)quitClicked:(id)sender {
     statusBarQuitClicked();
 }
+- (void)preferencesClicked:(id)sender {
+    statusBarPreferencesClicked();
+}
 @end
 
 static StatusBarDelegate *sDelegate = nil;
@@ -96,6 +100,13 @@ void initStatusBar(void) {
                                       action:nil
                                keyEquivalent:@""];
     sStatusMenuItem.enabled = NO;
+
+    [sMenu addItem:[NSMenuItem separatorItem]];
+
+    NSMenuItem *prefsItem = [sMenu addItemWithTitle:@"Preferences..."
+                                             action:@selector(preferencesClicked:)
+                                      keyEquivalent:@","];
+    prefsItem.target = sDelegate;
 
     [sMenu addItem:[NSMenuItem separatorItem]];
 

@@ -153,9 +153,11 @@ static CGEventRef recorderTapCallback(
 @end
 
 static SetupDelegate *sSetupDelegate = nil;
+static BOOL sIsOnboarding = YES;
 
-void showSetupWindow(void) {
+void showSettingsWindow(int onboarding) {
     @autoreleasepool {
+        sIsOnboarding = (onboarding != 0);
         CGFloat w = 480, h = 640;
         NSRect frame = NSMakeRect(0, 0, w, h);
         sSetupWindow = [[NSWindow alloc]
@@ -163,7 +165,7 @@ void showSetupWindow(void) {
                       styleMask:NSWindowStyleMaskTitled | NSWindowStyleMaskClosable
                         backing:NSBackingStoreBuffered
                           defer:NO];
-        [sSetupWindow setTitle:@"JoiceTyper Setup"];
+        [sSetupWindow setTitle:sIsOnboarding ? @"JoiceTyper Setup" : @"JoiceTyper Preferences"];
         [sSetupWindow center];
 
         sSetupDelegate = [[SetupDelegate alloc] init];
@@ -308,7 +310,7 @@ void showSetupWindow(void) {
 
         // Continue button (bottom right, initially disabled)
         sContinueButton = [[NSButton alloc] initWithFrame:NSMakeRect(w - pad - 120, 16, 120, 32)];
-        sContinueButton.title = @"Continue";
+        sContinueButton.title = sIsOnboarding ? @"Continue" : @"Save";
         sContinueButton.bezelStyle = NSBezelStyleRounded;
         sContinueButton.enabled = NO;
         sContinueButton.target = sSetupDelegate;
