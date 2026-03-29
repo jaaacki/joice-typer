@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"sync"
 	"time"
@@ -77,7 +78,13 @@ func (s *Streamer) tick() {
 	transcribeCtx, cancel := context.WithTimeout(context.Background(), streamTranscribeTimeout)
 	defer cancel()
 	text, err := s.transcriber.Transcribe(transcribeCtx, audio)
+	cancel()
 	if err != nil {
+		var timeoutErr *ErrDependencyTimeout
+		if errors.As(err, &timeoutErr) {
+			// Previous transcription still running — skip this tick
+			return
+		}
 		s.logger.Error("streaming transcription failed", "operation", "tick", "error", err)
 		return
 	}

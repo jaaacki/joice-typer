@@ -58,6 +58,7 @@ type whisperTranscriber struct {
 	lang       string
 	sampleRate int
 	logger     *slog.Logger
+	inflight   chan struct{} // semaphore: capacity 1
 }
 
 func NewTranscriber(ctx context.Context, modelPath string, modelSize string, language string, sampleRate int, logger *slog.Logger) (Transcriber, error) {
@@ -95,7 +96,10 @@ func NewTranscriber(ctx context.Context, modelPath string, modelSize string, lan
 	}
 
 	l.Info("model loaded", "operation", "NewTranscriber")
-	return &whisperTranscriber{ctx: wctx, lang: language, sampleRate: sampleRate, logger: l}, nil
+	return &whisperTranscriber{
+		ctx: wctx, lang: language, sampleRate: sampleRate, logger: l,
+		inflight: make(chan struct{}, 1),
+	}, nil
 }
 
 type transcribeResult struct {
@@ -129,16 +133,30 @@ func (t *whisperTranscriber) Transcribe(ctx context.Context, audio []float32) (s
 		defer cancel()
 	}
 
+	// Bulkhead: only 1 in-flight transcription. If a previous CGO call
+	// is still running (timed out but goroutine alive), reject immediately
+	// instead of stacking goroutines behind the mutex.
+	select {
+	case t.inflight <- struct{}{}:
+		// acquired
+	default:
+		return "", &ErrDependencyTimeout{
+			Component: "transcriber",
+			Operation: "Transcribe",
+			Wrapped:   fmt.Errorf("previous transcription still in flight"),
+		}
+	}
+
 	ch := make(chan transcribeResult, 1)
 	go func() {
+		defer func() { <-t.inflight }() // release semaphore when done
 		text, err := t.transcribeBlocking(audio)
 		ch <- transcribeResult{text, err}
 	}()
 
 	select {
 	case <-ctx.Done():
-		// CGO call still running but we return immediately.
-		// The goroutine will complete eventually and release the mutex.
+		// Don't release semaphore here — goroutine still running
 		return "", &ErrDependencyTimeout{
 			Component: "transcriber",
 			Operation: "Transcribe",
