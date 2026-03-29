@@ -1,4 +1,4 @@
-.PHONY: all setup build clean download-model whisper test app
+.PHONY: all setup build clean download-model whisper test app dmg
 
 WHISPER_DIR := third_party/whisper.cpp
 WHISPER_BUILD := $(WHISPER_DIR)/build
@@ -56,3 +56,19 @@ app: build
 	codesign --force --sign - $(APP_BUNDLE)/Contents/Frameworks/libportaudio.2.dylib
 	codesign --force --sign - $(APP_BUNDLE)
 	@echo "Built $(APP_BUNDLE)"
+
+DMG_NAME := $(APP_NAME).dmg
+DMG_STAGING := dmg-staging
+
+dmg: app
+	@echo "Creating $(DMG_NAME)..."
+	rm -rf $(DMG_STAGING) $(DMG_NAME)
+	mkdir -p $(DMG_STAGING)
+	cp -R $(APP_BUNDLE) $(DMG_STAGING)/
+	ln -s /Applications $(DMG_STAGING)/Applications
+	hdiutil create -volname "$(APP_NAME)" \
+		-srcfolder $(DMG_STAGING) \
+		-ov -format UDZO \
+		$(DMG_NAME)
+	rm -rf $(DMG_STAGING)
+	@echo "Built $(DMG_NAME)"

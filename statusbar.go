@@ -8,6 +8,7 @@ const (
 	StateReady
 	StateRecording
 	StateTranscribing
+	StateNoPermission
 )
 
 func (s AppState) String() string {
@@ -20,6 +21,8 @@ func (s AppState) String() string {
 		return "recording"
 	case StateTranscribing:
 		return "transcribing"
+	case StateNoPermission:
+		return "no_permission"
 	default:
 		return "unknown"
 	}

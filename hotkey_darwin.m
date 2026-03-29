@@ -21,6 +21,27 @@ int checkInputMonitoring(int prompt) {
     return IOHIDCheckAccess(kIOHIDRequestTypeListenEvent) == kIOHIDAccessTypeGranted ? 1 : 0;
 }
 
+static CGEventRef probeCallback(CGEventTapProxy p, CGEventType t, CGEventRef e, void *u) {
+    return e;
+}
+
+int probeEventTap(void) {
+    CGEventMask mask = CGEventMaskBit(kCGEventFlagsChanged);
+    CFMachPortRef tap = CGEventTapCreate(
+        kCGSessionEventTap,
+        kCGHeadInsertEventTap,
+        kCGEventTapOptionListenOnly,
+        mask,
+        probeCallback,
+        NULL
+    );
+    if (tap == NULL) {
+        return 0;
+    }
+    CFRelease(tap);
+    return 1;
+}
+
 void ensureNSApp(void) {
     static dispatch_once_t once;
     dispatch_once(&once, ^{

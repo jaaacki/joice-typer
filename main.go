@@ -166,12 +166,20 @@ func runAppMode() {
 		app.Shutdown()
 	}()
 
+	// Always validate permissions before starting hotkey — not just on first run.
+	// Ad-hoc signing means every rebuild/reinstall invalidates old grants.
+	UpdateStatusBar(StateNoPermission)
+	hotkey.WaitForPermissions(func(acc, inp bool) {
+		if acc && inp {
+			return
+		}
+		UpdateStatusBar(StateNoPermission)
+	})
+
 	UpdateStatusBar(StateReady)
 	sound.PlayReady()
 
-	if firstRun {
-		PostNotification("JoiceTyper is ready", "Hold Fn+Shift to dictate.")
-	}
+	PostNotification("JoiceTyper is ready", "Hold Fn+Shift to dictate.")
 
 	logger.Info("ready", "component", "main", "operation", "runAppMode", "trigger_key", cfg.TriggerKey)
 

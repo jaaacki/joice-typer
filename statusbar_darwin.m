@@ -52,6 +52,7 @@ static NSColor *colorForState(int state) {
         case 1: return [NSColor systemGreenColor];     // ready
         case 2: return [NSColor systemRedColor];       // recording
         case 3: return [NSColor systemBlueColor];      // transcribing
+        case 4: return [NSColor systemOrangeColor];    // no permission
         default: return [NSColor grayColor];
     }
 }
@@ -62,6 +63,7 @@ static NSString *textForState(int state) {
         case 1: return @"✅ Ready — Fn+Shift to dictate";
         case 2: return @"🔴 Recording...";
         case 3: return @"🔵 Transcribing...";
+        case 4: return @"⚠️ Grant Accessibility + Input Monitoring in System Settings";
         default: return @"Unknown";
     }
 }

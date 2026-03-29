@@ -15,6 +15,10 @@ int checkAccessibility(int prompt);
 // If prompt is 1, shows the macOS permission dialog.
 int checkInputMonitoring(int prompt);
 
+// probeEventTap tries to create and immediately destroy a CGEvent tap.
+// Returns 1 if creation succeeds (permissions are sufficient), 0 if not.
+int probeEventTap(void);
+
 // startHotkeyListener creates a CGEvent tap monitoring modifier flags.
 // targetFlags is the bitmask of modifier flags that must all be held to trigger.
 // Returns 0 on success, -1 if event tap creation fails (no Accessibility permission).

@@ -15,6 +15,10 @@ third_party/whisper.cpp/build/
 # macOS
 .DS_Store
 
+# Installer
+*.dmg
+dmg-staging/
+
 # IDE
 .idea/
 .vscode/

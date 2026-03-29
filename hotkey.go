@@ -2,13 +2,19 @@ package main
 
 /*
 #cgo LDFLAGS: -framework CoreGraphics -framework Carbon -framework Cocoa -framework IOKit
+#include <unistd.h>
 #include "hotkey_darwin.h"
 */
 import "C"
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"log/slog"
+	"os"
+	osExec "os/exec"
+	"path/filepath"
 	"sync"
 )
 
@@ -114,19 +120,110 @@ func NewHotkeyListener(triggerKeys []string, logger *slog.Logger) HotkeyListener
 	}
 }
 
+// WaitForPermissions polls Accessibility until granted (real-time API),
+// then attempts to create a CGEvent tap to validate full permission.
+// Input Monitoring cannot be reliably polled — IOHIDCheckAccess does not
+// update for a running process. The tap creation is the true test.
+// Calls onUpdate on each poll so the caller can update the UI.
+func (h *cgEventHotkeyListener) WaitForPermissions(onUpdate func(accessibility, inputMonitoring bool)) {
+	// Fast path: if the event tap already works, skip everything.
+	if C.probeEventTap() == 1 {
+		h.logger.Info("permissions already valid", "operation", "WaitForPermissions")
+		onUpdate(true, true)
+		saveBinaryHash(h.logger)
+		return
+	}
+
+	// Tap failed. Check if this is a new binary (reinstall) vs first install.
+	if binaryHashChanged(h.logger) {
+		// New binary — old TCC entries are stale and confusing. Clear them
+		// so the user sees a clean slate instead of a ghost toggle.
+		h.logger.Info("binary changed — resetting stale TCC entries",
+			"operation", "WaitForPermissions")
+		osExec.Command("tccutil", "reset", "Accessibility", "com.joicetyper.app").Run()
+		osExec.Command("tccutil", "reset", "ListenEvent", "com.joicetyper.app").Run()
+	}
+
+	// Prompt once — shows the macOS dialog. Will not repeat on subsequent polls.
+	C.checkAccessibility(1)
+	C.checkInputMonitoring(1)
+
+	// Poll silently until the event tap succeeds.
+	for {
+		if C.probeEventTap() == 1 {
+			h.logger.Info("permissions verified via event tap probe",
+				"operation", "WaitForPermissions")
+			onUpdate(true, true)
+			saveBinaryHash(h.logger)
+			return
+		}
+		acc := C.checkAccessibility(0) == 1
+		onUpdate(acc, false)
+		h.logger.Info("waiting for permissions",
+			"operation", "WaitForPermissions",
+			"accessibility", acc)
+		C.usleep(2_000_000)
+	}
+}
+
+// binaryHashChanged returns true if the current executable's hash differs
+// from the one stored on the last successful permission grant. Returns true
+// if no stored hash exists (first install — harmless to reset nothing).
+func binaryHashChanged(logger *slog.Logger) bool {
+	stored, err := readStoredHash()
+	if err != nil {
+		return true // no stored hash → first install or error → safe to reset
+	}
+	current, err := currentBinaryHash()
+	if err != nil {
+		logger.Warn("failed to hash current binary", "operation", "binaryHashChanged", "error", err)
+		return true
+	}
+	return stored != current
+}
+
+// saveBinaryHash writes the current executable's SHA-256 to the config dir.
+func saveBinaryHash(logger *slog.Logger) {
+	hash, err := currentBinaryHash()
+	if err != nil {
+		logger.Warn("failed to hash binary for save", "operation", "saveBinaryHash", "error", err)
+		return
+	}
+	dir, err := DefaultConfigDir()
+	if err != nil {
+		return
+	}
+	os.WriteFile(filepath.Join(dir, ".binary-hash"), []byte(hash), 0644)
+}
+
+func readStoredHash() (string, error) {
+	dir, err := DefaultConfigDir()
+	if err != nil {
+		return "", err
+	}
+	data, err := os.ReadFile(filepath.Join(dir, ".binary-hash"))
+	if err != nil {
+		return "", err
+	}
+	return string(data), nil
+}
+
+func currentBinaryHash() (string, error) {
+	exe, err := os.Executable()
+	if err != nil {
+		return "", err
+	}
+	data, err := os.ReadFile(exe)
+	if err != nil {
+		return "", err
+	}
+	h := sha256.Sum256(data)
+	return hex.EncodeToString(h[:]), nil
+}
+
 func (h *cgEventHotkeyListener) Start(events chan<- HotkeyEvent) error {
 	hotkeyLogger = h.logger
 	h.logger.Info("starting", "operation", "Start", "trigger_keys", h.triggerKeys)
-
-	// Check permissions (don't block — rebuilds invalidate trust)
-	if C.checkAccessibility(0) == 0 {
-		h.logger.Warn("Accessibility not granted — enable in System Settings → Privacy & Security → Accessibility",
-			"operation", "Start")
-	}
-	if C.checkInputMonitoring(0) == 0 {
-		h.logger.Warn("Input Monitoring not granted — enable in System Settings → Privacy & Security → Input Monitoring",
-			"operation", "Start")
-	}
 
 	flags, err := keysToFlags(h.triggerKeys)
 	if err != nil {

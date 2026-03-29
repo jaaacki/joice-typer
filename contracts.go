@@ -21,6 +21,10 @@ const (
 // HotkeyListener monitors global key events and emits trigger press/release events.
 // Start blocks (runs macOS CFRunLoop). Stop unblocks it.
 type HotkeyListener interface {
+	// WaitForPermissions polls until Accessibility and Input Monitoring are
+	// both granted, prompting the user via macOS dialogs. Calls onUpdate on
+	// each poll so the caller can update UI.
+	WaitForPermissions(onUpdate func(accessibility, inputMonitoring bool))
 	Start(events chan<- HotkeyEvent) error
 	Stop() error
 }
