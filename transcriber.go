@@ -81,7 +81,7 @@ func NewTranscriber(ctx context.Context, modelPath string, modelSize string, lan
 			l.Warn("quarantined corrupt model", "operation", "NewTranscriber",
 				"bad_path", filepath.Base(badPath))
 		}
-		return nil, fmt.Errorf("transcriber.NewTranscriber: model corrupt or incompatible")
+		return nil, &ErrBadPayload{Component: "transcriber", Operation: "NewTranscriber", Detail: "model corrupt or incompatible"}
 	}
 
 	// Validate language against whisper's own language list
@@ -339,24 +339,28 @@ func downloadModelWithProgress(ctx context.Context, modelPath string, modelSize 
 		},
 	}
 
-	// HEAD preflight — verify remote file exists and get expected size
+	// Use manifest's expected size as default; HEAD may refine it
+	var expectedSize int64
+	if spec, ok := modelManifest[modelSize]; ok {
+		expectedSize = spec.exactLen
+	}
+
+	// HEAD preflight — advisory, not mandatory
 	headReq, err := http.NewRequestWithContext(dlCtx, "HEAD", url, nil)
-	if err != nil {
-		return fmt.Errorf("transcriber.downloadModel: HEAD request: %w", err)
-	}
-	headResp, err := client.Do(headReq)
-	if err != nil {
-		return &ErrDependencyUnavailable{Component: "transcriber", Operation: "downloadModel", Wrapped: err}
-	}
-	headResp.Body.Close()
-	if headResp.StatusCode != http.StatusOK {
-		return &ErrDependencyUnavailable{
-			Component: "transcriber",
-			Operation: "downloadModel",
-			Wrapped:   fmt.Errorf("HEAD returned %d", headResp.StatusCode),
+	if err == nil {
+		headResp, headErr := client.Do(headReq)
+		if headErr == nil {
+			headResp.Body.Close()
+			if headResp.StatusCode == http.StatusOK && headResp.ContentLength > 0 {
+				expectedSize = headResp.ContentLength
+			}
+		}
+		if headErr != nil {
+			logger.Info("HEAD preflight failed, proceeding with GET",
+				"component", "transcriber", "operation", "downloadModel", "error", headErr)
 		}
 	}
-	expectedSize := headResp.ContentLength
+
 	if expectedSize > maxDownloadBytes {
 		return &ErrBadPayload{
 			Component: "transcriber",
@@ -376,7 +380,7 @@ func downloadModelWithProgress(ctx context.Context, modelPath string, modelSize 
 			jitter := time.Duration(rand.Int63n(int64(wait / 2)))
 			select {
 			case <-dlCtx.Done():
-				return dlCtx.Err()
+				return &ErrDependencyTimeout{Component: "transcriber", Operation: "downloadModel", Wrapped: dlCtx.Err()}
 			case <-time.After(wait + jitter):
 			}
 			logger.Info("retrying download",
@@ -394,7 +398,7 @@ func downloadModelWithProgress(ctx context.Context, modelPath string, modelSize 
 	}
 	if lastErr != nil {
 		os.Remove(tmpPath)
-		return fmt.Errorf("transcriber.downloadModel: all %d attempts failed: %w", downloadMaxRetries+1, lastErr)
+		return &ErrDependencyUnavailable{Component: "transcriber", Operation: "downloadModel", Wrapped: fmt.Errorf("all %d attempts failed: %w", downloadMaxRetries+1, lastErr)}
 	}
 
 	// Hash the completed download for integrity verification
@@ -416,11 +420,15 @@ func downloadModelWithProgress(ctx context.Context, modelPath string, modelSize 
 	if spec, ok := modelManifest[modelSize]; ok {
 		if written != spec.exactLen {
 			os.Remove(tmpPath)
-			return fmt.Errorf("transcriber.downloadModel: size mismatch: got %d bytes, expected %d", written, spec.exactLen)
+			logger.Error("size mismatch", "operation", "downloadModel",
+				"expected", spec.exactLen, "actual", written)
+			return &ErrBadPayload{Component: "transcriber", Operation: "downloadModel", Detail: "size mismatch"}
 		}
 		if hash != spec.sha256 {
 			os.Remove(tmpPath)
-			return fmt.Errorf("transcriber.downloadModel: sha256 mismatch: got %s, expected %s", hash, spec.sha256)
+			logger.Error("hash mismatch", "operation", "downloadModel",
+				"expected", spec.sha256, "actual", hash)
+			return &ErrBadPayload{Component: "transcriber", Operation: "downloadModel", Detail: "hash mismatch"}
 		}
 	}
 
@@ -465,18 +473,36 @@ func doDownload(ctx context.Context, client *http.Client, url string, tmpPath st
 
 	// Accept 200 (full) or 206 (partial)
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusPartialContent {
-		return fmt.Errorf("GET returned %d", resp.StatusCode)
-	}
-
-	// Reject non-binary content types: HTML error pages, JSON errors, proxied junk
-	ct := resp.Header.Get("Content-Type")
-	if strings.HasPrefix(ct, "text/") || strings.Contains(ct, "application/json") {
-		return fmt.Errorf("unexpected content type %q", ct)
+		return &ErrDependencyUnavailable{Component: "transcriber", Operation: "doDownload", Wrapped: fmt.Errorf("HTTP %d", resp.StatusCode)}
 	}
 
 	// If server doesn't support range and returns full body, start from scratch
 	if startByte > 0 && resp.StatusCode == http.StatusOK {
 		startByte = 0
+	}
+
+	// Validate Content-Range header on 206 to ensure server resumed correctly
+	if startByte > 0 && resp.StatusCode == http.StatusPartialContent {
+		cr := resp.Header.Get("Content-Range")
+		expectedPrefix := fmt.Sprintf("bytes %d-", startByte)
+		if !strings.HasPrefix(cr, expectedPrefix) {
+			// Server didn't resume from where we asked — start over
+			logger.Warn("Content-Range mismatch, restarting download",
+				"component", "transcriber", "operation", "doDownload",
+				"expected_prefix", expectedPrefix, "got", cr)
+			resp.Body.Close()
+			os.Remove(tmpPath)
+			startByte = 0
+			req2, err2 := http.NewRequestWithContext(ctx, "GET", url, nil)
+			if err2 != nil {
+				return fmt.Errorf("restart GET: %w", err2)
+			}
+			resp, err = client.Do(req2)
+			if err != nil {
+				return err
+			}
+			defer resp.Body.Close()
+		}
 	}
 
 	var f *os.File
@@ -521,12 +547,12 @@ func doDownload(ctx context.Context, client *http.Client, url string, tmpPath st
 
 	// Validate total size matches expected (detects truncation)
 	if expectedSize > 0 && totalWritten != expectedSize {
-		return fmt.Errorf("truncated: got %d bytes, expected %d", totalWritten, expectedSize)
+		return &ErrBadPayload{Component: "transcriber", Operation: "doDownload", Detail: "download truncated"}
 	}
 
 	// Detect hitting the safety cap
 	if totalWritten >= maxDownloadBytes {
-		return fmt.Errorf("exceeded %d byte limit", maxDownloadBytes)
+		return &ErrBadPayload{Component: "transcriber", Operation: "doDownload", Detail: "exceeded download size limit"}
 	}
 
 	return nil
