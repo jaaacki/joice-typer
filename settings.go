@@ -212,15 +212,19 @@ func populateMicList(selectedDevice string, l *slog.Logger) {
 }
 
 func populateModelList(selectedSize string) {
+	l := settingsLogger
+	if l == nil {
+		l = slog.Default()
+	}
 	sizes := make([]*C.char, len(ModelOptions))
 	descs := make([]*C.char, len(ModelOptions))
 	defaultIdx := 0
 	for i, m := range ModelOptions {
 		sizes[i] = C.CString(m.Size)
-		// Check if model is cached on disk
+		// Check if model is cached AND valid
 		modelPath, _ := DefaultModelPath(m.Size)
 		cached := ""
-		if _, err := os.Stat(modelPath); err == nil {
+		if validateCachedModel(modelPath, m.Size, l) {
 			cached = " \u2713"
 		}
 		descs[i] = C.CString(m.Description + cached)
@@ -270,6 +274,18 @@ func writeSetupConfig(deviceName string, language string, modelSize string, trig
 		SampleRate:    16000,
 		SoundFeedback: true,
 		InputDevice:   deviceName,
+	}
+
+	if err := cfg.Validate(); err != nil {
+		l.Error("invalid settings from UI, using defaults", "operation", "writeSetupConfig", "error", err)
+		cfg = Config{
+			TriggerKey:    []string{"fn", "shift"},
+			ModelSize:     "small",
+			Language:      "en",
+			SampleRate:    16000,
+			SoundFeedback: true,
+			InputDevice:   deviceName,
+		}
 	}
 
 	data, err := yaml.Marshal(&cfg)
@@ -411,6 +427,13 @@ func OpenPreferences() {
 	cfg.TriggerKey = triggerKeys
 	if selectedModel != "" {
 		cfg.ModelSize = selectedModel
+	}
+
+	if err := cfg.Validate(); err != nil {
+		if settingsLogger != nil {
+			settingsLogger.Error("invalid settings from UI, not saving", "operation", "OpenPreferences", "error", err)
+		}
+		return
 	}
 
 	data, marshalErr := yaml.Marshal(&cfg)
