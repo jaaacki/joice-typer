@@ -277,15 +277,7 @@ func writeSetupConfig(deviceName string, language string, modelSize string, trig
 	}
 
 	if err := cfg.Validate(); err != nil {
-		l.Error("invalid settings from UI, using defaults", "operation", "writeSetupConfig", "error", err)
-		cfg = Config{
-			TriggerKey:    []string{"fn", "shift"},
-			ModelSize:     "small",
-			Language:      "en",
-			SampleRate:    16000,
-			SoundFeedback: true,
-			InputDevice:   deviceName,
-		}
+		return fmt.Errorf("writeSetupConfig: invalid settings from UI: %w", err)
 	}
 
 	data, err := yaml.Marshal(&cfg)

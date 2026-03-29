@@ -162,13 +162,40 @@ func (a *App) handleReleaseStream() {
 
 func (a *App) finalStreamTranscribe(audio []float32, lastText string) {
 	defer a.wg.Done()
-	if !atomic.CompareAndSwapInt32(&a.busy, 0, 1) {
-		a.logger.Warn("already busy, skipping final stream transcription",
+
+	// Wait for the streamer's last tick to release both the busy flag
+	// and the transcriber bulkhead (up to 5s each).
+	acquired := false
+	for i := 0; i < 50; i++ {
+		if atomic.CompareAndSwapInt32(&a.busy, 0, 1) {
+			acquired = true
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	if !acquired {
+		a.logger.Warn("timed out waiting for busy flag",
 			"component", "app", "operation", "finalStreamTranscribe")
 		a.emitState(StateReady)
 		return
 	}
 	defer atomic.StoreInt32(&a.busy, 0)
+
+	// Also wait for the transcriber bulkhead to be free
+	if t, ok := a.transcriber.(interface{ IsInflight() bool }); ok {
+		for i := 0; i < 50; i++ {
+			if !t.IsInflight() {
+				break
+			}
+			if i == 49 {
+				a.logger.Warn("transcriber bulkhead still occupied",
+					"component", "app", "operation", "finalStreamTranscribe")
+				a.emitState(StateReady)
+				return
+			}
+			time.Sleep(100 * time.Millisecond)
+		}
+	}
 
 	a.emitState(StateTranscribing)
 
@@ -177,29 +204,34 @@ func (a *App) finalStreamTranscribe(audio []float32, lastText string) {
 
 	finalText, err := a.transcriber.Transcribe(transcribeCtx, audio)
 	if err != nil {
-		a.logger.Error("final transcription failed", "component", "app", "operation", "finalStreamTranscribe", "error", err)
+		a.logger.Error("final transcription failed",
+			"component", "app", "operation", "finalStreamTranscribe", "error", err)
 		a.emitState(StateReady)
 		return
 	}
 
 	finalText = strings.TrimSpace(finalText)
 	if finalText == "" {
-		a.logger.Warn("no speech detected in final transcription", "component", "app", "operation", "finalStreamTranscribe")
+		a.logger.Warn("no speech detected",
+			"component", "app", "operation", "finalStreamTranscribe")
 		a.emitState(StateReady)
 		return
 	}
 
 	if a.typer != nil && lastText != "" {
 		if err := a.typer.ReplaceAll(len([]rune(lastText)), finalText); err != nil {
-			a.logger.Error("failed to replace with final text", "component", "app", "operation", "finalStreamTranscribe", "error", err)
+			a.logger.Error("failed to replace with final text",
+				"component", "app", "operation", "finalStreamTranscribe", "error", err)
 		}
 	} else if a.typer != nil {
 		if err := a.typer.Type(finalText); err != nil {
-			a.logger.Error("failed to type final text", "component", "app", "operation", "finalStreamTranscribe", "error", err)
+			a.logger.Error("failed to type final text",
+				"component", "app", "operation", "finalStreamTranscribe", "error", err)
 		}
 	}
 
-	a.logger.Info("stream complete", "component", "app", "operation", "finalStreamTranscribe",
+	a.logger.Info("stream complete",
+		"component", "app", "operation", "finalStreamTranscribe",
 		"text_length", len(finalText))
 	a.emitState(StateReady)
 }
@@ -269,9 +301,19 @@ func (a *App) transcribeAndPaste(audio []float32) {
 	a.emitState(StateReady)
 }
 
-// IsIdle returns true if no recording or transcription is in flight.
+// IsIdle returns true if no recording, transcription, or native CGO work is in flight.
+// Checks both the app-level busy flag AND the transcriber's bulkhead semaphore.
 func (a *App) IsIdle() bool {
-	return !a.recording && atomic.LoadInt32(&a.busy) == 0
+	if a.recording || atomic.LoadInt32(&a.busy) != 0 {
+		return false
+	}
+	// Probe the transcriber bulkhead — if we can acquire and release, it's idle
+	if t, ok := a.transcriber.(interface{ IsInflight() bool }); ok {
+		if t.IsInflight() {
+			return false
+		}
+	}
+	return true
 }
 
 // SetRecorder replaces the recorder used by the app.

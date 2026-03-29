@@ -220,6 +220,17 @@ func (t *whisperTranscriber) transcribeBlocking(audio []float32) (string, error)
 	return text, nil
 }
 
+// IsInflight returns true if a transcription is currently running (bulkhead occupied).
+func (t *whisperTranscriber) IsInflight() bool {
+	select {
+	case t.inflight <- struct{}{}:
+		<-t.inflight // release immediately
+		return false
+	default:
+		return true
+	}
+}
+
 func (t *whisperTranscriber) Close() error {
 	t.logger.Info("closing", "operation", "Close")
 
@@ -520,6 +531,13 @@ func doDownload(ctx context.Context, client *http.Client, url string, tmpPath st
 				return err
 			}
 			defer resp.Body.Close()
+			if resp.StatusCode != http.StatusOK {
+				return &ErrDependencyUnavailable{
+					Component: "transcriber",
+					Operation: "doDownload",
+					Wrapped:   fmt.Errorf("restart GET returned HTTP %d", resp.StatusCode),
+				}
+			}
 		}
 	}
 
