@@ -30,6 +30,7 @@ type HotkeyListener interface {
 	// both granted, prompting the user via macOS dialogs. Calls onUpdate on
 	// each poll so the caller can update UI. Returns error on context cancellation.
 	WaitForPermissions(ctx context.Context, onUpdate func(accessibility, inputMonitoring bool)) error
+	RunMainLoopOnly()
 	Start(events chan<- HotkeyEvent) error
 	Stop() error
 }

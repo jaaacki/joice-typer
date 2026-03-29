@@ -192,22 +192,62 @@ func runAppMode() {
 		app.Shutdown()
 	}()
 
-	// Always validate permissions before starting hotkey — not just on first run.
-	// Ad-hoc signing means every rebuild/reinstall invalidates old grants.
-	UpdateStatusBar(StateNoPermission)
-	if err := hotkey.WaitForPermissions(startupCtx, func(acc, inp bool) {
-		if acc && inp {
+	// Check permissions in a background goroutine so the main thread can
+	// proceed to [NSApp run] immediately (keeps the app responsive).
+	// Once permissions are granted, the goroutine signals via a channel.
+	permReady := make(chan struct{})
+	go func() {
+		UpdateStatusBar(StateNoPermission)
+		if err := hotkey.WaitForPermissions(startupCtx, func(acc, inp bool) {
+			if acc && inp {
+				return
+			}
+			UpdateStatusBar(StateNoPermission)
+		}); err != nil {
+			logger.Error("permission wait cancelled", "component", "main", "operation", "runAppMode", "error", err)
 			return
 		}
-		UpdateStatusBar(StateNoPermission)
-	}); err != nil {
-		logger.Error("permission wait cancelled", "component", "main", "operation", "runAppMode", "error", err)
+		close(permReady)
+	}()
+
+	// Start the [NSApp run] event loop immediately — this keeps the app
+	// responsive while permissions are being checked. The hotkey listener
+	// is started once permissions are granted.
+	//
+	// We run [NSApp run] via hotkey.Start(), but hotkey.Start() also creates
+	// the event tap which needs permissions. So we split the flow:
+	// 1. Start [NSApp run] without the event tap (just for UI responsiveness)
+	// 2. Wait for permissions in background
+	// 3. When granted, stop the bare [NSApp run] and restart with the event tap
+
+	// Phase 1: Run bare [NSApp run] until permissions are granted or shutdown
+	go func() {
+		select {
+		case <-permReady:
+			// Permissions granted — stop the bare run loop so we can start the real one
+			hotkey.Stop()
+		case <-startupCtx.Done():
+			hotkey.Stop()
+		}
+	}()
+
+	// This starts [NSApp run] without an event tap — just keeps the app alive.
+	// hotkey.Start() normally does ensureNSApp + startListener + runMainLoop,
+	// but here we just need the run loop for UI responsiveness.
+	// RunMainLoopOnly() does ensureNSApp + runMainLoop without the listener.
+	hotkey.RunMainLoopOnly()
+
+	// Check if we're here because of shutdown or permissions ready
+	select {
+	case <-startupCtx.Done():
 		hotkeyMu.Lock()
 		hotkeyEvents = nil
 		hotkeyMu.Unlock()
 		close(events)
 		wg.Wait()
 		return
+	case <-permReady:
+		// Continue to start the hotkey listener
 	}
 
 	UpdateStatusBar(StateReady)
@@ -218,10 +258,6 @@ func runAppMode() {
 	logger.Info("ready", "component", "main", "operation", "runAppMode", "trigger_key", cfg.TriggerKey)
 
 	// Hotkey start/restart loop.
-	// hotkey.Start() blocks on [NSApp run]. It returns when Stop() is called
-	// — either from the signal handler (shutdown) or from signalHotkeyRestart()
-	// in settings.go (preferences changed). We check hotkeyRestartCh to
-	// distinguish the two cases.
 	for {
 		if err := hotkey.Start(events); err != nil {
 			logger.Error("hotkey listener failed", "component", "main", "operation", "runAppMode", "error", err)

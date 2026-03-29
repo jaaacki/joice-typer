@@ -252,6 +252,14 @@ func currentBinaryHash() (string, error) {
 	return hex.EncodeToString(h[:]), nil
 }
 
+// RunMainLoopOnly starts [NSApp run] without creating an event tap.
+// Used to keep the app responsive while waiting for permissions.
+// Stop() will unblock it.
+func (h *cgEventHotkeyListener) RunMainLoopOnly() {
+	C.ensureNSApp()
+	C.runMainLoop()
+}
+
 func (h *cgEventHotkeyListener) Start(events chan<- HotkeyEvent) error {
 	hotkeyLogger = h.logger
 	h.logger.Info("starting", "operation", "Start", "trigger_keys", h.triggerKeys)
