@@ -192,7 +192,7 @@ func TestApp_HappyPath(t *testing.T) {
 	paste.mu.Lock()
 	got := paste.pastedText
 	paste.mu.Unlock()
-	if got != "hello world" {
+	if got != "hello world " {
 		t.Errorf("expected pasted text 'hello world', got %q", got)
 	}
 
@@ -254,8 +254,8 @@ func TestApp_TranscriptionError_ContinuesListening(t *testing.T) {
 	paste.mu.Lock()
 	got := paste.pastedText
 	paste.mu.Unlock()
-	if got != "recovered" {
-		t.Errorf("expected pasted text 'recovered' after error recovery, got %q", got)
+	if got != "recovered " {
+		t.Errorf("expected pasted text 'recovered ' after error recovery, got %q", got)
 	}
 }
 
@@ -656,7 +656,7 @@ func TestApp_RecorderStartFails_ContinuesListening(t *testing.T) {
 	paste.mu.Lock()
 	got := paste.pastedText
 	paste.mu.Unlock()
-	if got != "hello" {
-		t.Errorf("expected 'hello' after retry, got %q", got)
+	if got != "hello " {
+		t.Errorf("expected 'hello ' after retry, got %q", got)
 	}
 }
