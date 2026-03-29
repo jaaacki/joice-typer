@@ -9,6 +9,7 @@ const (
 	StateRecording
 	StateTranscribing
 	StateNoPermission
+	StateDependencyStuck
 )
 
 func (s AppState) String() string {
@@ -23,6 +24,8 @@ func (s AppState) String() string {
 		return "transcribing"
 	case StateNoPermission:
 		return "no_permission"
+	case StateDependencyStuck:
+		return "dependency_stuck"
 	default:
 		return "unknown"
 	}

@@ -22,11 +22,6 @@ int pasteText(const char* text) {
             }
         }
 
-        // Save changeCount before we touch the clipboard.
-        // clearContents (+1) and setString (+1) = savedChangeCount + 2.
-        // If the count is anything else when we restore, another app wrote to the clipboard.
-        NSInteger savedChangeCount = [pb changeCount];
-
         // Set clipboard to our text
         [pb clearContents];
         NSString* str = [NSString stringWithUTF8String:text];
@@ -37,6 +32,11 @@ int pasteText(const char* text) {
         if (!ok) {
             return 2;
         }
+
+        // Capture changeCount AFTER our writes — not before + hardcoded offset.
+        // This is the actual count after our mutations, regardless of how macOS
+        // increments it internally.
+        NSInteger postWriteChangeCount = [pb changeCount];
 
         // Brief pause to let pasteboard settle before simulating keypress
         usleep(50000); // 50ms
@@ -66,9 +66,8 @@ int pasteText(const char* text) {
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(200 * NSEC_PER_MSEC)),
                        dispatch_get_main_queue(), ^{
             // Only restore if nobody else touched the clipboard during our paste.
-            // We did clearContents (+1) and setString (+1) = savedChangeCount + 2.
-            // If it differs, another app wrote to the clipboard — don't overwrite.
-            if ([pb changeCount] != savedChangeCount + 2) {
+            // Compare against the actual post-write count, not a hardcoded offset.
+            if ([pb changeCount] != postWriteChangeCount) {
                 return;
             }
             if (restoreItems.count > 0) {

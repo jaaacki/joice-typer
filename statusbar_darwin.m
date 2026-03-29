@@ -54,6 +54,7 @@ static NSColor *colorForState(int state) {
         case 2: return [NSColor systemRedColor];       // recording
         case 3: return [NSColor systemBlueColor];      // transcribing
         case 4: return [NSColor systemOrangeColor];    // no permission
+        case 5: return [NSColor systemYellowColor];    // dependency stuck
         default: return [NSColor grayColor];
     }
 }
@@ -65,6 +66,7 @@ static NSString *textForState(int state) {
         case 2: return @"🔴 Recording...";
         case 3: return @"🔵 Transcribing...";
         case 4: return @"⚠️ Grant Accessibility + Input Monitoring in System Settings";
+        case 5: return @"⚠️ Speech engine not responding — try again or restart";
         default: return @"Unknown";
     }
 }

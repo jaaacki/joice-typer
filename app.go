@@ -209,7 +209,7 @@ func (a *App) finalStreamTranscribe(audio []float32, lastText string) {
 		if errors.As(err, &timeoutErr) {
 			a.logger.Error("transcription timed out — speech engine may be stuck",
 				"component", "app", "operation", "finalStreamTranscribe", "error", err)
-			a.emitState(StateNoPermission)
+			a.emitState(StateDependencyStuck)
 			time.Sleep(2 * time.Second)
 		} else {
 			a.logger.Error("final transcription failed",
@@ -292,8 +292,8 @@ func (a *App) transcribeAndPaste(audio []float32) {
 		if errors.As(err, &timeoutErr) {
 			a.logger.Error("transcription timed out — speech engine may be stuck",
 				"component", "app", "operation", "transcribeAndPaste", "error", err)
-			// Brief orange flash to alert user that something is wrong
-			a.emitState(StateNoPermission)
+			// Show dependency-stuck state — distinct from permission issues
+			a.emitState(StateDependencyStuck)
 			time.Sleep(2 * time.Second)
 		} else {
 			a.logger.Error("transcription failed",
