@@ -64,14 +64,14 @@ func ListInputDevices() error {
 func findInputDevice(name string) (*portaudio.DeviceInfo, error) {
 	devices, err := portaudio.Devices()
 	if err != nil {
-		return nil, fmt.Errorf("recorder.findInputDevice: %w", err)
+		return nil, &ErrDependencyUnavailable{Component: "recorder", Operation: "findInputDevice", Wrapped: err}
 	}
 	for _, d := range devices {
 		if d.MaxInputChannels > 0 && d.Name == name {
 			return d, nil
 		}
 	}
-	return nil, fmt.Errorf("recorder.findInputDevice: input device %q not found", name)
+	return nil, &ErrDependencyUnavailable{Component: "recorder", Operation: "findInputDevice", Wrapped: fmt.Errorf("input device %q not found", name)}
 }
 
 func (r *portaudioRecorder) Start(ctx context.Context) error {
@@ -133,7 +133,7 @@ func (r *portaudioRecorder) Start(ctx context.Context) error {
 
 	if err != nil {
 		r.recording = false
-		return fmt.Errorf("recorder.Start: open stream: %w", err)
+		return &ErrDependencyUnavailable{Component: "recorder", Operation: "Start", Wrapped: fmt.Errorf("open stream: %w", err)}
 	}
 	r.stream = stream
 
@@ -143,7 +143,7 @@ func (r *portaudioRecorder) Start(ctx context.Context) error {
 			r.logger.Error("failed to close stream after start error",
 				"operation", "Start", "error", closeErr)
 		}
-		return fmt.Errorf("recorder.Start: start stream: %w", err)
+		return &ErrDependencyUnavailable{Component: "recorder", Operation: "Start", Wrapped: fmt.Errorf("start stream: %w", err)}
 	}
 
 	// Store stream reference so Stop can force-abort on timeout.
@@ -252,6 +252,10 @@ func (r *portaudioRecorder) Stop() ([]float32, error) {
 		case <-time.After(500 * time.Millisecond):
 			r.logger.Error("readLoop goroutine leaked after force-abort",
 				"operation", "Stop")
+			// Allow future sessions despite the leak — nil out done so Start() doesn't reject
+			r.mu.Lock()
+			r.done = nil
+			r.mu.Unlock()
 		}
 	}
 

@@ -256,6 +256,11 @@ func (a *App) transcribeAndPaste(audio []float32) {
 	a.emitState(StateReady)
 }
 
+// IsIdle returns true if no recording or transcription is in flight.
+func (a *App) IsIdle() bool {
+	return !a.recording && atomic.LoadInt32(&a.busy) == 0
+}
+
 // SetRecorder replaces the recorder used by the app.
 // Must only be called when no recording is in progress.
 func (a *App) SetRecorder(r Recorder) {

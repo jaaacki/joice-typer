@@ -12,6 +12,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"syscall"
+	"time"
 )
 
 // activeHotkey holds the current hotkey listener for stop/restart.
@@ -244,6 +245,18 @@ func runAppMode() {
 			activeHotkeyMu.Lock()
 			activeHotkey = hotkey
 			activeHotkeyMu.Unlock()
+
+			// Wait for app to become idle before swapping dependencies
+			for i := 0; i < 50; i++ { // 5 seconds max
+				if app.IsIdle() {
+					break
+				}
+				time.Sleep(100 * time.Millisecond)
+			}
+			if !app.IsIdle() {
+				logger.Warn("app not idle during dependency swap, proceeding anyway",
+					"component", "main", "operation", "runAppMode")
+			}
 
 			// Recreate recorder if input device changed
 			if oldCfg.InputDevice != cfg.InputDevice {
