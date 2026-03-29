@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"sync"
@@ -18,18 +19,26 @@ type mockRecorder struct {
 	audio       []float32
 	startErr    error
 	stopErr     error
+	startFn     func(ctx context.Context) error
+	stopFn      func() ([]float32, error)
 }
 
-func (m *mockRecorder) Start() error {
+func (m *mockRecorder) Start(ctx context.Context) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.startCalled = true
+	if m.startFn != nil {
+		return m.startFn(ctx)
+	}
 	return m.startErr
 }
 func (m *mockRecorder) Stop() ([]float32, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.stopCalled = true
+	if m.stopFn != nil {
+		return m.stopFn()
+	}
 	return m.audio, m.stopErr
 }
 func (m *mockRecorder) Snapshot() []float32 {
@@ -50,12 +59,19 @@ type mockTranscriber struct {
 	err           error
 	closeCalled   bool
 	receivedAudio []float32
+	transcribeFn  func(ctx context.Context, audio []float32) (string, error)
 }
 
-func (m *mockTranscriber) Transcribe(audio []float32) (string, error) {
+func (m *mockTranscriber) Transcribe(ctx context.Context, audio []float32) (string, error) {
+	m.mu.Lock()
+	fn := m.transcribeFn
+	m.receivedAudio = audio
+	m.mu.Unlock()
+	if fn != nil {
+		return fn(ctx, audio)
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.receivedAudio = audio
 	return m.text, m.err
 }
 func (m *mockTranscriber) Close() error {
@@ -430,5 +446,102 @@ func TestApp_ClipboardMode_ReleaseWithoutPress(t *testing.T) {
 	rec.mu.Unlock()
 	if stopped {
 		t.Error("recorder.Stop should not be called on release without press")
+	}
+}
+
+func TestApp_TranscriberTimeout_DoesNotHang(t *testing.T) {
+	// Simulate a NON-COOPERATIVE hung CGO call — ignores ctx entirely,
+	// blocks for 120 seconds. This is what a real stuck whisper_full does.
+	hangingTranscriber := &mockTranscriber{
+		transcribeFn: func(_ context.Context, audio []float32) (string, error) {
+			time.Sleep(120 * time.Second) // does NOT check ctx.Done()
+			return "should not reach", nil
+		},
+	}
+
+	rec := &mockRecorder{audio: make([]float32, 16000)}
+	paste := &mockPaster{}
+	logger := slog.Default()
+	snd := NewSound(false, logger)
+	app := NewApp(rec, hangingTranscriber, paste, nil, snd, "clipboard", logger)
+
+	events := make(chan HotkeyEvent, 10)
+	go app.Run(events)
+
+	// Press and release to trigger transcription
+	events <- TriggerPressed
+	time.Sleep(50 * time.Millisecond)
+	events <- TriggerReleased
+
+	// Wait for the transcription goroutine to start and get stuck
+	time.Sleep(200 * time.Millisecond)
+
+	// Shutdown should NOT hang forever — app.Shutdown has a 10s wg timeout
+	// and transcriber.Close has a 5s TryLock timeout. Total worst case ~15s.
+	done := make(chan struct{})
+	go func() {
+		close(events)
+		app.Shutdown()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		// Good — shutdown completed despite non-cooperative transcriber
+	case <-time.After(20 * time.Second):
+		t.Fatal("Shutdown hung with hanging transcriber — expected timeout")
+	}
+}
+
+func TestApp_RecorderStartFails_ContinuesListening(t *testing.T) {
+	var callCount int
+	var countMu sync.Mutex
+
+	rec := &mockRecorder{
+		audio: make([]float32, 16000),
+		startFn: func(ctx context.Context) error {
+			countMu.Lock()
+			callCount++
+			n := callCount
+			countMu.Unlock()
+			if n == 1 {
+				return fmt.Errorf("device busy")
+			}
+			return nil
+		},
+	}
+	trans := &mockTranscriber{
+		transcribeFn: func(ctx context.Context, audio []float32) (string, error) {
+			return "hello", nil
+		},
+	}
+	paste := &mockPaster{}
+	logger := slog.Default()
+	snd := NewSound(false, logger)
+	app := NewApp(rec, trans, paste, nil, snd, "clipboard", logger)
+
+	events := make(chan HotkeyEvent, 10)
+	go app.Run(events)
+
+	// First press — recorder.Start fails
+	events <- TriggerPressed
+	time.Sleep(50 * time.Millisecond)
+	events <- TriggerReleased
+	time.Sleep(100 * time.Millisecond)
+
+	// Second press — should succeed
+	events <- TriggerPressed
+	time.Sleep(50 * time.Millisecond)
+	events <- TriggerReleased
+	time.Sleep(300 * time.Millisecond)
+
+	close(events)
+	app.Shutdown()
+
+	paste.mu.Lock()
+	got := paste.pastedText
+	paste.mu.Unlock()
+	if got != "hello" {
+		t.Errorf("expected 'hello' after retry, got %q", got)
 	}
 }

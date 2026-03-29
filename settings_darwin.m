@@ -1,24 +1,38 @@
 #import <Cocoa/Cocoa.h>
 #import <ApplicationServices/ApplicationServices.h>
-#include "setup_darwin.h"
+#include <stdatomic.h>
+#include "settings_darwin.h"
 #include "hotkey_darwin.h"
 
 static NSWindow *sSetupWindow = nil;
 static NSTextField *sStep1Status = nil;
 static NSTextField *sStep2Status = nil;
 static NSPopUpButton *sMicDropdown = nil;
+static NSPopUpButton *sLangDropdown = nil;
+static char sSelectedLangBuffer[8] = {0};
 static NSProgressIndicator *sProgressBar = nil;
 static NSTextField *sProgressLabel = nil;
-static NSTextField *sStep4Status = nil;
-static NSTextField *sStep5Status = nil;
+static NSTextField *sStep6Status = nil;
+static NSTextField *sStep7Status = nil;
 static NSButton *sContinueButton = nil;
 static BOOL sSetupComplete = NO;
 static NSTextField *sStep1Indicator = nil;
 static NSTextField *sStep2Indicator = nil;
 static NSTextField *sStep3Indicator = nil;
 static NSTextField *sStep4Indicator = nil;
-static NSTextField *sStep5Indicator = nil;
+static NSTextField *sStep6Indicator = nil;
+static NSTextField *sStep7Indicator = nil;
 static char sSelectedDeviceBuffer[512] = {0};
+
+static NSTextField *sHotkeyLabel = nil;
+static NSButton *sHotkeyChangeBtn = nil;
+static NSButton *sHotkeyCancelBtn = nil;
+static NSButton *sHotkeyConfirmBtn = nil;
+static char sHotkeyBuffer[128] = {0};
+static _Atomic uint64_t sRecordedFlags = 0;
+static uint64_t sConfirmedFlags = 0;
+static CFMachPortRef sRecorderTap = NULL;
+static CFRunLoopSourceRef sRecorderSource = NULL;
 
 static NSTextField *makeLabel(NSString *text, CGFloat fontSize, BOOL bold, NSColor *color, NSRect frame) {
     NSTextField *label = [[NSTextField alloc] initWithFrame:frame];
@@ -32,8 +46,46 @@ static NSTextField *makeLabel(NSString *text, CGFloat fontSize, BOOL bold, NSCol
     return label;
 }
 
+static NSString *flagsToDisplayString(uint64_t flags) {
+    NSMutableArray *parts = [NSMutableArray array];
+    if (flags & 0x800000) [parts addObject:@"Fn"];
+    if (flags & 0x20000)  [parts addObject:@"Shift"];
+    if (flags & 0x40000)  [parts addObject:@"Ctrl"];
+    if (flags & 0x80000)  [parts addObject:@"Option"];
+    if (flags & 0x100000) [parts addObject:@"Cmd"];
+    if (parts.count == 0) return @"Press keys...";
+    return [parts componentsJoinedByString:@" + "];
+}
+
+static CGEventRef recorderTapCallback(
+    CGEventTapProxy proxy,
+    CGEventType type,
+    CGEventRef event,
+    void *userInfo
+) {
+    if (type == kCGEventTapDisabledByTimeout) {
+        if (sRecorderTap != NULL) CGEventTapEnable(sRecorderTap, true);
+        return event;
+    }
+    if (type != kCGEventFlagsChanged) return event;
+
+    uint64_t flags = CGEventGetFlags(event);
+    uint64_t relevant = flags & (0x800000 | 0x20000 | 0x40000 | 0x80000 | 0x100000);
+    sRecordedFlags = relevant;
+
+    dispatch_async(dispatch_get_main_queue(), ^{
+        sHotkeyLabel.stringValue = flagsToDisplayString(relevant);
+    });
+
+    return event;
+}
+
 @interface SetupDelegate : NSObject <NSWindowDelegate>
 - (void)continueClicked:(id)sender;
+- (void)hotkeyChangeClicked:(id)sender;
+- (void)hotkeyCancelClicked:(id)sender;
+- (void)hotkeyConfirmClicked:(id)sender;
+- (void)stopRecorder;
 @end
 
 @implementation SetupDelegate
@@ -48,20 +100,88 @@ static NSTextField *makeLabel(NSString *text, CGFloat fontSize, BOOL bold, NSCol
     [sSetupWindow close];
     [NSApp stopModal];
 }
+
+- (void)hotkeyChangeClicked:(id)sender {
+    sHotkeyChangeBtn.hidden = YES;
+    sHotkeyCancelBtn.hidden = NO;
+    sHotkeyConfirmBtn.hidden = NO;
+    sHotkeyLabel.stringValue = @"Press keys...";
+    sRecordedFlags = 0;
+
+    CGEventMask mask = CGEventMaskBit(kCGEventFlagsChanged);
+    sRecorderTap = CGEventTapCreate(
+        kCGSessionEventTap,
+        kCGHeadInsertEventTap,
+        kCGEventTapOptionListenOnly,
+        mask,
+        recorderTapCallback,
+        NULL
+    );
+    if (sRecorderTap != NULL) {
+        sRecorderSource = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, sRecorderTap, 0);
+        CFRunLoopAddSource(CFRunLoopGetMain(), sRecorderSource, kCFRunLoopCommonModes);
+        CGEventTapEnable(sRecorderTap, true);
+    }
+}
+
+- (void)hotkeyCancelClicked:(id)sender {
+    [self stopRecorder];
+    sHotkeyLabel.stringValue = [NSString stringWithUTF8String:sHotkeyBuffer];
+}
+
+- (void)hotkeyConfirmClicked:(id)sender {
+    [self stopRecorder];
+    if (sRecordedFlags == 0) {
+        sHotkeyLabel.stringValue = [NSString stringWithUTF8String:sHotkeyBuffer];
+        return;
+    }
+    sConfirmedFlags = sRecordedFlags;
+    NSString *display = flagsToDisplayString(sConfirmedFlags);
+    strlcpy(sHotkeyBuffer, [display UTF8String], sizeof(sHotkeyBuffer));
+    sHotkeyLabel.stringValue = display;
+}
+
+- (void)stopRecorder {
+    sHotkeyChangeBtn.hidden = NO;
+    sHotkeyCancelBtn.hidden = YES;
+    sHotkeyConfirmBtn.hidden = YES;
+    if (sRecorderTap != NULL) {
+        CGEventTapEnable(sRecorderTap, false);
+        if (sRecorderSource != NULL) {
+            CFRunLoopRemoveSource(CFRunLoopGetMain(), sRecorderSource, kCFRunLoopCommonModes);
+            CFRelease(sRecorderSource);
+            sRecorderSource = NULL;
+        }
+        CFRelease(sRecorderTap);
+        sRecorderTap = NULL;
+    }
+}
 @end
 
 static SetupDelegate *sSetupDelegate = nil;
+static BOOL sIsOnboarding = YES;
 
-void showSetupWindow(void) {
+void showSettingsWindow(int onboarding) {
     @autoreleasepool {
-        CGFloat w = 480, h = 520;
+        // Close any existing window to prevent leaks on repeated opens
+        if (sSetupWindow != nil) {
+            [sSetupWindow close];
+            sSetupWindow = nil;
+        }
+
+        // Reset stale hotkey recorder state
+        sConfirmedFlags = 0;
+        sRecordedFlags = 0;
+
+        sIsOnboarding = (onboarding != 0);
+        CGFloat w = 480, h = 640;
         NSRect frame = NSMakeRect(0, 0, w, h);
         sSetupWindow = [[NSWindow alloc]
             initWithContentRect:frame
                       styleMask:NSWindowStyleMaskTitled | NSWindowStyleMaskClosable
                         backing:NSBackingStoreBuffered
                           defer:NO];
-        [sSetupWindow setTitle:@"JoiceTyper Setup"];
+        [sSetupWindow setTitle:sIsOnboarding ? @"JoiceTyper Setup" : @"JoiceTyper Preferences"];
         [sSetupWindow center];
 
         sSetupDelegate = [[SetupDelegate alloc] init];
@@ -121,16 +241,64 @@ void showSetupWindow(void) {
         [content addSubview:sMicDropdown];
         y -= 36;
 
-        // Step 4: Download
-        sStep4Indicator = makeLabel(@"\u23F3", 16, NO, [NSColor labelColor], NSMakeRect(pad, y, 24, 24));
+        // Step 4: Language
+        sStep4Indicator = makeLabel(@"\U0001F310", 16, NO, [NSColor labelColor], NSMakeRect(pad, y, 24, 24));
         [content addSubview:sStep4Indicator];
-        NSTextField *s4title = makeLabel(@"4. Download Speech Model", 13, YES,
+        NSTextField *s4title = makeLabel(@"4. Language", 13, YES,
             [NSColor labelColor], NSMakeRect(pad + 28, y, innerW - 28, 20));
         [content addSubview:s4title];
+        y -= 28;
+        sLangDropdown = [[NSPopUpButton alloc] initWithFrame:NSMakeRect(pad + 28, y, innerW - 28, 26) pullsDown:NO];
+        [content addSubview:sLangDropdown];
+        y -= 36;
+
+        // Step 5: Hotkey
+        NSTextField *s5HkIndicator = makeLabel(@"\u2328\uFE0F", 16, NO, [NSColor labelColor], NSMakeRect(pad, y, 24, 24));
+        [content addSubview:s5HkIndicator];
+        NSTextField *s5title = makeLabel(@"5. Hotkey", 13, YES,
+            [NSColor labelColor], NSMakeRect(pad + 28, y, innerW - 28, 20));
+        [content addSubview:s5title];
+        y -= 28;
+
+        sHotkeyLabel = makeLabel(@"Fn + Shift", 12, NO,
+            [NSColor labelColor], NSMakeRect(pad + 28, y, 200, 20));
+        [content addSubview:sHotkeyLabel];
+
+        sHotkeyChangeBtn = [[NSButton alloc] initWithFrame:NSMakeRect(w - pad - 80, y, 80, 24)];
+        sHotkeyChangeBtn.title = @"Change";
+        sHotkeyChangeBtn.bezelStyle = NSBezelStyleRounded;
+        sHotkeyChangeBtn.target = sSetupDelegate;
+        sHotkeyChangeBtn.action = @selector(hotkeyChangeClicked:);
+        [content addSubview:sHotkeyChangeBtn];
+
+        sHotkeyCancelBtn = [[NSButton alloc] initWithFrame:NSMakeRect(w - pad - 170, y, 80, 24)];
+        sHotkeyCancelBtn.title = @"Cancel";
+        sHotkeyCancelBtn.bezelStyle = NSBezelStyleRounded;
+        sHotkeyCancelBtn.target = sSetupDelegate;
+        sHotkeyCancelBtn.action = @selector(hotkeyCancelClicked:);
+        sHotkeyCancelBtn.hidden = YES;
+        [content addSubview:sHotkeyCancelBtn];
+
+        sHotkeyConfirmBtn = [[NSButton alloc] initWithFrame:NSMakeRect(w - pad - 80, y, 80, 24)];
+        sHotkeyConfirmBtn.title = @"Confirm";
+        sHotkeyConfirmBtn.bezelStyle = NSBezelStyleRounded;
+        sHotkeyConfirmBtn.target = sSetupDelegate;
+        sHotkeyConfirmBtn.action = @selector(hotkeyConfirmClicked:);
+        sHotkeyConfirmBtn.hidden = YES;
+        [content addSubview:sHotkeyConfirmBtn];
+
+        y -= 36;
+
+        // Step 6: Download
+        sStep6Indicator = makeLabel(@"\u23F3", 16, NO, [NSColor labelColor], NSMakeRect(pad, y, 24, 24));
+        [content addSubview:sStep6Indicator];
+        NSTextField *s6title = makeLabel(@"6. Download Speech Model", 13, YES,
+            [NSColor labelColor], NSMakeRect(pad + 28, y, innerW - 28, 20));
+        [content addSubview:s6title];
         y -= 16;
-        sStep4Status = makeLabel(@"whisper-small \u00B7 466 MB", 11, NO,
+        sStep6Status = makeLabel(@"whisper-small \u00B7 466 MB", 11, NO,
             [NSColor secondaryLabelColor], NSMakeRect(pad + 28, y, innerW - 28, 16));
-        [content addSubview:sStep4Status];
+        [content addSubview:sStep6Status];
         y -= 18;
         sProgressBar = [[NSProgressIndicator alloc] initWithFrame:NSMakeRect(pad + 28, y, innerW - 28, 8)];
         sProgressBar.style = NSProgressIndicatorStyleBar;
@@ -145,20 +313,20 @@ void showSetupWindow(void) {
         [content addSubview:sProgressLabel];
         y -= 36;
 
-        // Step 5: Ready
-        sStep5Indicator = makeLabel(@"\u23F3", 16, NO, [NSColor labelColor], NSMakeRect(pad, y, 24, 24));
-        [content addSubview:sStep5Indicator];
-        NSTextField *s5title = makeLabel(@"5. Ready", 13, YES,
+        // Step 7: Ready
+        sStep7Indicator = makeLabel(@"\u23F3", 16, NO, [NSColor labelColor], NSMakeRect(pad, y, 24, 24));
+        [content addSubview:sStep7Indicator];
+        NSTextField *s7title = makeLabel(@"7. Ready", 13, YES,
             [NSColor labelColor], NSMakeRect(pad + 28, y, innerW - 28, 20));
-        [content addSubview:s5title];
+        [content addSubview:s7title];
         y -= 20;
-        sStep5Status = makeLabel(@"Waiting...", 11, NO,
+        sStep7Status = makeLabel(@"Waiting...", 11, NO,
             [NSColor secondaryLabelColor], NSMakeRect(pad + 28, y, innerW - 28, 16));
-        [content addSubview:sStep5Status];
+        [content addSubview:sStep7Status];
 
         // Continue button (bottom right, initially disabled)
         sContinueButton = [[NSButton alloc] initWithFrame:NSMakeRect(w - pad - 120, 16, 120, 32)];
-        sContinueButton.title = @"Continue";
+        sContinueButton.title = sIsOnboarding ? @"Continue" : @"Save";
         sContinueButton.bezelStyle = NSBezelStyleRounded;
         sContinueButton.enabled = NO;
         sContinueButton.target = sSetupDelegate;
@@ -166,6 +334,11 @@ void showSetupWindow(void) {
         [content addSubview:sContinueButton];
 
         sSetupComplete = NO;
+
+        // In preferences mode, Save is always available (no download gate)
+        if (!sIsOnboarding) {
+            sContinueButton.enabled = YES;
+        }
 
         [sSetupWindow makeKeyAndOrderFront:nil];
         [NSApp activateIgnoringOtherApps:YES];
@@ -215,7 +388,7 @@ void populateSetupDevices(const char **deviceNames, int count, int defaultIndex)
 
 void updateSetupDownloadProgress(double progress, long long bytesDownloaded, long long bytesTotal) {
     dispatch_async(dispatch_get_main_queue(), ^{
-        sStep4Indicator.stringValue = @"\u2B07\uFE0F";
+        sStep6Indicator.stringValue = @"\u2B07\uFE0F";
         sProgressBar.doubleValue = progress;
         long long mb_done = bytesDownloaded / (1024 * 1024);
         long long mb_total = bytesTotal / (1024 * 1024);
@@ -226,30 +399,30 @@ void updateSetupDownloadProgress(double progress, long long bytesDownloaded, lon
 
 void updateSetupDownloadComplete(void) {
     dispatch_async(dispatch_get_main_queue(), ^{
-        sStep4Indicator.stringValue = @"\u2705";
+        sStep6Indicator.stringValue = @"\u2705";
         sProgressBar.doubleValue = 1.0;
         sProgressLabel.stringValue = @"Download complete";
-        sStep4Status.stringValue = @"Model ready";
-        sStep4Status.textColor = [NSColor systemGreenColor];
+        sStep6Status.stringValue = @"Model ready";
+        sStep6Status.textColor = [NSColor systemGreenColor];
     });
 }
 
 void updateSetupDownloadFailed(const char *errorMsg) {
     NSString *msg = [NSString stringWithUTF8String:errorMsg];
     dispatch_async(dispatch_get_main_queue(), ^{
-        sStep4Indicator.stringValue = @"\u274C";
+        sStep6Indicator.stringValue = @"\u274C";
         sProgressBar.doubleValue = 0;
         sProgressLabel.stringValue = msg;
-        sStep4Status.stringValue = @"Download failed \u2014 restart to retry";
-        sStep4Status.textColor = [NSColor systemRedColor];
+        sStep6Status.stringValue = @"Download failed \u2014 restart to retry";
+        sStep6Status.textColor = [NSColor systemRedColor];
     });
 }
 
 void updateSetupReady(void) {
     dispatch_async(dispatch_get_main_queue(), ^{
-        sStep5Indicator.stringValue = @"\u2705";
-        sStep5Status.stringValue = @"All set!";
-        sStep5Status.textColor = [NSColor systemGreenColor];
+        sStep7Indicator.stringValue = @"\u2705";
+        sStep7Status.stringValue = @"All set!";
+        sStep7Status.textColor = [NSColor systemGreenColor];
         sContinueButton.title = @"Start JoiceTyper";
         sContinueButton.enabled = YES;
     });
@@ -277,6 +450,55 @@ const char *getSelectedDevice(void) {
     memcpy(sSelectedDeviceBuffer, utf8, len);
     sSelectedDeviceBuffer[len] = '\0';
     return sSelectedDeviceBuffer;
+}
+
+void populateSettingsLanguages(const char **codes, const char **names, int count, int defaultIndex) {
+    [sLangDropdown removeAllItems];
+    for (int i = 0; i < count; i++) {
+        NSString *title = [NSString stringWithUTF8String:names[i]];
+        [sLangDropdown addItemWithTitle:title];
+        [sLangDropdown lastItem].representedObject = [NSString stringWithUTF8String:codes[i]];
+    }
+    if (defaultIndex >= 0 && defaultIndex < count) {
+        [sLangDropdown selectItemAtIndex:defaultIndex];
+    }
+}
+
+const char *getSelectedLanguage(void) {
+    if (sLangDropdown == nil || sLangDropdown.selectedItem == nil) {
+        sSelectedLangBuffer[0] = '\0';
+        return sSelectedLangBuffer;
+    }
+    NSString *code = sLangDropdown.selectedItem.representedObject;
+    const char *utf8 = [code UTF8String];
+    if (utf8 == NULL) {
+        sSelectedLangBuffer[0] = '\0';
+        return sSelectedLangBuffer;
+    }
+    size_t len = strlen(utf8);
+    if (len >= sizeof(sSelectedLangBuffer)) {
+        len = sizeof(sSelectedLangBuffer) - 1;
+    }
+    memcpy(sSelectedLangBuffer, utf8, len);
+    sSelectedLangBuffer[len] = '\0';
+    return sSelectedLangBuffer;
+}
+
+void setSettingsHotkey(const char *displayText) {
+    strlcpy(sHotkeyBuffer, displayText, sizeof(sHotkeyBuffer));
+    dispatch_async(dispatch_get_main_queue(), ^{
+        if (sHotkeyLabel != nil) {
+            sHotkeyLabel.stringValue = [NSString stringWithUTF8String:sHotkeyBuffer];
+        }
+    });
+}
+
+const char *getSettingsHotkey(void) {
+    return sHotkeyBuffer;
+}
+
+uint64_t getSettingsHotkeyFlags(void) {
+    return sConfirmedFlags;
 }
 
 void runSetupEventLoop(void) {

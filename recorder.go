@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"sync"
@@ -13,6 +14,7 @@ type portaudioRecorder struct {
 	sampleRate   float64
 	deviceName   string
 	stream       *portaudio.Stream
+	activeStream *portaudio.Stream // guarded by mu; used by Stop to force-abort on timeout
 	buffer       []float32
 	chunks       [][]float32
 	mu           sync.Mutex
@@ -72,7 +74,11 @@ func findInputDevice(name string) (*portaudio.DeviceInfo, error) {
 	return nil, fmt.Errorf("recorder.findInputDevice: input device %q not found", name)
 }
 
-func (r *portaudioRecorder) Start() error {
+func (r *portaudioRecorder) Start(ctx context.Context) error {
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -80,14 +86,13 @@ func (r *portaudioRecorder) Start() error {
 		return fmt.Errorf("recorder.Start: already recording")
 	}
 
-	// Best-effort wait for previous readLoop. Session isolation (sessionID +
-	// per-session stream/buffer) prevents interference even if still running.
+	// Block new sessions until previous one is fully cleaned up
 	if r.done != nil {
 		select {
 		case <-r.done:
+			// Previous session exited
 		default:
-			r.logger.Warn("previous readLoop still active, proceeding with new session",
-				"operation", "Start")
+			return fmt.Errorf("recorder.Start: previous session still active, cannot start new recording")
 		}
 	}
 
@@ -138,6 +143,9 @@ func (r *portaudioRecorder) Start() error {
 		return fmt.Errorf("recorder.Start: start stream: %w", err)
 	}
 
+	// Store stream reference so Stop can force-abort on timeout.
+	r.activeStream = stream
+
 	// Pass session state by value — readLoop owns its own stream, buffer,
 	// and done channel. A zombie readLoop from a timed-out Stop cannot
 	// interfere with a future session's resources.
@@ -155,6 +163,9 @@ func (r *portaudioRecorder) Start() error {
 func (r *portaudioRecorder) readLoop(stream *portaudio.Stream, buffer []float32, done chan struct{}, sessionID uint64) {
 	defer func() {
 		stream.Close()
+		r.mu.Lock()
+		r.activeStream = nil
+		r.mu.Unlock()
 		close(done)
 	}()
 	for {
@@ -222,8 +233,23 @@ func (r *portaudioRecorder) Stop() ([]float32, error) {
 	// readLoop's defer calls stream.Close() which implicitly stops and releases.
 	select {
 	case <-done:
+		// readLoop exited cleanly
 	case <-time.After(500 * time.Millisecond):
-		r.logger.Warn("readLoop slow to exit", "operation", "Stop")
+		r.logger.Warn("readLoop did not exit in time, force-aborting stream",
+			"operation", "Stop")
+		r.mu.Lock()
+		if r.activeStream != nil {
+			r.activeStream.Abort()
+			r.activeStream = nil
+		}
+		r.mu.Unlock()
+		// Wait a bit more for goroutine to notice
+		select {
+		case <-done:
+		case <-time.After(500 * time.Millisecond):
+			r.logger.Error("readLoop goroutine leaked after force-abort",
+				"operation", "Stop")
+		}
 	}
 
 	total := 0

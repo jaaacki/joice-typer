@@ -208,6 +208,64 @@ func TestValidate_InvalidLanguage(t *testing.T) {
 	}
 }
 
+func TestValidate_ValidLanguages(t *testing.T) {
+	for _, lang := range []string{"en", "zh", "ja", "ko", "es", "yue", "haw"} {
+		cfg := Config{
+			TriggerKey: []string{"fn"}, ModelSize: "small",
+			SampleRate: 16000, Language: lang,
+		}
+		if err := cfg.Validate(); err != nil {
+			t.Errorf("language %q should be valid: %v", lang, err)
+		}
+	}
+}
+
+func TestValidate_InvalidLanguageCode(t *testing.T) {
+	cfg := Config{
+		TriggerKey: []string{"fn"}, ModelSize: "small",
+		SampleRate: 16000, Language: "zzzz",
+	}
+	if err := cfg.Validate(); err == nil {
+		t.Error("expected error for unsupported language code")
+	}
+}
+
+func TestLoadConfig_RejectsUnknownFields(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	data := []byte("trigger_key: [fn]\nmodel_size: small\nsample_rate: 16000\nbogus_field: true\n")
+	os.WriteFile(path, data, 0644)
+	_, err := LoadConfig(path)
+	if err == nil {
+		t.Error("expected error for unknown YAML field 'bogus_field'")
+	}
+}
+
+func TestAtomicWriteFile_PartialWriteCleanup(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "test.yaml")
+
+	// Write initial valid content
+	if err := atomicWriteFile(path, []byte("original"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Verify the .tmp file doesn't linger after successful write
+	tmpPath := path + ".tmp"
+	if _, err := os.Stat(tmpPath); !os.IsNotExist(err) {
+		t.Error("tmp file should not exist after successful write")
+	}
+
+	// Verify content
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "original" {
+		t.Errorf("expected 'original', got %q", string(data))
+	}
+}
+
 func TestLoadConfig_DefaultTypeMode(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.yaml")

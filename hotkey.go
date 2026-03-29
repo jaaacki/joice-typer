@@ -8,6 +8,7 @@ package main
 import "C"
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
@@ -125,13 +126,13 @@ func NewHotkeyListener(triggerKeys []string, logger *slog.Logger) HotkeyListener
 // Input Monitoring cannot be reliably polled — IOHIDCheckAccess does not
 // update for a running process. The tap creation is the true test.
 // Calls onUpdate on each poll so the caller can update the UI.
-func (h *cgEventHotkeyListener) WaitForPermissions(onUpdate func(accessibility, inputMonitoring bool)) {
+func (h *cgEventHotkeyListener) WaitForPermissions(ctx context.Context, onUpdate func(accessibility, inputMonitoring bool)) error {
 	// Fast path: if the event tap already works, skip everything.
 	if C.probeEventTap() == 1 {
 		h.logger.Info("permissions already valid", "operation", "WaitForPermissions")
 		onUpdate(true, true)
 		saveBinaryHash(h.logger)
-		return
+		return nil
 	}
 
 	// Tap failed. Check if this is a new binary (reinstall) vs first install.
@@ -150,12 +151,17 @@ func (h *cgEventHotkeyListener) WaitForPermissions(onUpdate func(accessibility, 
 
 	// Poll silently until the event tap succeeds.
 	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
 		if C.probeEventTap() == 1 {
 			h.logger.Info("permissions verified via event tap probe",
 				"operation", "WaitForPermissions")
 			onUpdate(true, true)
 			saveBinaryHash(h.logger)
-			return
+			return nil
 		}
 		acc := C.checkAccessibility(0) == 1
 		onUpdate(acc, false)
@@ -264,4 +270,23 @@ func keysToFlags(keys []string) (uint64, error) {
 		flags |= f
 	}
 	return flags, nil
+}
+
+var flagToKey = map[uint64]string{
+	flagFn:     "fn",
+	flagShift:  "shift",
+	flagCtrl:   "ctrl",
+	flagOption: "option",
+	flagCmd:    "cmd",
+}
+
+func flagsToKeys(flags uint64) []string {
+	order := []uint64{flagFn, flagShift, flagCtrl, flagOption, flagCmd}
+	var keys []string
+	for _, f := range order {
+		if flags&f != 0 {
+			keys = append(keys, flagToKey[f])
+		}
+	}
+	return keys
 }

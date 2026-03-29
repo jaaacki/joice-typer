@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"os"
@@ -10,6 +11,14 @@ import (
 	"strings"
 	"sync"
 	"syscall"
+)
+
+// activeHotkey holds the current hotkey listener for stop/restart.
+// Protected by activeHotkeyMu. Used by signalHotkeyRestart() in settings.go
+// and the signal handler.
+var (
+	activeHotkeyMu sync.Mutex
+	activeHotkey   HotkeyListener
 )
 
 func main() {
@@ -91,10 +100,29 @@ func runAppMode() {
 		}
 	}()
 
+	// Create a context cancelled by SIGTERM — used for permissions and startup
+	startupCtx, startupCancel := context.WithCancel(context.Background())
+
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	go func() {
+		sig := <-sigCh
+		logger.Info("received signal", "component", "main", "operation", "signal", "signal", sig.String())
+		startupCancel() // cancel permission polling and setup wizard
+		activeHotkeyMu.Lock()
+		h := activeHotkey
+		activeHotkeyMu.Unlock()
+		if h != nil {
+			if stopErr := h.Stop(); stopErr != nil {
+				logger.Error("failed to stop hotkey", "component", "main", "operation", "signal", "error", stopErr)
+			}
+		}
+	}()
+
 	// First-run: show setup wizard
 	firstRun := IsFirstRun()
 	if firstRun {
-		selectedDevice, setupErr := RunSetupWizard(logger)
+		selectedDevice, setupErr := RunSetupWizard(startupCtx, logger)
 		if setupErr != nil {
 			logger.Error("setup wizard failed", "component", "main", "operation", "runAppMode", "error", setupErr)
 			os.Exit(1)
@@ -125,7 +153,7 @@ func runAppMode() {
 	InitStatusBar()
 	UpdateStatusBar(StateLoading)
 
-	transcriber, err := NewTranscriber(modelPath, cfg.ModelSize, cfg.Language, logger)
+	transcriber, err := NewTranscriber(startupCtx, modelPath, cfg.ModelSize, cfg.Language, cfg.SampleRate, logger)
 	if err != nil {
 		logger.Error("failed to initialize transcriber", "component", "main", "operation", "runAppMode", "error", err)
 		os.Exit(1)
@@ -148,15 +176,9 @@ func runAppMode() {
 	events := make(chan HotkeyEvent, 10)
 	hotkey := NewHotkeyListener(cfg.TriggerKey, logger)
 
-	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
-	go func() {
-		sig := <-sigCh
-		logger.Info("received signal", "component", "main", "operation", "signal", "signal", sig.String())
-		if stopErr := hotkey.Stop(); stopErr != nil {
-			logger.Error("failed to stop hotkey", "component", "main", "operation", "signal", "error", stopErr)
-		}
-	}()
+	activeHotkeyMu.Lock()
+	activeHotkey = hotkey
+	activeHotkeyMu.Unlock()
 
 	var wg sync.WaitGroup
 	wg.Add(1)
@@ -169,12 +191,20 @@ func runAppMode() {
 	// Always validate permissions before starting hotkey — not just on first run.
 	// Ad-hoc signing means every rebuild/reinstall invalidates old grants.
 	UpdateStatusBar(StateNoPermission)
-	hotkey.WaitForPermissions(func(acc, inp bool) {
+	if err := hotkey.WaitForPermissions(startupCtx, func(acc, inp bool) {
 		if acc && inp {
 			return
 		}
 		UpdateStatusBar(StateNoPermission)
-	})
+	}); err != nil {
+		logger.Error("permission wait cancelled", "component", "main", "operation", "runAppMode", "error", err)
+		hotkeyMu.Lock()
+		hotkeyEvents = nil
+		hotkeyMu.Unlock()
+		close(events)
+		wg.Wait()
+		return
+	}
 
 	UpdateStatusBar(StateReady)
 	sound.PlayReady()
@@ -183,9 +213,38 @@ func runAppMode() {
 
 	logger.Info("ready", "component", "main", "operation", "runAppMode", "trigger_key", cfg.TriggerKey)
 
-	if err := hotkey.Start(events); err != nil {
-		logger.Error("hotkey listener failed", "component", "main", "operation", "runAppMode", "error", err)
-		os.Exit(1)
+	// Hotkey start/restart loop.
+	// hotkey.Start() blocks on [NSApp run]. It returns when Stop() is called
+	// — either from the signal handler (shutdown) or from signalHotkeyRestart()
+	// in settings.go (preferences changed). We check hotkeyRestartCh to
+	// distinguish the two cases.
+	for {
+		if err := hotkey.Start(events); err != nil {
+			logger.Error("hotkey listener failed", "component", "main", "operation", "runAppMode", "error", err)
+			break
+		}
+
+		// hotkey.Start() returned — check if restart was requested
+		select {
+		case <-hotkeyRestartCh:
+			logger.Info("restarting hotkey with new config", "component", "main", "operation", "runAppMode")
+			// Reload config and recreate listener
+			cfg, err = LoadConfig(cfgPath)
+			if err != nil {
+				logger.Error("failed to reload config, keeping current hotkey",
+					"component", "main", "operation", "runAppMode", "error", err)
+				continue // retry with existing hotkey
+			}
+			hotkey = NewHotkeyListener(cfg.TriggerKey, logger)
+			activeHotkeyMu.Lock()
+			activeHotkey = hotkey
+			activeHotkeyMu.Unlock()
+			UpdateStatusBar(StateReady)
+			continue
+		default:
+			// Normal shutdown (signal handler called Stop)
+		}
+		break
 	}
 
 	hotkeyMu.Lock()
@@ -252,8 +311,28 @@ func runTerminalMode(configPath string) {
 		os.Exit(1)
 	}
 
+	// --- Signal handling (before model init so SIGTERM can cancel download) ---
+	startupCtx, startupCancel := context.WithCancel(context.Background())
+	events := make(chan HotkeyEvent, 10)
+	hotkey := NewHotkeyListener(cfg.TriggerKey, logger)
+
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+
+	go func() {
+		sig := <-sigCh
+		logger.Info("received signal",
+			"component", "main", "operation", "signal",
+			"signal", sig.String())
+		startupCancel()
+		if err := hotkey.Stop(); err != nil {
+			logger.Error("failed to stop hotkey listener",
+				"component", "main", "operation", "signal", "error", err)
+		}
+	}()
+
 	// --- Init transcriber (loads model -- may download on first run) ---
-	transcriber, err := NewTranscriber(modelPath, cfg.ModelSize, cfg.Language, logger)
+	transcriber, err := NewTranscriber(startupCtx, modelPath, cfg.ModelSize, cfg.Language, cfg.SampleRate, logger)
 	if err != nil {
 		logger.Error("failed to initialize transcriber",
 			"component", "main", "operation", "runTerminalMode", "error", err)
@@ -277,24 +356,6 @@ func runTerminalMode(configPath string) {
 
 	// --- Create app ---
 	app := NewApp(recorder, transcriber, paster, typer, sound, cfg.TypeMode, logger)
-
-	// --- Signal handling ---
-	events := make(chan HotkeyEvent, 10)
-	hotkey := NewHotkeyListener(cfg.TriggerKey, logger)
-
-	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
-
-	go func() {
-		sig := <-sigCh
-		logger.Info("received signal",
-			"component", "main", "operation", "signal",
-			"signal", sig.String())
-		if err := hotkey.Stop(); err != nil {
-			logger.Error("failed to stop hotkey listener",
-				"component", "main", "operation", "signal", "error", err)
-		}
-	}()
 
 	// --- Start event processing goroutine ---
 	var wg sync.WaitGroup

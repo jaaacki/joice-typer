@@ -1,10 +1,13 @@
 package main
 
 import (
+	"context"
 	"log/slog"
 	"sync"
 	"time"
 )
+
+const streamTranscribeTimeout = 15 * time.Second
 
 // Streamer runs a periodic transcription loop during recording,
 // streaming partial results to the cursor via a Typer.
@@ -71,7 +74,9 @@ func (s *Streamer) tick() {
 		return
 	}
 
-	text, err := s.transcriber.Transcribe(audio)
+	transcribeCtx, cancel := context.WithTimeout(context.Background(), streamTranscribeTimeout)
+	defer cancel()
+	text, err := s.transcriber.Transcribe(transcribeCtx, audio)
 	if err != nil {
 		s.logger.Error("streaming transcription failed", "operation", "tick", "error", err)
 		return

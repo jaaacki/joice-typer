@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"log/slog"
 	"sync"
 	"testing"
@@ -13,7 +14,7 @@ type sequenceTranscriber struct {
 	callIdx int
 }
 
-func (s *sequenceTranscriber) Transcribe(audio []float32) (string, error) {
+func (s *sequenceTranscriber) Transcribe(ctx context.Context, audio []float32) (string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.callIdx >= len(s.results) {
