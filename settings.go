@@ -249,10 +249,21 @@ func boolToCInt(b bool) C.int {
 
 var hotkeyRestartCh = make(chan struct{}, 1)
 
+// signalHotkeyRestart stops the current hotkey listener and signals the
+// main loop to reload config and restart. Called from OpenPreferences()
+// on the main thread after the modal closes. hotkey.Stop() dispatches
+// [NSApp stop:] which will cause [NSApp run] to exit on the next event
+// loop iteration (after this call returns to Cocoa).
 func signalHotkeyRestart() {
 	select {
 	case hotkeyRestartCh <- struct{}{}:
 	default:
+	}
+	activeHotkeyMu.Lock()
+	h := activeHotkey
+	activeHotkeyMu.Unlock()
+	if h != nil {
+		h.Stop()
 	}
 }
 

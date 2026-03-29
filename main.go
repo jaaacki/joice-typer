@@ -12,6 +12,14 @@ import (
 	"syscall"
 )
 
+// activeHotkey holds the current hotkey listener for stop/restart.
+// Protected by activeHotkeyMu. Used by signalHotkeyRestart() in settings.go
+// and the signal handler.
+var (
+	activeHotkeyMu sync.Mutex
+	activeHotkey   HotkeyListener
+)
+
 func main() {
 	// The main goroutine must stay on the main OS thread for macOS CFRunLoop.
 	runtime.LockOSThread()
@@ -148,8 +156,9 @@ func runAppMode() {
 	events := make(chan HotkeyEvent, 10)
 	hotkey := NewHotkeyListener(cfg.TriggerKey, logger)
 
-	var activeHotkeyMu sync.Mutex
-	var activeHotkey HotkeyListener = hotkey
+	activeHotkeyMu.Lock()
+	activeHotkey = hotkey
+	activeHotkeyMu.Unlock()
 
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
@@ -189,7 +198,11 @@ func runAppMode() {
 
 	logger.Info("ready", "component", "main", "operation", "runAppMode", "trigger_key", cfg.TriggerKey)
 
-	// Hotkey start/restart loop
+	// Hotkey start/restart loop.
+	// hotkey.Start() blocks on [NSApp run]. It returns when Stop() is called
+	// — either from the signal handler (shutdown) or from signalHotkeyRestart()
+	// in settings.go (preferences changed). We check hotkeyRestartCh to
+	// distinguish the two cases.
 	for {
 		if err := hotkey.Start(events); err != nil {
 			logger.Error("hotkey listener failed", "component", "main", "operation", "runAppMode", "error", err)

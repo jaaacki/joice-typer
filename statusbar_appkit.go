@@ -32,5 +32,10 @@ func statusBarQuitClicked() {
 
 //export statusBarPreferencesClicked
 func statusBarPreferencesClicked() {
-	go OpenPreferences()
+	// Must NOT use `go` — Cocoa UI calls in OpenPreferences must run on
+	// the main thread. This callback is already on the main thread (called
+	// from NSApp's event dispatch). The modal window inside OpenPreferences
+	// is a standard Cocoa pattern: [NSApp runModalForWindow:] nests within
+	// the existing [NSApp run] event loop.
+	OpenPreferences()
 }
