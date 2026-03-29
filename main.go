@@ -100,10 +100,29 @@ func runAppMode() {
 		}
 	}()
 
+	// Create a context cancelled by SIGTERM — used for permissions and startup
+	startupCtx, startupCancel := context.WithCancel(context.Background())
+
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	go func() {
+		sig := <-sigCh
+		logger.Info("received signal", "component", "main", "operation", "signal", "signal", sig.String())
+		startupCancel() // cancel permission polling and setup wizard
+		activeHotkeyMu.Lock()
+		h := activeHotkey
+		activeHotkeyMu.Unlock()
+		if h != nil {
+			if stopErr := h.Stop(); stopErr != nil {
+				logger.Error("failed to stop hotkey", "component", "main", "operation", "signal", "error", stopErr)
+			}
+		}
+	}()
+
 	// First-run: show setup wizard
 	firstRun := IsFirstRun()
 	if firstRun {
-		selectedDevice, setupErr := RunSetupWizard(logger)
+		selectedDevice, setupErr := RunSetupWizard(startupCtx, logger)
 		if setupErr != nil {
 			logger.Error("setup wizard failed", "component", "main", "operation", "runAppMode", "error", setupErr)
 			os.Exit(1)
@@ -161,19 +180,6 @@ func runAppMode() {
 	activeHotkey = hotkey
 	activeHotkeyMu.Unlock()
 
-	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
-	go func() {
-		sig := <-sigCh
-		logger.Info("received signal", "component", "main", "operation", "signal", "signal", sig.String())
-		activeHotkeyMu.Lock()
-		h := activeHotkey
-		activeHotkeyMu.Unlock()
-		if stopErr := h.Stop(); stopErr != nil {
-			logger.Error("failed to stop hotkey", "component", "main", "operation", "signal", "error", stopErr)
-		}
-	}()
-
 	var wg sync.WaitGroup
 	wg.Add(1)
 	go func() {
@@ -185,12 +191,20 @@ func runAppMode() {
 	// Always validate permissions before starting hotkey — not just on first run.
 	// Ad-hoc signing means every rebuild/reinstall invalidates old grants.
 	UpdateStatusBar(StateNoPermission)
-	hotkey.WaitForPermissions(context.Background(), func(acc, inp bool) {
+	if err := hotkey.WaitForPermissions(startupCtx, func(acc, inp bool) {
 		if acc && inp {
 			return
 		}
 		UpdateStatusBar(StateNoPermission)
-	})
+	}); err != nil {
+		logger.Error("permission wait cancelled", "component", "main", "operation", "runAppMode", "error", err)
+		hotkeyMu.Lock()
+		hotkeyEvents = nil
+		hotkeyMu.Unlock()
+		close(events)
+		wg.Wait()
+		return
+	}
 
 	UpdateStatusBar(StateReady)
 	sound.PlayReady()

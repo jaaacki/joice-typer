@@ -9,6 +9,7 @@ package main
 import "C"
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"os"
@@ -36,7 +37,7 @@ func IsFirstRun() bool {
 // RunSetupWizard runs the first-run setup flow.
 // Returns the selected device name and nil on success.
 // Must be called from the main thread.
-func RunSetupWizard(logger *slog.Logger) (string, error) {
+func RunSetupWizard(ctx context.Context, logger *slog.Logger) (string, error) {
 	l := logger.With("component", "setup")
 	settingsLogger = logger.With("component", "settings")
 	l.Info("starting setup wizard", "operation", "RunSetupWizard")
@@ -49,6 +50,8 @@ func RunSetupWizard(logger *slog.Logger) (string, error) {
 		for {
 			select {
 			case <-done:
+				return
+			case <-ctx.Done():
 				return
 			default:
 			}
@@ -67,6 +70,8 @@ func RunSetupWizard(logger *slog.Logger) (string, error) {
 		for {
 			select {
 			case <-done:
+				return
+			case <-ctx.Done():
 				return
 			default:
 			}
@@ -88,6 +93,11 @@ func RunSetupWizard(logger *slog.Logger) (string, error) {
 
 	// Step 6: Model download in background goroutine
 	go func() {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
 		const setupModelSize = "small"
 		modelPath, pathErr := DefaultModelPath(setupModelSize)
 		if pathErr != nil {
@@ -103,7 +113,7 @@ func RunSetupWizard(logger *slog.Logger) (string, error) {
 			C.updateSetupReady()
 			return
 		}
-		dlErr := downloadModelWithProgress(modelPath, setupModelSize, func(progress float64, downloaded, total int64) {
+		dlErr := downloadModelWithProgress(ctx, modelPath, setupModelSize, func(progress float64, downloaded, total int64) {
 			C.updateSetupDownloadProgress(C.double(progress), C.longlong(downloaded), C.longlong(total))
 		}, l)
 		if dlErr != nil {

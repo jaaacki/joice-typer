@@ -62,7 +62,7 @@ type whisperTranscriber struct {
 func NewTranscriber(modelPath string, modelSize string, language string, logger *slog.Logger) (Transcriber, error) {
 	l := logger.With("component", "transcriber")
 
-	if err := ensureModel(modelPath, modelSize, l); err != nil {
+	if err := ensureModel(context.Background(), modelPath, modelSize, l); err != nil {
 		return nil, fmt.Errorf("transcriber.NewTranscriber: %w", err)
 	}
 
@@ -292,13 +292,13 @@ func validateCachedModel(modelPath string, modelSize string, logger *slog.Logger
 }
 
 // ensureModel checks if the model file exists and downloads it if not.
-func ensureModel(modelPath string, modelSize string, logger *slog.Logger) error {
+func ensureModel(ctx context.Context, modelPath string, modelSize string, logger *slog.Logger) error {
 	if validateCachedModel(modelPath, modelSize, logger) {
 		return nil
 	}
 
 	var lastPct int
-	return downloadModelWithProgress(modelPath, modelSize, func(progress float64, downloaded, total int64) {
+	return downloadModelWithProgress(ctx, modelPath, modelSize, func(progress float64, downloaded, total int64) {
 		pct := int(progress * 100)
 		if pct/10 > lastPct/10 {
 			logger.Info("downloading model", "operation", "ensureModel",
@@ -311,7 +311,7 @@ func ensureModel(modelPath string, modelSize string, logger *slog.Logger) error 
 // downloadModelWithProgress downloads a whisper model to modelPath, calling
 // onProgress with download progress. The caller is responsible for existence
 // checks — this function always downloads.
-func downloadModelWithProgress(modelPath string, modelSize string, onProgress DownloadProgressFunc, logger *slog.Logger) error {
+func downloadModelWithProgress(ctx context.Context, modelPath string, modelSize string, onProgress DownloadProgressFunc, logger *slog.Logger) error {
 	modelFile := filepath.Base(modelPath)
 	url := "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/" + modelFile
 
@@ -323,7 +323,7 @@ func downloadModelWithProgress(modelPath string, modelSize string, onProgress Do
 		return fmt.Errorf("transcriber.downloadModel: create dir: %w", err)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	dlCtx, cancel := context.WithTimeout(ctx, 10*time.Minute)
 	defer cancel()
 
 	transport := &http.Transport{
@@ -342,7 +342,7 @@ func downloadModelWithProgress(modelPath string, modelSize string, onProgress Do
 	}
 
 	// HEAD preflight — verify remote file exists and get expected size
-	headReq, err := http.NewRequestWithContext(ctx, "HEAD", url, nil)
+	headReq, err := http.NewRequestWithContext(dlCtx, "HEAD", url, nil)
 	if err != nil {
 		return fmt.Errorf("transcriber.downloadModel: HEAD request: %w", err)
 	}
@@ -377,8 +377,8 @@ func downloadModelWithProgress(modelPath string, modelSize string, onProgress Do
 			wait := downloadRetryBaseWait * time.Duration(1<<(attempt-1))
 			jitter := time.Duration(rand.Int63n(int64(wait / 2)))
 			select {
-			case <-ctx.Done():
-				return ctx.Err()
+			case <-dlCtx.Done():
+				return dlCtx.Err()
 			case <-time.After(wait + jitter):
 			}
 			logger.Info("retrying download",
@@ -386,7 +386,7 @@ func downloadModelWithProgress(modelPath string, modelSize string, onProgress Do
 				"attempt", attempt+1, "max", downloadMaxRetries+1)
 		}
 
-		lastErr = doDownload(ctx, client, url, tmpPath, expectedSize, onProgress, logger)
+		lastErr = doDownload(dlCtx, client, url, tmpPath, expectedSize, onProgress, logger)
 		if lastErr == nil {
 			break // success
 		}
