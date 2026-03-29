@@ -95,12 +95,11 @@ static NSString *buildHotkeyDisplayString(uint64_t flags, int keycode) {
 
 static void refreshContinueState(void) {
     if (!sIsOnboarding) {
+        // Prefs mode: no Save button. Step 7 shows permission status only.
         BOOL allPerms = sAccessibilityGranted && sInputMonitoringGranted;
-        sContinueButton.enabled = allPerms;
-        // Update step 7 indicator
         if (allPerms) {
             sStep7Indicator.stringValue = @"\u2705";
-            sStep7Status.stringValue = @"Edit settings and click Save";
+            sStep7Status.stringValue = @"Settings auto-save when you close this window";
             sStep7Status.textColor = [NSColor systemGreenColor];
         } else {
             sStep7Indicator.stringValue = @"\u26A0\uFE0F";
@@ -171,9 +170,10 @@ static CGEventRef recorderTapCallback(
 @implementation SetupDelegate
 - (BOOL)windowShouldClose:(NSWindow *)sender {
     [self stopRecorder];
-    sSetupComplete = NO;
+    // In preferences mode, closing via red X saves (auto-save on close).
+    // In onboarding mode, closing via red X cancels (user must click Start).
+    sSetupComplete = !sIsOnboarding;
     [NSApp stopModal];
-    // Don't actually close — just hide. We reuse the window on next open.
     [sSetupWindow orderOut:nil];
     return NO;
 }
@@ -245,11 +245,7 @@ static CGEventRef recorderTapCallback(
     NSString *display = buildHotkeyDisplayString(sConfirmedFlags, sConfirmedKeycode);
     strlcpy(sHotkeyBuffer, [display UTF8String], sizeof(sHotkeyBuffer));
     sHotkeyLabel.stringValue = display;
-
-    // Auto-save: in preferences mode, trigger the Save button immediately
-    if (!sIsOnboarding) {
-        [self continueClicked:sender];
-    }
+    // No auto-save — settings auto-save when the window is closed.
 }
 
 - (void)openAccessibilitySettings:(id)sender {
@@ -297,8 +293,11 @@ void showSettingsWindow(int onboarding) {
         // The window is hidden (orderOut) on dismiss, not released.
         if (sSetupWindow != nil) {
             [sSetupWindow setTitle:sIsOnboarding ? @"JoiceTyper Setup" : @"JoiceTyper Preferences"];
-            sContinueButton.title = sIsOnboarding ? @"Start JoiceTyper" : @"Save";
-            sContinueButton.enabled = !sIsOnboarding;
+            sContinueButton.title = @"Start JoiceTyper";
+            // In prefs mode: no Save button — auto-saves on close (red X).
+            // In onboarding mode: button visible, enabled when permissions granted.
+            sContinueButton.hidden = !sIsOnboarding;
+            sContinueButton.enabled = NO;
 
             // Reset step indicators to initial state
             sStep1Indicator.stringValue = @"\u23F3";
@@ -520,9 +519,10 @@ void showSettingsWindow(int onboarding) {
 
         // Continue button (bottom right, initially disabled)
         sContinueButton = [[NSButton alloc] initWithFrame:NSMakeRect(w - pad - 120, 16, 120, 32)];
-        sContinueButton.title = sIsOnboarding ? @"Start JoiceTyper" : @"Save";
+        sContinueButton.title = @"Start JoiceTyper";
         sContinueButton.bezelStyle = NSBezelStyleRounded;
-        sContinueButton.enabled = !sIsOnboarding; // only auto-enable in prefs mode
+        sContinueButton.hidden = !sIsOnboarding; // prefs: no button, auto-saves on close
+        sContinueButton.enabled = NO; // onboarding: enabled when permissions granted
         sContinueButton.target = sSetupDelegate;
         sContinueButton.action = @selector(continueClicked:);
         [content addSubview:sContinueButton];
