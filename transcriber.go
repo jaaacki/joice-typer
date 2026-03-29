@@ -24,6 +24,13 @@ import (
 	"unsafe"
 )
 
+const (
+	maxTranscribeSeconds  = 60                // reject audio longer than 60s
+	maxTranscribeSegments = 500               // cap whisper segments to prevent runaway
+	maxTranscribeBytes    = 50000             // cap output text to ~50KB
+	transcribeTimeout     = 30 * time.Second  // hard deadline for whisper_full
+)
+
 // modelSpec defines expected properties for each whisper model size.
 // SHA-256 hashes are pinned from the Git LFS OIDs on huggingface.co/ggerganov/whisper.cpp.
 // These are the trusted root — not derived from downloaded content.
@@ -94,6 +101,23 @@ func (t *whisperTranscriber) Transcribe(ctx context.Context, audio []float32) (s
 		return "", fmt.Errorf("transcriber.Transcribe: empty audio buffer")
 	}
 
+	// Cap input audio duration
+	maxSamples := 16000 * maxTranscribeSeconds // assuming 16kHz
+	if len(audio) > maxSamples {
+		return "", &ErrBadPayload{
+			Component: "transcriber",
+			Operation: "Transcribe",
+			Detail:    fmt.Sprintf("audio too long: %d samples (%ds at 16kHz), max %ds", len(audio), len(audio)/16000, maxTranscribeSeconds),
+		}
+	}
+
+	// Apply default deadline if caller didn't set one
+	if _, hasDeadline := ctx.Deadline(); !hasDeadline {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, transcribeTimeout)
+		defer cancel()
+	}
+
 	ch := make(chan transcribeResult, 1)
 	go func() {
 		text, err := t.transcribeBlocking(audio)
@@ -142,19 +166,28 @@ func (t *whisperTranscriber) transcribeBlocking(audio []float32) (string, error)
 		return "", fmt.Errorf("transcriber.Transcribe: whisper_full returned %d", result)
 	}
 
-	nSegments := int(C.whisper_full_n_segments(t.ctx))
-	var segments []string
-	for i := 0; i < nSegments; i++ {
+	n := int(C.whisper_full_n_segments(t.ctx))
+	if n > maxTranscribeSegments {
+		t.logger.Warn("segment count capped", "operation", "Transcribe", "actual", n, "max", maxTranscribeSegments)
+		n = maxTranscribeSegments
+	}
+
+	var sb strings.Builder
+	for i := 0; i < n; i++ {
 		cText := C.whisper_full_get_segment_text(t.ctx, C.int(i))
 		if cText == nil {
 			continue // skip nil segments instead of crashing
 		}
-		segments = append(segments, C.GoString(cText))
+		sb.WriteString(C.GoString(cText))
+		if sb.Len() > maxTranscribeBytes {
+			t.logger.Warn("output size capped", "operation", "Transcribe", "bytes", sb.Len(), "max", maxTranscribeBytes)
+			break
+		}
 	}
 
-	text := strings.TrimSpace(strings.Join(segments, ""))
+	text := strings.TrimSpace(sb.String())
 	t.logger.Info("transcribed", "operation", "Transcribe",
-		"segments", nSegments, "text_length", len(text))
+		"segments", n, "text_length", len(text))
 	return text, nil
 }
 
