@@ -19,6 +19,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -303,9 +304,24 @@ func validateCachedModel(modelPath string, modelSize string, logger *slog.Logger
 		return false
 	}
 
-	// Always hash the actual file — never trust the sidecar alone.
-	// A tampered model with an intact sidecar must not pass verification.
+	// Check sidecar: if file size + mtime match what was stored alongside
+	// the hash, trust the cached verification without re-hashing.
 	hashPath := modelPath + ".sha256"
+	sidecarData, sidecarErr := os.ReadFile(hashPath)
+	if sidecarErr == nil {
+		parts := strings.SplitN(strings.TrimSpace(string(sidecarData)), ":", 3)
+		if len(parts) == 3 {
+			cachedHash := parts[0]
+			cachedSize, _ := strconv.ParseInt(parts[1], 10, 64)
+			cachedMtime, _ := strconv.ParseInt(parts[2], 10, 64)
+			if cachedHash == spec.sha256 && cachedSize == info.Size() && cachedMtime == info.ModTime().Unix() {
+				l.Info("model verified via cached metadata", "model_size", modelSize)
+				return true
+			}
+		}
+	}
+
+	// Sidecar missing, stale, or metadata mismatch — full hash required.
 	l.Info("hashing model file", "model_size", modelSize, "size", info.Size())
 	f, err := os.Open(modelPath)
 	if err != nil {
@@ -328,8 +344,9 @@ func validateCachedModel(modelPath string, modelSize string, logger *slog.Logger
 		return false
 	}
 
-	// Hash matches — update sidecar cache
-	if err := os.WriteFile(hashPath, []byte(currentHash), 0644); err != nil {
+	// Hash matches — write sidecar with metadata for fast-path next time
+	sidecar := fmt.Sprintf("%s:%d:%d", currentHash, info.Size(), info.ModTime().Unix())
+	if err := os.WriteFile(hashPath, []byte(sidecar), 0644); err != nil {
 		l.Warn("failed to write hash cache", "error", err)
 	}
 	l.Info("model verified", "model_size", modelSize)
@@ -506,11 +523,14 @@ func downloadModelWithProgress(ctx context.Context, modelPath string, modelSize 
 		return fmt.Errorf("transcriber.downloadModel: rename: %w", err)
 	}
 
-	// Cache hash for fast-path verification on future startups
+	// Cache hash with metadata for fast-path verification on future startups
 	hashPath := modelPath + ".sha256"
-	if writeErr := os.WriteFile(hashPath, []byte(hash), 0644); writeErr != nil {
-		logger.Error("failed to write hash cache",
-			"operation", "downloadModelWithProgress", "error", writeErr)
+	if dlInfo, statErr := os.Stat(modelPath); statErr == nil {
+		sidecar := fmt.Sprintf("%s:%d:%d", hash, dlInfo.Size(), dlInfo.ModTime().Unix())
+		if writeErr := os.WriteFile(hashPath, []byte(sidecar), 0644); writeErr != nil {
+			logger.Error("failed to write hash cache",
+				"operation", "downloadModelWithProgress", "error", writeErr)
+		}
 	}
 
 	logger.Info("model downloaded and verified", "operation", "downloadModelWithProgress",

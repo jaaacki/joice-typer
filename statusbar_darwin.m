@@ -83,6 +83,17 @@ static NSString *textForState(int state) {
 }
 @end
 
+static NSImage *sCachedImages[6] = {nil};
+
+static void ensureCachedImages(void) {
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        for (int i = 0; i <= 5; i++) {
+            sCachedImages[i] = createBubbleJIcon(colorForState(i));
+        }
+    });
+}
+
 static StatusBarDelegate *sDelegate = nil;
 
 void initStatusBar(void) {
@@ -127,9 +138,10 @@ void initStatusBarOnMainThread(void) {
 }
 
 void updateStatusBar(int state) {
+    ensureCachedImages();
     dispatch_async(dispatch_get_main_queue(), ^{
         if (sStatusItem == nil) return;
-        sStatusItem.button.image = createBubbleJIcon(colorForState(state));
+        sStatusItem.button.image = sCachedImages[state >= 0 && state < 6 ? state : 0];
         sStatusMenuItem.title = textForState(state);
         sStatusMenuItem.enabled = (state == 1); // only clickable when ready
     });

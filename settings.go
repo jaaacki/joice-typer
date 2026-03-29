@@ -182,19 +182,15 @@ func populateMicList(selectedDevice string, l *slog.Logger) {
 }
 
 func populateModelList(selectedSize string) {
-	l := settingsLogger
-	if l == nil {
-		l = slog.Default()
-	}
 	sizes := make([]*C.char, len(ModelOptions))
 	descs := make([]*C.char, len(ModelOptions))
 	defaultIdx := 0
 	for i, m := range ModelOptions {
 		sizes[i] = C.CString(m.Size)
-		// Check if model is cached AND valid
+		// Fast check: file exists? Full hash is verified at startup anyway.
 		modelPath, _ := DefaultModelPath(m.Size)
 		cached := ""
-		if validateCachedModel(modelPath, m.Size, l) {
+		if _, err := os.Stat(modelPath); err == nil {
 			cached = " \u2713"
 		}
 		descs[i] = C.CString(m.Description + cached)

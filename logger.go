@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -26,9 +25,8 @@ func SetupLogger(logDir string) (*slog.Logger, func(), error) {
 		return nil, nil, fmt.Errorf("logger.SetupLogger: open log file: %w", err)
 	}
 
-	writer := io.MultiWriter(os.Stderr, f)
-	handler := slog.NewJSONHandler(writer, &slog.HandlerOptions{
-		Level: slog.LevelDebug,
+	handler := slog.NewJSONHandler(f, &slog.HandlerOptions{
+		Level: slog.LevelInfo,
 	})
 
 	logger := slog.New(handler)
