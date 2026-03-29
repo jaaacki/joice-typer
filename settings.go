@@ -94,6 +94,9 @@ func RunSetupWizard(ctx context.Context, logger *slog.Logger) (string, error) {
 	// Step 4: Populate language list
 	populateLanguageList("en")
 
+	// Step 5.5: Populate model list (default to small for onboarding)
+	populateModelList("small")
+
 	// Step 6: Model download in background goroutine
 	go func() {
 		select {
@@ -154,6 +157,12 @@ func RunSetupWizard(ctx context.Context, logger *slog.Logger) (string, error) {
 	// Read selected language
 	selectedLang := C.GoString(C.getSelectedLanguage())
 
+	// Read selected model
+	selectedModel := C.GoString(C.getSelectedModel())
+	if selectedModel == "" {
+		selectedModel = "small"
+	}
+
 	// Read hotkey flags and keycode
 	hotkeyFlags := uint64(C.getSettingsHotkeyFlags())
 	hotkeyKeycode := int(C.getSettingsHotkeyKeycode())
@@ -165,7 +174,7 @@ func RunSetupWizard(ctx context.Context, logger *slog.Logger) (string, error) {
 	}
 
 	// Write config
-	if err := writeSetupConfig(selectedDevice, selectedLang, triggerKeys, l); err != nil {
+	if err := writeSetupConfig(selectedDevice, selectedLang, selectedModel, triggerKeys, l); err != nil {
 		return "", fmt.Errorf("setup.RunSetupWizard: %w", err)
 	}
 
@@ -202,6 +211,32 @@ func populateMicList(selectedDevice string, l *slog.Logger) {
 	}
 }
 
+func populateModelList(selectedSize string) {
+	sizes := make([]*C.char, len(ModelOptions))
+	descs := make([]*C.char, len(ModelOptions))
+	defaultIdx := 0
+	for i, m := range ModelOptions {
+		sizes[i] = C.CString(m.Size)
+		// Check if model is cached on disk
+		modelPath, _ := DefaultModelPath(m.Size)
+		cached := ""
+		if _, err := os.Stat(modelPath); err == nil {
+			cached = " \u2713"
+		}
+		descs[i] = C.CString(m.Description + cached)
+		if m.Size == selectedSize {
+			defaultIdx = i
+		}
+	}
+	C.populateSettingsModels(&sizes[0], &descs[0], C.int(len(ModelOptions)), C.int(defaultIdx))
+	for _, s := range sizes {
+		C.free(unsafe.Pointer(s))
+	}
+	for _, d := range descs {
+		C.free(unsafe.Pointer(d))
+	}
+}
+
 func populateLanguageList(selectedCode string) {
 	codes := make([]*C.char, len(WhisperLanguages))
 	names := make([]*C.char, len(WhisperLanguages))
@@ -222,7 +257,7 @@ func populateLanguageList(selectedCode string) {
 	}
 }
 
-func writeSetupConfig(deviceName string, language string, triggerKeys []string, l *slog.Logger) error {
+func writeSetupConfig(deviceName string, language string, modelSize string, triggerKeys []string, l *slog.Logger) error {
 	cfgPath, err := DefaultConfigPath()
 	if err != nil {
 		return fmt.Errorf("writeSetupConfig: %w", err)
@@ -230,7 +265,7 @@ func writeSetupConfig(deviceName string, language string, triggerKeys []string, 
 
 	cfg := Config{
 		TriggerKey:    triggerKeys,
-		ModelSize:     "small",
+		ModelSize:     modelSize,
 		Language:      language,
 		SampleRate:    16000,
 		SoundFeedback: true,
@@ -307,8 +342,29 @@ func OpenPreferences() {
 	// StateNoPermission via the status bar menu).
 	C.setPrefsPermissionState()
 
+	// Poll permissions in background so UI updates if user grants them
+	prefsDone := make(chan struct{})
+	go func() {
+		for {
+			select {
+			case <-prefsDone:
+				return
+			default:
+			}
+			acc := C.checkAccessibility(0) == 1
+			inp := C.probeEventTap() == 1
+			C.updateSetupAccessibility(boolToCInt(acc))
+			C.updateSetupInputMonitoring(boolToCInt(inp))
+			if acc && inp {
+				return
+			}
+			time.Sleep(2 * time.Second)
+		}
+	}()
+
 	// Pre-populate from current config
 	populateLanguageList(cfg.Language)
+	populateModelList(cfg.ModelSize)
 	populateMicList(cfg.InputDevice, settingsLogger)
 
 	// Set current hotkey display
@@ -319,6 +375,9 @@ func OpenPreferences() {
 
 	// Block until user clicks Save or closes
 	C.runSetupEventLoop()
+
+	// Stop permission polling goroutine
+	close(prefsDone)
 
 	if C.isSetupComplete() == 0 {
 		return // cancelled

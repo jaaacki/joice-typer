@@ -12,7 +12,9 @@ static NSPopUpButton *sLangDropdown = nil;
 static char sSelectedLangBuffer[8] = {0};
 static NSProgressIndicator *sProgressBar = nil;
 static NSTextField *sProgressLabel = nil;
-static NSTextField *sStep6Status = nil;
+static NSPopUpButton *sModelDropdown = nil;
+static NSTextField *sModelStatus = nil;
+static char sSelectedModelBuffer[32] = {0};
 static NSTextField *sStep7Status = nil;
 static NSButton *sContinueButton = nil;
 static BOOL sSetupComplete = NO;
@@ -93,10 +95,31 @@ static NSString *buildHotkeyDisplayString(uint64_t flags, int keycode) {
 
 static void refreshContinueState(void) {
     if (!sIsOnboarding) {
-        sContinueButton.enabled = YES;
+        BOOL allPerms = sAccessibilityGranted && sInputMonitoringGranted;
+        sContinueButton.enabled = allPerms;
+        // Update step 7 indicator
+        if (allPerms) {
+            sStep7Indicator.stringValue = @"\u2705";
+            sStep7Status.stringValue = @"Edit settings and click Save";
+            sStep7Status.textColor = [NSColor systemGreenColor];
+        } else {
+            sStep7Indicator.stringValue = @"\u26A0\uFE0F";
+            sStep7Status.stringValue = @"Grant all permissions above first";
+            sStep7Status.textColor = [NSColor systemOrangeColor];
+        }
         return;
     }
-    sContinueButton.enabled = (sAccessibilityGranted && sInputMonitoringGranted && sDownloadComplete);
+    BOOL ready = sAccessibilityGranted && sInputMonitoringGranted && sDownloadComplete;
+    sContinueButton.enabled = ready;
+    if (ready) {
+        sStep7Indicator.stringValue = @"\u2705";
+        sStep7Status.stringValue = @"All set!";
+        sStep7Status.textColor = [NSColor systemGreenColor];
+    } else {
+        sStep7Indicator.stringValue = @"\u23F3";
+        sStep7Status.stringValue = @"Waiting...";
+        sStep7Status.textColor = [NSColor secondaryLabelColor];
+    }
 }
 
 static CGEventRef recorderTapCallback(
@@ -138,6 +161,8 @@ static CGEventRef recorderTapCallback(
 - (void)hotkeyChangeClicked:(id)sender;
 - (void)hotkeyCancelClicked:(id)sender;
 - (void)hotkeyConfirmClicked:(id)sender;
+- (void)openAccessibilitySettings:(id)sender;
+- (void)openInputMonitoringSettings:(id)sender;
 - (void)stopRecorder;
 @end
 
@@ -220,6 +245,14 @@ static CGEventRef recorderTapCallback(
     sHotkeyLabel.stringValue = display;
 }
 
+- (void)openAccessibilitySettings:(id)sender {
+    [[NSWorkspace sharedWorkspace] openURL:[NSURL URLWithString:@"x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"]];
+}
+
+- (void)openInputMonitoringSettings:(id)sender {
+    [[NSWorkspace sharedWorkspace] openURL:[NSURL URLWithString:@"x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent"]];
+}
+
 - (void)stopRecorder {
     sHotkeyChangeBtn.hidden = NO;
     sHotkeyCancelBtn.hidden = YES;
@@ -268,16 +301,15 @@ void showSettingsWindow(int onboarding) {
             sStep2Status.stringValue = @"Checking...";
             sStep2Status.textColor = [NSColor secondaryLabelColor];
             sStep6Indicator.stringValue = @"\u23F3";
-            if (sStep6Status != nil) {
-                sStep6Status.stringValue = @"whisper-small \u00B7 466 MB";
-                sStep6Status.textColor = [NSColor secondaryLabelColor];
+            if (sModelStatus != nil) {
+                sModelStatus.stringValue = @"";
             }
             if (sProgressBar != nil) {
-                sProgressBar.hidden = NO;
+                sProgressBar.hidden = YES;
                 sProgressBar.doubleValue = 0;
             }
             if (sProgressLabel != nil) {
-                sProgressLabel.hidden = NO;
+                sProgressLabel.hidden = YES;
                 sProgressLabel.stringValue = @"";
             }
             sStep7Indicator.stringValue = @"\u23F3";
@@ -295,7 +327,7 @@ void showSettingsWindow(int onboarding) {
         }
 
         // First-time window creation
-        CGFloat w = 480, h = 640;
+        CGFloat w = 480, h = 700;
         NSRect frame = NSMakeRect(0, 0, w, h);
         sSetupWindow = [[NSWindow alloc]
             initWithContentRect:frame
@@ -336,9 +368,22 @@ void showSettingsWindow(int onboarding) {
         [content addSubview:s1title];
         y -= 20;
         sStep1Status = makeLabel(@"Checking...", 11, NO,
-            [NSColor secondaryLabelColor], NSMakeRect(pad + 28, y, innerW - 28, 16));
+            [NSColor secondaryLabelColor], NSMakeRect(pad + 28, y, innerW - 90, 16));
         [content addSubview:sStep1Status];
-        y -= 36;
+
+        NSButton *s1OpenBtn = [[NSButton alloc] initWithFrame:NSMakeRect(w - pad - 60, y + 16, 60, 20)];
+        s1OpenBtn.title = @"Open";
+        s1OpenBtn.bezelStyle = NSBezelStyleRounded;
+        s1OpenBtn.controlSize = NSControlSizeSmall;
+        s1OpenBtn.font = [NSFont systemFontOfSize:10];
+        s1OpenBtn.target = sSetupDelegate;
+        s1OpenBtn.action = @selector(openAccessibilitySettings:);
+        [content addSubview:s1OpenBtn];
+
+        NSTextField *s1Help = makeLabel(@"If toggled on but showing denied: remove entry (\u2212) and re-add it", 9, NO,
+            [NSColor tertiaryLabelColor], NSMakeRect(pad + 28, y - 14, innerW - 90, 14));
+        [content addSubview:s1Help];
+        y -= 50;
 
         // Step 2: Input Monitoring
         sStep2Indicator = makeLabel(@"\u23F3", 16, NO, [NSColor labelColor], NSMakeRect(pad, y, 24, 24));
@@ -348,9 +393,22 @@ void showSettingsWindow(int onboarding) {
         [content addSubview:s2title];
         y -= 20;
         sStep2Status = makeLabel(@"Checking...", 11, NO,
-            [NSColor secondaryLabelColor], NSMakeRect(pad + 28, y, innerW - 28, 16));
+            [NSColor secondaryLabelColor], NSMakeRect(pad + 28, y, innerW - 90, 16));
         [content addSubview:sStep2Status];
-        y -= 36;
+
+        NSButton *s2OpenBtn = [[NSButton alloc] initWithFrame:NSMakeRect(w - pad - 60, y + 16, 60, 20)];
+        s2OpenBtn.title = @"Open";
+        s2OpenBtn.bezelStyle = NSBezelStyleRounded;
+        s2OpenBtn.controlSize = NSControlSizeSmall;
+        s2OpenBtn.font = [NSFont systemFontOfSize:10];
+        s2OpenBtn.target = sSetupDelegate;
+        s2OpenBtn.action = @selector(openInputMonitoringSettings:);
+        [content addSubview:s2OpenBtn];
+
+        NSTextField *s2Help = makeLabel(@"If toggled on but showing denied: remove entry (\u2212) and re-add it", 9, NO,
+            [NSColor tertiaryLabelColor], NSMakeRect(pad + 28, y - 14, innerW - 90, 14));
+        [content addSubview:s2Help];
+        y -= 50;
 
         // Step 3: Microphone
         sStep3Indicator = makeLabel(@"\u23F3", 16, NO, [NSColor labelColor], NSMakeRect(pad, y, 24, 24));
@@ -411,27 +469,34 @@ void showSettingsWindow(int onboarding) {
 
         y -= 36;
 
-        // Step 6: Download
-        sStep6Indicator = makeLabel(@"\u23F3", 16, NO, [NSColor labelColor], NSMakeRect(pad, y, 24, 24));
+        // Step 6: Speech Model
+        sStep6Indicator = makeLabel(@"\U0001F9E0", 16, NO, [NSColor labelColor], NSMakeRect(pad, y, 24, 24));
         [content addSubview:sStep6Indicator];
-        NSTextField *s6title = makeLabel(@"6. Download Speech Model", 13, YES,
+        NSTextField *s6title = makeLabel(@"6. Speech Model", 13, YES,
             [NSColor labelColor], NSMakeRect(pad + 28, y, innerW - 28, 20));
         [content addSubview:s6title];
-        y -= 16;
-        sStep6Status = makeLabel(@"whisper-small \u00B7 466 MB", 11, NO,
-            [NSColor secondaryLabelColor], NSMakeRect(pad + 28, y, innerW - 28, 16));
-        [content addSubview:sStep6Status];
+        y -= 28;
+        sModelDropdown = [[NSPopUpButton alloc] initWithFrame:NSMakeRect(pad + 28, y, innerW - 28, 26) pullsDown:NO];
+        [content addSubview:sModelDropdown];
+        y -= 20;
+        sModelStatus = makeLabel(@"", 10, NO,
+            [NSColor secondaryLabelColor], NSMakeRect(pad + 28, y, innerW - 28, 14));
+        [content addSubview:sModelStatus];
         y -= 18;
+
+        // Keep progress bar for downloads
         sProgressBar = [[NSProgressIndicator alloc] initWithFrame:NSMakeRect(pad + 28, y, innerW - 28, 8)];
         sProgressBar.style = NSProgressIndicatorStyleBar;
         sProgressBar.minValue = 0;
         sProgressBar.maxValue = 1.0;
         sProgressBar.doubleValue = 0;
         sProgressBar.indeterminate = NO;
+        sProgressBar.hidden = YES;
         [content addSubview:sProgressBar];
-        y -= 18;
+        y -= 14;
         sProgressLabel = makeLabel(@"", 10, NO,
             [NSColor secondaryLabelColor], NSMakeRect(pad + 28, y, innerW - 28, 14));
+        sProgressLabel.hidden = YES;
         [content addSubview:sProgressLabel];
         y -= 36;
 
@@ -512,9 +577,11 @@ void populateSetupDevices(const char **deviceNames, int count, int defaultIndex)
 void updateSetupDownloadProgress(double progress, long long bytesDownloaded, long long bytesTotal) {
     dispatch_async(dispatch_get_main_queue(), ^{
         sStep6Indicator.stringValue = @"\u2B07\uFE0F";
+        sProgressBar.hidden = NO;
         sProgressBar.doubleValue = progress;
         long long mb_done = bytesDownloaded / (1024 * 1024);
         long long mb_total = bytesTotal / (1024 * 1024);
+        sProgressLabel.hidden = NO;
         sProgressLabel.stringValue = [NSString stringWithFormat:@"%lld MB / %lld MB \u2014 %d%%",
             mb_done, mb_total, (int)(progress * 100)];
     });
@@ -522,11 +589,12 @@ void updateSetupDownloadProgress(double progress, long long bytesDownloaded, lon
 
 void updateSetupDownloadComplete(void) {
     dispatch_async(dispatch_get_main_queue(), ^{
+        sDownloadComplete = YES;
         sStep6Indicator.stringValue = @"\u2705";
         sProgressBar.doubleValue = 1.0;
-        sProgressLabel.stringValue = @"Download complete";
-        sStep6Status.stringValue = @"Model ready";
-        sStep6Status.textColor = [NSColor systemGreenColor];
+        sProgressBar.hidden = YES;
+        sProgressLabel.hidden = YES;
+        if (sModelStatus != nil) sModelStatus.stringValue = @"Model ready";
     });
 }
 
@@ -534,10 +602,9 @@ void updateSetupDownloadFailed(const char *errorMsg) {
     NSString *msg = [NSString stringWithUTF8String:errorMsg];
     dispatch_async(dispatch_get_main_queue(), ^{
         sStep6Indicator.stringValue = @"\u274C";
-        sProgressBar.doubleValue = 0;
-        sProgressLabel.stringValue = msg;
-        sStep6Status.stringValue = @"Download failed \u2014 restart to retry";
-        sStep6Status.textColor = [NSColor systemRedColor];
+        sProgressBar.hidden = YES;
+        sProgressLabel.hidden = YES;
+        if (sModelStatus != nil) sModelStatus.stringValue = msg;
     });
 }
 
@@ -577,15 +644,17 @@ void setPrefsPermissionState(void) {
         // Download step: model already loaded if we got this far
         sDownloadComplete = YES;
         sStep6Indicator.stringValue = @"\u2705";
-        sStep6Status.stringValue = @"Model loaded";
-        sStep6Status.textColor = [NSColor systemGreenColor];
-        sProgressBar.hidden = YES;
-        sProgressLabel.hidden = YES;
 
-        // Ready step
-        sStep7Indicator.stringValue = @"\u2705";
-        sStep7Status.stringValue = @"Edit settings and click Save";
-        sStep7Status.textColor = [NSColor systemGreenColor];
+        // Ready step — reflects actual permission state
+        if (accGranted && inpGranted) {
+            sStep7Indicator.stringValue = @"\u2705";
+            sStep7Status.stringValue = @"Edit settings and click Save";
+            sStep7Status.textColor = [NSColor systemGreenColor];
+        } else {
+            sStep7Indicator.stringValue = @"\u26A0\uFE0F";
+            sStep7Status.stringValue = @"Grant all permissions above first";
+            sStep7Status.textColor = [NSColor systemOrangeColor];
+        }
 
         refreshContinueState();
     });
@@ -685,4 +754,44 @@ void runSetupEventLoop(void) {
     // Run as modal session — does NOT call [NSApp run].
     // The single [NSApp run] happens later in hotkey's runMainLoop().
     [NSApp runModalForWindow:sSetupWindow];
+}
+
+void populateSettingsModels(const char **sizes, const char **descriptions, int count, int defaultIndex) {
+    [sModelDropdown removeAllItems];
+    for (int i = 0; i < count; i++) {
+        NSString *title = [NSString stringWithUTF8String:descriptions[i]];
+        [sModelDropdown addItemWithTitle:title];
+        [sModelDropdown lastItem].representedObject = [NSString stringWithUTF8String:sizes[i]];
+    }
+    if (defaultIndex >= 0 && defaultIndex < count) {
+        [sModelDropdown selectItemAtIndex:defaultIndex];
+    }
+}
+
+const char *getSelectedModel(void) {
+    if (sModelDropdown == nil || sModelDropdown.selectedItem == nil) {
+        sSelectedModelBuffer[0] = '\0';
+        return sSelectedModelBuffer;
+    }
+    NSString *size = sModelDropdown.selectedItem.representedObject;
+    const char *utf8 = [size UTF8String];
+    if (utf8 == NULL) {
+        sSelectedModelBuffer[0] = '\0';
+        return sSelectedModelBuffer;
+    }
+    size_t len = strlen(utf8);
+    if (len >= sizeof(sSelectedModelBuffer)) {
+        len = sizeof(sSelectedModelBuffer) - 1;
+    }
+    memcpy(sSelectedModelBuffer, utf8, len);
+    sSelectedModelBuffer[len] = '\0';
+    return sSelectedModelBuffer;
+}
+
+void updateSettingsModelStatus(const char *status) {
+    dispatch_async(dispatch_get_main_queue(), ^{
+        if (sModelStatus != nil) {
+            sModelStatus.stringValue = [NSString stringWithUTF8String:status];
+        }
+    });
 }
