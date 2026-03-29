@@ -172,7 +172,25 @@ func (r *portaudioRecorder) readLoop(stream *portaudio.Stream, buffer []float32,
 		close(done)
 	}()
 	for {
-		if err := stream.Read(); err != nil {
+		// Watchdog: if stream.Read() doesn't return in 5s, the OS audio callback is stuck.
+		// One goroutine per iteration is safe — the loop is sequential (waits for Read to return).
+		readDone := make(chan error, 1)
+		go func() {
+			readDone <- stream.Read()
+		}()
+
+		var readErr error
+		select {
+		case readErr = <-readDone:
+			// normal path
+		case <-time.After(5 * time.Second):
+			r.logger.Error("stream.Read() hung for 5s, aborting recording",
+				"component", "recorder", "operation", "readLoop")
+			stream.Abort()
+			return
+		}
+
+		if readErr != nil {
 			// stream.Read returns error when stream is stopped — expected
 			return
 		}

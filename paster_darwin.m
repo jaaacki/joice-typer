@@ -22,6 +22,11 @@ int pasteText(const char* text) {
             }
         }
 
+        // Save changeCount before we touch the clipboard.
+        // clearContents (+1) and setString (+1) = savedChangeCount + 2.
+        // If the count is anything else when we restore, another app wrote to the clipboard.
+        NSInteger savedChangeCount = [pb changeCount];
+
         // Set clipboard to our text
         [pb clearContents];
         NSString* str = [NSString stringWithUTF8String:text];
@@ -60,6 +65,12 @@ int pasteText(const char* text) {
         NSArray *restoreItems = [savedItems copy];
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(200 * NSEC_PER_MSEC)),
                        dispatch_get_main_queue(), ^{
+            // Only restore if nobody else touched the clipboard during our paste.
+            // We did clearContents (+1) and setString (+1) = savedChangeCount + 2.
+            // If it differs, another app wrote to the clipboard — don't overwrite.
+            if ([pb changeCount] != savedChangeCount + 2) {
+                return;
+            }
             if (restoreItems.count > 0) {
                 NSMutableArray<NSPasteboardItem *> *itemsToRestore = [NSMutableArray array];
                 for (NSDictionary<NSPasteboardType, NSData *> *itemData in restoreItems) {

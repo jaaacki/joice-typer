@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"strings"
 	"sync"
@@ -204,8 +205,17 @@ func (a *App) finalStreamTranscribe(audio []float32, lastText string) {
 
 	finalText, err := a.transcriber.Transcribe(transcribeCtx, audio)
 	if err != nil {
-		a.logger.Error("final transcription failed",
-			"component", "app", "operation", "finalStreamTranscribe", "error", err)
+		var timeoutErr *ErrDependencyTimeout
+		if errors.As(err, &timeoutErr) {
+			a.logger.Error("transcription timed out — speech engine may be stuck",
+				"component", "app", "operation", "finalStreamTranscribe", "error", err)
+			a.emitState(StateNoPermission)
+			time.Sleep(2 * time.Second)
+		} else {
+			a.logger.Error("final transcription failed",
+				"component", "app", "operation", "finalStreamTranscribe", "error", err)
+		}
+		a.sound.PlayError()
 		a.emitState(StateReady)
 		return
 	}
@@ -278,8 +288,17 @@ func (a *App) transcribeAndPaste(audio []float32) {
 	defer cancel()
 	text, err := a.transcriber.Transcribe(transcribeCtx, audio)
 	if err != nil {
-		a.logger.Error("transcription failed",
-			"operation", "transcribeAndPaste", "error", err)
+		var timeoutErr *ErrDependencyTimeout
+		if errors.As(err, &timeoutErr) {
+			a.logger.Error("transcription timed out — speech engine may be stuck",
+				"component", "app", "operation", "transcribeAndPaste", "error", err)
+			// Brief orange flash to alert user that something is wrong
+			a.emitState(StateNoPermission)
+			time.Sleep(2 * time.Second)
+		} else {
+			a.logger.Error("transcription failed",
+				"operation", "transcribeAndPaste", "error", err)
+		}
 		a.sound.PlayError()
 		a.emitState(StateReady)
 		return
