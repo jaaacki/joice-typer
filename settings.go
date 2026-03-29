@@ -97,45 +97,8 @@ func RunSetupWizard(ctx context.Context, logger *slog.Logger) (string, error) {
 	// Step 5.5: Populate model list (default to small for onboarding)
 	populateModelList("small")
 
-	// Step 6: Model download in background goroutine
-	// Uses the currently selected model from the dropdown (default: small)
-	setupModelSize := C.GoString(C.getSelectedModel())
-	if setupModelSize == "" {
-		setupModelSize = "small"
-	}
-	go func() {
-		select {
-		case <-wizardCtx.Done():
-			return
-		default:
-		}
-		modelPath, pathErr := DefaultModelPath(setupModelSize)
-		if pathErr != nil {
-			l.Error("failed to resolve model path", "operation", "RunSetupWizard", "error", pathErr)
-			cErr := C.CString("Failed to locate model directory. Check disk permissions.")
-			C.updateSetupDownloadFailed(cErr)
-			C.free(unsafe.Pointer(cErr))
-			return
-		}
-		// Validate cached model using the same path as main startup
-		if validateCachedModel(modelPath, setupModelSize, l) {
-			C.updateSetupDownloadComplete()
-			C.updateSetupReady()
-			return
-		}
-		dlErr := downloadModelWithProgress(wizardCtx, modelPath, setupModelSize, func(progress float64, downloaded, total int64) {
-			C.updateSetupDownloadProgress(C.double(progress), C.longlong(downloaded), C.longlong(total))
-		}, l)
-		if dlErr != nil {
-			l.Error("model download failed", "operation", "RunSetupWizard", "error", dlErr)
-			cErr := C.CString("Download failed — check your internet connection and restart.")
-			C.updateSetupDownloadFailed(cErr)
-			C.free(unsafe.Pointer(cErr))
-			return
-		}
-		C.updateSetupDownloadComplete()
-		C.updateSetupReady()
-	}()
+	// Model download happens AFTER the user clicks Continue — not before.
+	// This ensures the selected model (not the default) is downloaded.
 
 	// Set default hotkey display
 	cDefaultHotkey := C.CString("Fn + Shift")

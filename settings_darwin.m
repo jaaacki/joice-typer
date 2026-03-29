@@ -109,15 +109,17 @@ static void refreshContinueState(void) {
         }
         return;
     }
-    BOOL ready = sAccessibilityGranted && sInputMonitoringGranted && sDownloadComplete;
+    // In onboarding, Continue requires only permissions — model download
+    // happens AFTER the user clicks Continue with their selected model.
+    BOOL ready = sAccessibilityGranted && sInputMonitoringGranted;
     sContinueButton.enabled = ready;
     if (ready) {
         sStep7Indicator.stringValue = @"\u2705";
-        sStep7Status.stringValue = @"All set!";
+        sStep7Status.stringValue = @"All set! Model will be downloaded after you continue.";
         sStep7Status.textColor = [NSColor systemGreenColor];
     } else {
         sStep7Indicator.stringValue = @"\u23F3";
-        sStep7Status.stringValue = @"Waiting...";
+        sStep7Status.stringValue = @"Waiting for permissions...";
         sStep7Status.textColor = [NSColor secondaryLabelColor];
     }
 }
