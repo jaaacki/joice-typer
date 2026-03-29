@@ -157,9 +157,11 @@ func (a *App) handleReleaseStream() {
 		return
 	}
 
-	// Final transcription of complete audio
+	// Final transcription of complete audio (bounded by clipboardTranscribeTimeout)
 	a.emitState(StateTranscribing)
-	finalText, transcribeErr := a.transcriber.Transcribe(context.Background(), audio)
+	streamFinalCtx, streamFinalCancel := context.WithTimeout(context.Background(), clipboardTranscribeTimeout)
+	defer streamFinalCancel()
+	finalText, transcribeErr := a.transcriber.Transcribe(streamFinalCtx, audio)
 	if transcribeErr != nil {
 		a.logger.Error("final transcription failed", "component", "app", "operation", "handleReleaseStream", "error", transcribeErr)
 		a.emitState(StateReady)

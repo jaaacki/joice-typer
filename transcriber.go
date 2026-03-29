@@ -256,16 +256,9 @@ func validateCachedModel(modelPath string, modelSize string, logger *slog.Logger
 		return false
 	}
 
-	// Fast path: if sidecar hash matches manifest AND file size matches, trust it
+	// Always hash the actual file — never trust the sidecar alone.
+	// A tampered model with an intact sidecar must not pass verification.
 	hashPath := modelPath + ".sha256"
-	if cached, err := os.ReadFile(hashPath); err == nil {
-		if strings.TrimSpace(string(cached)) == spec.sha256 {
-			l.Info("model verified via cached hash", "model_size", modelSize)
-			return true
-		}
-	}
-
-	// Slow path: hash the actual file
 	l.Info("hashing model file", "model_size", modelSize, "size", info.Size())
 	f, err := os.Open(modelPath)
 	if err != nil {

@@ -251,18 +251,22 @@ func runAppMode() {
 				logger.Info("recorder updated", "component", "main", "operation", "runAppMode", "device", cfg.InputDevice)
 			}
 
-			// Recreate transcriber if language changed
+			// Recreate transcriber if language changed.
+			// Create new BEFORE closing old — if creation fails, keep the working one.
 			if oldCfg.Language != cfg.Language {
-				if closeErr := transcriber.Close(); closeErr != nil {
-					logger.Error("failed to close old transcriber", "component", "main", "operation", "runAppMode", "error", closeErr)
-				}
 				modelPath, _ := DefaultModelPath(cfg.ModelSize)
-				transcriber, err = NewTranscriber(context.Background(), modelPath, cfg.ModelSize, cfg.Language, cfg.SampleRate, logger)
-				if err != nil {
-					logger.Error("failed to recreate transcriber", "component", "main", "operation", "runAppMode", "error", err)
+				newTranscriber, tErr := NewTranscriber(context.Background(), modelPath, cfg.ModelSize, cfg.Language, cfg.SampleRate, logger)
+				if tErr != nil {
+					logger.Error("failed to recreate transcriber, keeping old",
+						"component", "main", "operation", "runAppMode", "error", tErr)
 				} else {
-					app.SetTranscriber(transcriber)
+					oldTranscriber := transcriber
+					transcriber = newTranscriber
+					app.SetTranscriber(newTranscriber)
 					logger.Info("transcriber updated", "component", "main", "operation", "runAppMode", "language", cfg.Language)
+					if closeErr := oldTranscriber.Close(); closeErr != nil {
+						logger.Error("failed to close old transcriber", "component", "main", "operation", "runAppMode", "error", closeErr)
+					}
 				}
 			}
 

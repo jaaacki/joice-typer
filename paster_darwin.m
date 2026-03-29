@@ -6,13 +6,20 @@ int pasteText(const char* text) {
     @autoreleasepool {
         NSPasteboard* pb = [NSPasteboard generalPasteboard];
 
-        // Save current clipboard contents
-        NSData *savedData = nil;
-        NSString *savedType = nil;
-        NSArray<NSString *> *types = [pb types];
-        if ([types containsObject:NSPasteboardTypeString]) {
-            savedData = [pb dataForType:NSPasteboardTypeString];
-            savedType = NSPasteboardTypeString;
+        // Save ALL current clipboard items (text, images, files, rich text, etc.)
+        NSArray<NSPasteboardItem *> *oldItems = pb.pasteboardItems;
+        NSMutableArray<NSDictionary<NSPasteboardType, NSData *> *> *savedItems = [NSMutableArray array];
+        for (NSPasteboardItem *item in oldItems) {
+            NSMutableDictionary<NSPasteboardType, NSData *> *itemData = [NSMutableDictionary dictionary];
+            for (NSPasteboardType type in item.types) {
+                NSData *data = [item dataForType:type];
+                if (data != nil) {
+                    itemData[type] = data;
+                }
+            }
+            if (itemData.count > 0) {
+                [savedItems addObject:itemData];
+            }
         }
 
         // Set clipboard to our text
@@ -48,14 +55,19 @@ int pasteText(const char* text) {
         CFRelease(keyDown);
         CFRelease(keyUp);
 
-        // Restore clipboard after a delay (let the paste complete first)
-        NSData *restoreData = [savedData copy];
-        NSString *restoreType = [savedType copy];
+        // Restore original clipboard after a delay (let the paste complete first)
+        NSArray *restoreItems = [savedItems copy];
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(200 * NSEC_PER_MSEC)),
                        dispatch_get_main_queue(), ^{
-            if (restoreData != nil) {
+            if (restoreItems.count > 0) {
                 [pb clearContents];
-                [pb setData:restoreData forType:restoreType];
+                for (NSDictionary<NSPasteboardType, NSData *> *itemData in restoreItems) {
+                    NSPasteboardItem *newItem = [[NSPasteboardItem alloc] init];
+                    for (NSPasteboardType type in itemData) {
+                        [newItem setData:itemData[type] forType:type];
+                    }
+                    [pb writeObjects:@[newItem]];
+                }
             }
         });
 
