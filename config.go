@@ -190,15 +190,14 @@ func DefaultConfigDir() (string, error) {
 	newDir := filepath.Join(home, "Library", "Application Support", "JoiceTyper")
 	oldDir := filepath.Join(home, ".config", "voicetype")
 
-	// Migration from old path — best-effort. If it fails, the new dir
-	// is created when config is first written. No logger available here.
+	// Migrate from old config path if it exists and new path doesn't.
 	if _, err := os.Stat(oldDir); err == nil {
 		if _, err := os.Stat(newDir); os.IsNotExist(err) {
 			if mkErr := os.MkdirAll(filepath.Dir(newDir), 0755); mkErr != nil {
-				// Migration failed — parent dir doesn't exist.
-				// New dir will be created when config is written.
-			} else if renameErr := os.Rename(oldDir, newDir); renameErr != nil {
-				// Migration failed — old dir still works, new dir will be created.
+				return "", fmt.Errorf("config.DefaultConfigDir: migrate mkdir: %w", mkErr)
+			}
+			if renameErr := os.Rename(oldDir, newDir); renameErr != nil {
+				return "", fmt.Errorf("config.DefaultConfigDir: migrate rename: %w", renameErr)
 			}
 		}
 	}

@@ -27,8 +27,10 @@ func main() {
 	// The main goroutine must stay on the main OS thread for macOS CFRunLoop.
 	runtime.LockOSThread()
 
-	// Error is non-fatal: flag default will be empty, user can override with --config
-	defaultCfgPath, _ := DefaultConfigPath()
+	defaultCfgPath, defaultCfgErr := DefaultConfigPath()
+	if defaultCfgErr != nil {
+		fmt.Fprintf(os.Stderr, "warning: could not resolve default config path: %v\n", defaultCfgErr)
+	}
 	configPath := flag.String("config", defaultCfgPath, "path to config file")
 	listDevices := flag.Bool("list-devices", false, "list available audio input devices and exit")
 	flag.Parse()
@@ -76,6 +78,9 @@ func suppressStderr(logDir string) {
 		f.Close()
 		return // best-effort: if this fails, whisper.cpp noise appears in stderr
 	}
+	// Dup2 succeeded — fd 2 now points to the file. Close the original
+	// descriptor to avoid leaking it for the process lifetime.
+	f.Close()
 }
 
 // runAppMode is the entry point when running inside a .app bundle.

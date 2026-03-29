@@ -7,6 +7,7 @@ package main
 import "C"
 
 import (
+	"os"
 	"syscall"
 )
 
@@ -28,9 +29,11 @@ func UpdateStatusBar(state AppState) {
 
 //export statusBarQuitClicked
 func statusBarQuitClicked() {
-	// Direct syscall to self — always triggers the signal handler for
-	// orderly shutdown. syscall.Kill to own pid cannot fail on macOS.
-	syscall.Kill(syscall.Getpid(), syscall.SIGTERM)
+	if err := syscall.Kill(syscall.Getpid(), syscall.SIGTERM); err != nil {
+		// Signal to self failed — should never happen, but don't leave
+		// the app running silently. Force exit as last resort.
+		os.Exit(1)
+	}
 }
 
 //export statusBarPreferencesClicked
