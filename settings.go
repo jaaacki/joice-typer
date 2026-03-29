@@ -44,14 +44,17 @@ func RunSetupWizard(ctx context.Context, logger *slog.Logger) (string, error) {
 
 	C.showSettingsWindow(1)
 
-	// Step 1: Accessibility polling in background goroutine
+	// Create a local context cancelled both by the parent ctx (SIGTERM)
+	// and by modal close (done channel). This ensures the download
+	// goroutine stops when the user closes the wizard, not just on SIGTERM.
 	done := make(chan struct{})
+	wizardCtx, wizardCancel := context.WithCancel(ctx)
 	go func() {
 		for {
 			select {
 			case <-done:
 				return
-			case <-ctx.Done():
+			case <-wizardCtx.Done():
 				return
 			default:
 			}
@@ -71,7 +74,7 @@ func RunSetupWizard(ctx context.Context, logger *slog.Logger) (string, error) {
 			select {
 			case <-done:
 				return
-			case <-ctx.Done():
+			case <-wizardCtx.Done():
 				return
 			default:
 			}
@@ -94,7 +97,7 @@ func RunSetupWizard(ctx context.Context, logger *slog.Logger) (string, error) {
 	// Step 6: Model download in background goroutine
 	go func() {
 		select {
-		case <-ctx.Done():
+		case <-wizardCtx.Done():
 			return
 		default:
 		}
@@ -113,7 +116,7 @@ func RunSetupWizard(ctx context.Context, logger *slog.Logger) (string, error) {
 			C.updateSetupReady()
 			return
 		}
-		dlErr := downloadModelWithProgress(ctx, modelPath, setupModelSize, func(progress float64, downloaded, total int64) {
+		dlErr := downloadModelWithProgress(wizardCtx, modelPath, setupModelSize, func(progress float64, downloaded, total int64) {
 			C.updateSetupDownloadProgress(C.double(progress), C.longlong(downloaded), C.longlong(total))
 		}, l)
 		if dlErr != nil {
@@ -135,7 +138,8 @@ func RunSetupWizard(ctx context.Context, logger *slog.Logger) (string, error) {
 	// Block here — [NSApp run] processes events until Continue is clicked
 	C.runSetupEventLoop()
 
-	// Cleanup: signal accessibility goroutine to stop
+	// Cleanup: cancel all background goroutines (permissions + download)
+	wizardCancel()
 	close(done)
 
 	// Check if user completed or cancelled

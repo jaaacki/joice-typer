@@ -21,6 +21,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 	"unsafe"
 )
@@ -207,21 +208,32 @@ func (t *whisperTranscriber) Close() error {
 
 	// TryLock with timeout — a hung transcribeBlocking holds the mutex
 	// and we must not block shutdown forever waiting for CGO to return.
+	// The timedOut flag coordinates between the helper goroutine and the
+	// select: if the timeout fires first, the helper must unlock after
+	// it eventually acquires the lock (otherwise the mutex is poisoned).
+	var timedOut atomic.Bool
 	locked := make(chan struct{})
 	go func() {
 		t.mu.Lock()
+		if timedOut.Load() {
+			// Timeout already fired — we acquired the lock too late.
+			// Unlock immediately to avoid poisoning the mutex.
+			t.mu.Unlock()
+			return
+		}
 		close(locked)
 	}()
 
 	select {
 	case <-locked:
-		// Got the lock — safe to free
+		// Got the lock in time — safe to free
 		if t.ctx != nil {
 			C.whisper_free(t.ctx)
 			t.ctx = nil
 		}
 		t.mu.Unlock()
 	case <-time.After(5 * time.Second):
+		timedOut.Store(true)
 		t.logger.Error("close timed out waiting for transcription lock — whisper context leaked",
 			"component", "transcriber", "operation", "Close")
 		return &ErrDependencyTimeout{
