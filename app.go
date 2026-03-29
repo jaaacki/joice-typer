@@ -309,7 +309,8 @@ func (a *App) transcribeAndPaste(audio []float32) {
 		return
 	}
 
-	if err := a.paster.Paste(text); err != nil {
+	// Append trailing space so consecutive dictations don't merge words.
+	if err := a.paster.Paste(text + " "); err != nil {
 		a.logger.Error("paste failed",
 			"operation", "transcribeAndPaste", "error", err)
 		a.sound.PlayError()
