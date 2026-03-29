@@ -208,6 +208,28 @@ func TestValidate_InvalidLanguage(t *testing.T) {
 	}
 }
 
+func TestValidate_ValidLanguages(t *testing.T) {
+	for _, lang := range []string{"en", "zh", "ja", "ko", "es", "yue", "haw"} {
+		cfg := Config{
+			TriggerKey: []string{"fn"}, ModelSize: "small",
+			SampleRate: 16000, Language: lang,
+		}
+		if err := cfg.Validate(); err != nil {
+			t.Errorf("language %q should be valid: %v", lang, err)
+		}
+	}
+}
+
+func TestValidate_InvalidLanguageCode(t *testing.T) {
+	cfg := Config{
+		TriggerKey: []string{"fn"}, ModelSize: "small",
+		SampleRate: 16000, Language: "zzzz",
+	}
+	if err := cfg.Validate(); err == nil {
+		t.Error("expected error for unsupported language code")
+	}
+}
+
 func TestLoadConfig_DefaultTypeMode(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.yaml")
