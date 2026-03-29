@@ -40,6 +40,8 @@ static int sRecordedKeycode = -1;
 static int sConfirmedKeycode = -1;
 static CFMachPortRef sRecorderTap = NULL;
 static CFRunLoopSourceRef sRecorderSource = NULL;
+static id sRecorderLocalMonitor = nil;
+static id sRecorderFlagsMonitor = nil;
 
 static NSTextField *makeLabel(NSString *text, CGFloat fontSize, BOOL bold, NSColor *color, NSRect frame) {
     NSTextField *label = [[NSTextField alloc] initWithFrame:frame];
@@ -164,20 +166,40 @@ static CGEventRef recorderTapCallback(
     sRecordedFlags = 0;
     sRecordedKeycode = -1;
 
-    CGEventMask mask = CGEventMaskBit(kCGEventFlagsChanged) | CGEventMaskBit(kCGEventKeyDown) | CGEventMaskBit(kCGEventKeyUp);
-    sRecorderTap = CGEventTapCreate(
-        kCGSessionEventTap,
-        kCGHeadInsertEventTap,
-        kCGEventTapOptionListenOnly,
-        mask,
-        recorderTapCallback,
-        NULL
-    );
-    if (sRecorderTap != NULL) {
-        sRecorderSource = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, sRecorderTap, 0);
-        CFRunLoopAddSource(CFRunLoopGetMain(), sRecorderSource, kCFRunLoopCommonModes);
-        CGEventTapEnable(sRecorderTap, true);
-    }
+    // Use NSEvent local monitors instead of CGEvent tap.
+    // CGEvent taps don't receive key events reliably inside a modal window.
+    // Local monitors work within the app's own event loop including modals.
+
+    // Monitor modifier flag changes
+    sRecorderFlagsMonitor = [NSEvent addLocalMonitorForEventsMatchingMask:NSEventMaskFlagsChanged
+        handler:^NSEvent *(NSEvent *event) {
+            uint64_t flags = [event modifierFlags];
+            uint64_t relevant = flags & (NSEventModifierFlagFunction | NSEventModifierFlagShift |
+                                          NSEventModifierFlagControl | NSEventModifierFlagOption |
+                                          NSEventModifierFlagCommand);
+            // Convert to CGEvent flag format for consistency
+            uint64_t cgFlags = 0;
+            if (relevant & NSEventModifierFlagFunction) cgFlags |= 0x800000;
+            if (relevant & NSEventModifierFlagShift)    cgFlags |= 0x20000;
+            if (relevant & NSEventModifierFlagControl)  cgFlags |= 0x40000;
+            if (relevant & NSEventModifierFlagOption)    cgFlags |= 0x80000;
+            if (relevant & NSEventModifierFlagCommand)  cgFlags |= 0x100000;
+            sRecordedFlags = cgFlags;
+            if (sRecordedKeycode < 0) {
+                sHotkeyLabel.stringValue = buildHotkeyDisplayString(cgFlags, -1);
+            }
+            return event;
+        }];
+
+    // Monitor key-down events
+    sRecorderLocalMonitor = [NSEvent addLocalMonitorForEventsMatchingMask:NSEventMaskKeyDown
+        handler:^NSEvent *(NSEvent *event) {
+            sRecordedKeycode = (int)[event keyCode];
+            uint64_t flags = sRecordedFlags;
+            int kc = sRecordedKeycode;
+            sHotkeyLabel.stringValue = buildHotkeyDisplayString(flags, kc);
+            return nil; // consume the event so it doesn't beep
+        }];
 }
 
 - (void)hotkeyCancelClicked:(id)sender {
@@ -202,15 +224,13 @@ static CGEventRef recorderTapCallback(
     sHotkeyChangeBtn.hidden = NO;
     sHotkeyCancelBtn.hidden = YES;
     sHotkeyConfirmBtn.hidden = YES;
-    if (sRecorderTap != NULL) {
-        CGEventTapEnable(sRecorderTap, false);
-        if (sRecorderSource != NULL) {
-            CFRunLoopRemoveSource(CFRunLoopGetMain(), sRecorderSource, kCFRunLoopCommonModes);
-            CFRelease(sRecorderSource);
-            sRecorderSource = NULL;
-        }
-        CFRelease(sRecorderTap);
-        sRecorderTap = NULL;
+    if (sRecorderLocalMonitor != nil) {
+        [NSEvent removeMonitor:sRecorderLocalMonitor];
+        sRecorderLocalMonitor = nil;
+    }
+    if (sRecorderFlagsMonitor != nil) {
+        [NSEvent removeMonitor:sRecorderFlagsMonitor];
+        sRecorderFlagsMonitor = nil;
     }
 }
 @end
