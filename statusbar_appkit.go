@@ -3,12 +3,14 @@ package main
 /*
 #cgo LDFLAGS: -framework Cocoa
 #include "statusbar_darwin.h"
+#include <stdlib.h>
 */
 import "C"
 
 import (
 	"os"
 	"syscall"
+	"unsafe"
 )
 
 // InitStatusBar creates the menu bar icon. Must be called from the main thread.
@@ -25,6 +27,13 @@ func InitStatusBarAsync() {
 // UpdateStatusBar changes the menu bar icon state.
 func UpdateStatusBar(state AppState) {
 	C.updateStatusBar(C.int(state))
+}
+
+// SetStatusBarHotkeyText sets the hotkey display string shown in the ready state.
+func SetStatusBarHotkeyText(text string) {
+	cText := C.CString(text)
+	C.setStatusBarHotkeyText(cText)
+	C.free(unsafe.Pointer(cText))
 }
 
 //export statusBarQuitClicked

@@ -13,4 +13,7 @@ void initStatusBarOnMainThread(void);
 // state: 0=loading, 1=ready, 2=recording, 3=transcribing
 void updateStatusBar(int state);
 
+// setStatusBarHotkeyText sets the hotkey display string shown in the ready state.
+void setStatusBarHotkeyText(const char *text);
+
 #endif

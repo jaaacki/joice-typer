@@ -254,9 +254,11 @@ func runAppMode() {
 			app.Shutdown()
 		}()
 
+		hotkeyDisplay := formatHotkeyDisplay(cfg.TriggerKey)
+		SetStatusBarHotkeyText(strings.ReplaceAll(hotkeyDisplay, " + ", "+"))
 		UpdateStatusBar(StateReady)
 		sound.PlayReady()
-		PostNotification("JoiceTyper is ready", "Hold Fn+Shift to dictate.")
+		PostNotification("JoiceTyper is ready", "Hold "+hotkeyDisplay+" to dictate.")
 		logger.Info("ready", "component", "main", "operation", "runAppMode", "trigger_key", cfg.TriggerKey)
 
 		initDone <- nil
@@ -338,7 +340,9 @@ func runAppMode() {
 						"component", "main", "operation", "runAppMode", "error", pathErr)
 					continue
 				}
-				reloadCtx, reloadCancel := context.WithTimeout(context.Background(), 30*time.Second)
+				UpdateStatusBar(StateLoading)
+				PostNotification("JoiceTyper", "Loading speech model...")
+				reloadCtx, reloadCancel := context.WithTimeout(context.Background(), 5*time.Minute)
 				newTranscriber, tErr := NewTranscriber(reloadCtx, newModelPath, cfg.ModelSize, cfg.Language, cfg.SampleRate, logger)
 				reloadCancel()
 				if tErr != nil {
@@ -355,6 +359,8 @@ func runAppMode() {
 				}
 			}
 
+			hotkeyDisplay := formatHotkeyDisplay(cfg.TriggerKey)
+			SetStatusBarHotkeyText(strings.ReplaceAll(hotkeyDisplay, " + ", "+"))
 			UpdateStatusBar(StateReady)
 			continue
 		default:

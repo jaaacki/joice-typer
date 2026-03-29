@@ -245,6 +245,11 @@ static CGEventRef recorderTapCallback(
     NSString *display = buildHotkeyDisplayString(sConfirmedFlags, sConfirmedKeycode);
     strlcpy(sHotkeyBuffer, [display UTF8String], sizeof(sHotkeyBuffer));
     sHotkeyLabel.stringValue = display;
+
+    // Auto-save: in preferences mode, trigger the Save button immediately
+    if (!sIsOnboarding) {
+        [self continueClicked:sender];
+    }
 }
 
 - (void)openAccessibilitySettings:(id)sender {

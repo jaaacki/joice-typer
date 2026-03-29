@@ -9,6 +9,7 @@ extern void statusBarPreferencesClicked(void);
 static NSStatusItem *sStatusItem = nil;
 static NSMenu *sMenu = nil;
 static NSMenuItem *sStatusMenuItem = nil;
+static char sHotkeyDisplayText[128] = "Fn+Shift";
 
 // Draw the Bubble J icon with the given color
 static NSImage *createBubbleJIcon(NSColor *color) {
@@ -62,7 +63,10 @@ static NSColor *colorForState(int state) {
 static NSString *textForState(int state) {
     switch (state) {
         case 0: return @"Loading model...";
-        case 1: return @"✅ Ready — Fn+Shift to dictate";
+        case 1: {
+            NSString *keys = [NSString stringWithUTF8String:sHotkeyDisplayText];
+            return [NSString stringWithFormat:@"✅ Ready — %@ to dictate", keys];
+        }
         case 2: return @"🔴 Recording...";
         case 3: return @"🔵 Transcribing...";
         case 4: return @"⚠️ Grant Accessibility + Input Monitoring in System Settings";
@@ -116,7 +120,7 @@ void initStatusBar(void) {
 
     [sMenu addItem:[NSMenuItem separatorItem]];
 
-    NSMenuItem *prefsItem = [sMenu addItemWithTitle:@"Preferences..."
+    NSMenuItem *prefsItem = [sMenu addItemWithTitle:@"Preferences"
                                              action:@selector(preferencesClicked:)
                                       keyEquivalent:@","];
     prefsItem.target = sDelegate;
@@ -145,4 +149,8 @@ void updateStatusBar(int state) {
         sStatusMenuItem.title = textForState(state);
         sStatusMenuItem.enabled = (state == 1); // only clickable when ready
     });
+}
+
+void setStatusBarHotkeyText(const char *text) {
+    strlcpy(sHotkeyDisplayText, text, sizeof(sHotkeyDisplayText));
 }
