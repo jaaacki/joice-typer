@@ -438,23 +438,40 @@ void updateSetupDownloadFailed(const char *errorMsg) {
     });
 }
 
-void setPrefsPermissionsGranted(void) {
-    dispatch_async(dispatch_get_main_queue(), ^{
-        // In preferences mode, the app is already running — permissions are granted.
-        // Set indicators to "Granted" state and hide the download step.
-        sAccessibilityGranted = YES;
-        sStep1Indicator.stringValue = @"\u2705";
-        sStep1Status.stringValue = @"Granted";
-        sStep1Status.textColor = [NSColor systemGreenColor];
+void setPrefsPermissionState(void) {
+    // Check ACTUAL permission state — don't assume granted just because
+    // the app is running. Preferences is reachable during StateNoPermission.
+    int accGranted = checkAccessibility(0);
+    int inpGranted = probeEventTap();
 
-        sInputMonitoringGranted = YES;
-        sStep2Indicator.stringValue = @"\u2705";
-        sStep2Status.stringValue = @"Granted";
-        sStep2Status.textColor = [NSColor systemGreenColor];
+    dispatch_async(dispatch_get_main_queue(), ^{
+        // Accessibility
+        sAccessibilityGranted = (accGranted != 0);
+        if (accGranted) {
+            sStep1Indicator.stringValue = @"\u2705";
+            sStep1Status.stringValue = @"Granted";
+            sStep1Status.textColor = [NSColor systemGreenColor];
+        } else {
+            sStep1Indicator.stringValue = @"\u26A0\uFE0F";
+            sStep1Status.stringValue = @"Not granted \u2014 System Settings \u2192 Privacy & Security \u2192 Accessibility";
+            sStep1Status.textColor = [NSColor systemOrangeColor];
+        }
+
+        // Input Monitoring (probed via event tap)
+        sInputMonitoringGranted = (inpGranted != 0);
+        if (inpGranted) {
+            sStep2Indicator.stringValue = @"\u2705";
+            sStep2Status.stringValue = @"Granted";
+            sStep2Status.textColor = [NSColor systemGreenColor];
+        } else {
+            sStep2Indicator.stringValue = @"\u26A0\uFE0F";
+            sStep2Status.stringValue = @"Not granted \u2014 System Settings \u2192 Privacy & Security \u2192 Input Monitoring";
+            sStep2Status.textColor = [NSColor systemOrangeColor];
+        }
 
         sStep3Indicator.stringValue = @"\U0001F3A4";
 
-        // Download step: mark as complete (model already loaded)
+        // Download step: model already loaded if we got this far
         sDownloadComplete = YES;
         sStep6Indicator.stringValue = @"\u2705";
         sStep6Status.stringValue = @"Model loaded";

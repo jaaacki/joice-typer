@@ -16,7 +16,7 @@ void updateSetupDownloadProgress(double progress, long long bytesDownloaded, lon
 void updateSetupDownloadComplete(void);
 void updateSetupDownloadFailed(const char *errorMsg);
 void updateSetupReady(void);
-void setPrefsPermissionsGranted(void);
+void setPrefsPermissionState(void);
 int isSetupComplete(void);
 const char *getSelectedDevice(void);
 void runSetupEventLoop(void);

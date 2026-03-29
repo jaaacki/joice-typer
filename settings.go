@@ -301,9 +301,10 @@ func OpenPreferences() {
 
 	C.showSettingsWindow(0)
 
-	// In preferences mode, permissions are already granted (app is running).
-	// Set indicators to "Granted" and hide download step.
-	C.setPrefsPermissionsGranted()
+	// Set permission indicators from actual current state — don't assume
+	// granted just because the app is running (prefs is reachable during
+	// StateNoPermission via the status bar menu).
+	C.setPrefsPermissionState()
 
 	// Pre-populate from current config
 	populateLanguageList(cfg.Language)
