@@ -45,6 +45,16 @@ int probeEventTap(void) {
     return 1;
 }
 
+void dispatch_permission_prompts(void) {
+    // Dispatch permission prompts to the main queue so they execute
+    // AFTER [NSApp run] starts. The prompt dialogs are AppKit windows
+    // that need the run loop to process their buttons.
+    dispatch_async(dispatch_get_main_queue(), ^{
+        checkAccessibility(1);
+        checkInputMonitoring(1);
+    });
+}
+
 void ensureNSApp(void) {
     static dispatch_once_t once;
     dispatch_once(&once, ^{

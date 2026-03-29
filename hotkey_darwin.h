@@ -15,6 +15,10 @@ int checkAccessibility(int prompt);
 // If prompt is 1, shows the macOS permission dialog.
 int checkInputMonitoring(int prompt);
 
+// dispatch_permission_prompts triggers permission dialogs on the main queue.
+// Must be called after [NSApp run] starts so the dialogs can process events.
+void dispatch_permission_prompts(void);
+
 // probeEventTap tries to create and immediately destroy a CGEvent tap.
 // Returns 1 if creation succeeds (permissions are sufficient), 0 if not.
 int probeEventTap(void);

@@ -167,8 +167,13 @@ func (h *cgEventHotkeyListener) WaitForPermissions(ctx context.Context, onUpdate
 	}
 
 	// Prompt once — triggers system dialogs. No-op if already decided.
-	C.checkAccessibility(1)
-	C.checkInputMonitoring(1)
+	// These MUST run after [NSApp run] starts because the prompt dialogs
+	// are AppKit windows that need the run loop to process button clicks.
+	// dispatch_async ensures they run on the main thread after the loop starts.
+	C.dispatch_permission_prompts()
+
+	// Give the main run loop a moment to start before polling
+	C.usleep(500_000)
 
 	// Poll both permissions independently using their correct APIs.
 	for {
