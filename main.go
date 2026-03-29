@@ -311,8 +311,28 @@ func runTerminalMode(configPath string) {
 		os.Exit(1)
 	}
 
+	// --- Signal handling (before model init so SIGTERM can cancel download) ---
+	startupCtx, startupCancel := context.WithCancel(context.Background())
+	events := make(chan HotkeyEvent, 10)
+	hotkey := NewHotkeyListener(cfg.TriggerKey, logger)
+
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+
+	go func() {
+		sig := <-sigCh
+		logger.Info("received signal",
+			"component", "main", "operation", "signal",
+			"signal", sig.String())
+		startupCancel()
+		if err := hotkey.Stop(); err != nil {
+			logger.Error("failed to stop hotkey listener",
+				"component", "main", "operation", "signal", "error", err)
+		}
+	}()
+
 	// --- Init transcriber (loads model -- may download on first run) ---
-	transcriber, err := NewTranscriber(context.Background(), modelPath, cfg.ModelSize, cfg.Language, cfg.SampleRate, logger)
+	transcriber, err := NewTranscriber(startupCtx, modelPath, cfg.ModelSize, cfg.Language, cfg.SampleRate, logger)
 	if err != nil {
 		logger.Error("failed to initialize transcriber",
 			"component", "main", "operation", "runTerminalMode", "error", err)
@@ -336,24 +356,6 @@ func runTerminalMode(configPath string) {
 
 	// --- Create app ---
 	app := NewApp(recorder, transcriber, paster, typer, sound, cfg.TypeMode, logger)
-
-	// --- Signal handling ---
-	events := make(chan HotkeyEvent, 10)
-	hotkey := NewHotkeyListener(cfg.TriggerKey, logger)
-
-	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
-
-	go func() {
-		sig := <-sigCh
-		logger.Info("received signal",
-			"component", "main", "operation", "signal",
-			"signal", sig.String())
-		if err := hotkey.Stop(); err != nil {
-			logger.Error("failed to stop hotkey listener",
-				"component", "main", "operation", "signal", "error", err)
-		}
-	}()
 
 	// --- Start event processing goroutine ---
 	var wg sync.WaitGroup

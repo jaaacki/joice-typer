@@ -21,7 +21,6 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 	"unsafe"
 )
@@ -206,42 +205,29 @@ func (t *whisperTranscriber) transcribeBlocking(audio []float32) (string, error)
 func (t *whisperTranscriber) Close() error {
 	t.logger.Info("closing", "operation", "Close")
 
-	// TryLock with timeout — a hung transcribeBlocking holds the mutex
-	// and we must not block shutdown forever waiting for CGO to return.
-	// The timedOut flag coordinates between the helper goroutine and the
-	// select: if the timeout fires first, the helper must unlock after
-	// it eventually acquires the lock (otherwise the mutex is poisoned).
-	var timedOut atomic.Bool
-	locked := make(chan struct{})
-	go func() {
-		t.mu.Lock()
-		if timedOut.Load() {
-			// Timeout already fired — we acquired the lock too late.
-			// Unlock immediately to avoid poisoning the mutex.
+	// Poll TryLock with a hard deadline. No helper goroutine, no race.
+	// TryLock is non-blocking — if the mutex is held by a hung CGO call,
+	// it returns false immediately. We poll every 100ms up to 5s.
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		if t.mu.TryLock() {
+			if t.ctx != nil {
+				C.whisper_free(t.ctx)
+				t.ctx = nil
+			}
 			t.mu.Unlock()
-			return
+			return nil
 		}
-		close(locked)
-	}()
-
-	select {
-	case <-locked:
-		// Got the lock in time — safe to free
-		if t.ctx != nil {
-			C.whisper_free(t.ctx)
-			t.ctx = nil
+		if time.Now().After(deadline) {
+			t.logger.Error("close timed out waiting for transcription lock — whisper context leaked",
+				"component", "transcriber", "operation", "Close")
+			return &ErrDependencyTimeout{
+				Component: "transcriber",
+				Operation: "Close",
+			}
 		}
-		t.mu.Unlock()
-	case <-time.After(5 * time.Second):
-		timedOut.Store(true)
-		t.logger.Error("close timed out waiting for transcription lock — whisper context leaked",
-			"component", "transcriber", "operation", "Close")
-		return &ErrDependencyTimeout{
-			Component: "transcriber",
-			Operation: "Close",
-		}
+		time.Sleep(100 * time.Millisecond)
 	}
-	return nil
 }
 
 // DownloadProgressFunc is called during model download with progress info.

@@ -197,7 +197,9 @@ func DefaultModelPath(modelSize string) (string, error) {
 
 // atomicWriteFile writes data to a temporary file, fsyncs it, then renames
 // to the final path. The fsync ensures data reaches stable storage before
-// the rename makes it visible — surviving both crashes and power loss.
+// the rename makes it visible. This prevents truncated config on crash.
+// Note: no directory fsync — not fully durable against power loss on all
+// filesystems, but sufficient for APFS on macOS.
 func atomicWriteFile(path string, data []byte, perm os.FileMode) error {
 	tmp := path + ".tmp"
 	f, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, perm)
