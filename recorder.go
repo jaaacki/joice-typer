@@ -15,6 +15,7 @@ type portaudioRecorder struct {
 	deviceName   string
 	stream       *portaudio.Stream
 	activeStream *portaudio.Stream // guarded by mu; used by Stop to force-abort on timeout
+	warmStream   *portaudio.Stream // pre-opened stream for instant start
 	buffer       []float32
 	chunks       [][]float32
 	mu           sync.Mutex
@@ -86,6 +87,52 @@ func findInputDevice(name string) (*portaudio.DeviceInfo, error) {
 	return nil, &ErrDependencyUnavailable{Component: "recorder", Operation: "findInputDevice", Wrapped: fmt.Errorf("input device %q not found", name)}
 }
 
+// openStream creates and returns a PortAudio stream for the configured device.
+func (r *portaudioRecorder) openStream(buf []float32) (*portaudio.Stream, error) {
+	if r.deviceName != "" {
+		device, devErr := findInputDevice(r.deviceName)
+		if devErr != nil {
+			r.logger.Warn("configured device not found, using default input",
+				"operation", "openStream",
+				"device", r.deviceName, "error", devErr)
+			return portaudio.OpenDefaultStream(1, 0, r.sampleRate, len(buf), buf)
+		}
+		params := portaudio.StreamParameters{
+			Input: portaudio.StreamDeviceParameters{
+				Device:   device,
+				Channels: 1,
+				Latency:  device.DefaultLowInputLatency,
+			},
+			SampleRate:      r.sampleRate,
+			FramesPerBuffer: len(buf),
+		}
+		return portaudio.OpenStream(params, buf)
+	}
+	return portaudio.OpenDefaultStream(1, 0, r.sampleRate, len(buf), buf)
+}
+
+// Warm pre-opens the audio stream so Start() is near-instant.
+// Call after the app is ready. Safe to call multiple times.
+func (r *portaudioRecorder) Warm() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if r.warmStream != nil {
+		return // already warmed
+	}
+
+	buf := make([]float32, 1024)
+	stream, err := r.openStream(buf)
+	if err != nil {
+		r.logger.Warn("failed to pre-warm audio stream",
+			"component", "recorder", "operation", "Warm", "error", err)
+		return
+	}
+	r.warmStream = stream
+	r.buffer = buf
+	r.logger.Info("audio stream pre-warmed", "component", "recorder", "operation", "Warm")
+}
+
 func (r *portaudioRecorder) Start(ctx context.Context) error {
 	if ctx.Err() != nil {
 		return ctx.Err()
@@ -115,38 +162,25 @@ func (r *portaudioRecorder) Start(ctx context.Context) error {
 	r.totalSamples = 0
 	r.recording = true
 	r.sessionID++
-	r.buffer = make([]float32, 1024)
 
 	var stream *portaudio.Stream
 	var err error
 
-	if r.deviceName != "" {
-		device, devErr := findInputDevice(r.deviceName)
-		if devErr != nil {
-			r.logger.Warn("configured device not found, using default input",
-				"operation", "Start",
-				"device", r.deviceName, "error", devErr)
-			stream, err = portaudio.OpenDefaultStream(1, 0, r.sampleRate, len(r.buffer), r.buffer)
-		} else {
-			params := portaudio.StreamParameters{
-				Input: portaudio.StreamDeviceParameters{
-					Device:   device,
-					Channels: 1,
-					Latency:  device.DefaultLowInputLatency,
-				},
-				SampleRate:      r.sampleRate,
-				FramesPerBuffer: len(r.buffer),
-			}
-			stream, err = portaudio.OpenStream(params, r.buffer)
-		}
+	// Use pre-warmed stream if available (near-instant start)
+	if r.warmStream != nil {
+		stream = r.warmStream
+		r.warmStream = nil
+		r.logger.Debug("using pre-warmed stream", "operation", "Start")
 	} else {
-		stream, err = portaudio.OpenDefaultStream(1, 0, r.sampleRate, len(r.buffer), r.buffer)
+		// Cold path: open stream now (slow — can take 1-2 seconds)
+		r.buffer = make([]float32, 1024)
+		stream, err = r.openStream(r.buffer)
+		if err != nil {
+			r.recording = false
+			return &ErrDependencyUnavailable{Component: "recorder", Operation: "Start", Wrapped: fmt.Errorf("open stream: %w", err)}
+		}
 	}
 
-	if err != nil {
-		r.recording = false
-		return &ErrDependencyUnavailable{Component: "recorder", Operation: "Start", Wrapped: fmt.Errorf("open stream: %w", err)}
-	}
 	r.stream = stream
 
 	if err := stream.Start(); err != nil {
@@ -308,6 +342,10 @@ func (r *portaudioRecorder) Stop() ([]float32, error) {
 	}
 	r.logger.Debug("recording stopped", "operation", "Stop", "samples", len(audio),
 		"duration_sec", float64(len(audio))/r.sampleRate)
+
+	// Re-warm the stream in background so next recording starts instantly
+	go r.Warm()
+
 	return audio, nil
 }
 

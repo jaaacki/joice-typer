@@ -208,6 +208,7 @@ func runAppMode() {
 
 		// Step 3: Create app components
 		recorder = NewRecorder(cfg.SampleRate, cfg.InputDevice, logger)
+		recorder.Warm() // pre-open audio stream for instant recording start
 		paster := NewPaster(logger)
 		sound = NewSound(cfg.SoundFeedback, logger)
 
