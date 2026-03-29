@@ -154,11 +154,12 @@ func RunSetupWizard(ctx context.Context, logger *slog.Logger) (string, error) {
 	// Read selected language
 	selectedLang := C.GoString(C.getSelectedLanguage())
 
-	// Read hotkey flags
+	// Read hotkey flags and keycode
 	hotkeyFlags := uint64(C.getSettingsHotkeyFlags())
+	hotkeyKeycode := int(C.getSettingsHotkeyKeycode())
 	var triggerKeys []string
-	if hotkeyFlags != 0 {
-		triggerKeys = flagsToKeys(hotkeyFlags)
+	if hotkeyFlags != 0 || hotkeyKeycode >= 0 {
+		triggerKeys = hotkeyToKeys(hotkeyFlags, hotkeyKeycode)
 	} else {
 		triggerKeys = []string{"fn", "shift"}
 	}
@@ -327,10 +328,11 @@ func OpenPreferences() {
 	selectedDevice := C.GoString(C.getSelectedDevice())
 	selectedLang := C.GoString(C.getSelectedLanguage())
 	hotkeyFlags := uint64(C.getSettingsHotkeyFlags())
+	hotkeyKeycode := int(C.getSettingsHotkeyKeycode())
 
 	var triggerKeys []string
-	if hotkeyFlags != 0 {
-		triggerKeys = flagsToKeys(hotkeyFlags)
+	if hotkeyFlags != 0 || hotkeyKeycode >= 0 {
+		triggerKeys = hotkeyToKeys(hotkeyFlags, hotkeyKeycode)
 	} else {
 		triggerKeys = cfg.TriggerKey // keep existing
 	}
@@ -361,11 +363,15 @@ func formatHotkeyDisplay(keys []string) string {
 	nameMap := map[string]string{
 		"fn": "Fn", "shift": "Shift", "ctrl": "Ctrl",
 		"option": "Option", "cmd": "Cmd",
+		"space": "Space", "tab": "Tab", "return": "Return",
+		"escape": "Escape", "delete": "Delete",
 	}
 	var parts []string
 	for _, k := range keys {
 		if n, ok := nameMap[k]; ok {
 			parts = append(parts, n)
+		} else {
+			parts = append(parts, strings.ToUpper(k))
 		}
 	}
 	return strings.Join(parts, " + ")

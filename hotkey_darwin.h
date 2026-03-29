@@ -19,10 +19,11 @@ int checkInputMonitoring(int prompt);
 // Returns 1 if creation succeeds (permissions are sufficient), 0 if not.
 int probeEventTap(void);
 
-// startHotkeyListener creates a CGEvent tap monitoring modifier flags.
-// targetFlags is the bitmask of modifier flags that must all be held to trigger.
+// startHotkeyListener creates a CGEvent tap monitoring modifier flags and optionally a key.
+// targetFlags: bitmask of modifier flags that must all be held.
+// targetKeycode: virtual keycode that must be pressed (pass -1 for modifier-only triggers).
 // Returns 0 on success, -1 if event tap creation fails (no Accessibility permission).
-int startHotkeyListener(uint64_t targetFlags);
+int startHotkeyListener(uint64_t targetFlags, int targetKeycode);
 
 // stopHotkeyListener disables the event tap and releases resources.
 void stopHotkeyListener(void);

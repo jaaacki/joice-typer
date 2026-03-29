@@ -36,6 +36,8 @@ static NSButton *sHotkeyConfirmBtn = nil;
 static char sHotkeyBuffer[128] = {0};
 static _Atomic uint64_t sRecordedFlags = 0;
 static uint64_t sConfirmedFlags = 0;
+static int sRecordedKeycode = -1;
+static int sConfirmedKeycode = -1;
 static CFMachPortRef sRecorderTap = NULL;
 static CFRunLoopSourceRef sRecorderSource = NULL;
 
@@ -51,13 +53,38 @@ static NSTextField *makeLabel(NSString *text, CGFloat fontSize, BOOL bold, NSCol
     return label;
 }
 
-static NSString *flagsToDisplayString(uint64_t flags) {
+static NSString *keycodeToDisplayName(int keycode) {
+    switch (keycode) {
+        case 0x00: return @"A"; case 0x01: return @"S"; case 0x02: return @"D";
+        case 0x03: return @"F"; case 0x04: return @"H"; case 0x05: return @"G";
+        case 0x06: return @"Z"; case 0x07: return @"X"; case 0x08: return @"C";
+        case 0x09: return @"V"; case 0x0B: return @"B"; case 0x0C: return @"Q";
+        case 0x0D: return @"W"; case 0x0E: return @"E"; case 0x0F: return @"R";
+        case 0x10: return @"Y"; case 0x11: return @"T"; case 0x12: return @"1";
+        case 0x13: return @"2"; case 0x14: return @"3"; case 0x15: return @"4";
+        case 0x16: return @"6"; case 0x17: return @"5"; case 0x1A: return @"7";
+        case 0x1C: return @"8"; case 0x19: return @"9"; case 0x1D: return @"0";
+        case 0x1F: return @"O"; case 0x20: return @"U"; case 0x22: return @"I";
+        case 0x23: return @"P"; case 0x25: return @"L"; case 0x26: return @"J";
+        case 0x28: return @"K"; case 0x2D: return @"N"; case 0x2E: return @"M";
+        case 0x31: return @"Space"; case 0x30: return @"Tab"; case 0x24: return @"Return";
+        case 0x35: return @"Escape"; case 0x33: return @"Delete";
+        case 0x7A: return @"F1"; case 0x78: return @"F2"; case 0x63: return @"F3";
+        case 0x76: return @"F4"; case 0x60: return @"F5"; case 0x61: return @"F6";
+        case 0x62: return @"F7"; case 0x64: return @"F8"; case 0x65: return @"F9";
+        case 0x6D: return @"F10"; case 0x67: return @"F11"; case 0x6F: return @"F12";
+        default: return [NSString stringWithFormat:@"Key(%d)", keycode];
+    }
+}
+
+static NSString *buildHotkeyDisplayString(uint64_t flags, int keycode) {
     NSMutableArray *parts = [NSMutableArray array];
     if (flags & 0x800000) [parts addObject:@"Fn"];
-    if (flags & 0x20000)  [parts addObject:@"Shift"];
     if (flags & 0x40000)  [parts addObject:@"Ctrl"];
     if (flags & 0x80000)  [parts addObject:@"Option"];
+    if (flags & 0x20000)  [parts addObject:@"Shift"];
     if (flags & 0x100000) [parts addObject:@"Cmd"];
+    if (keycode >= 0) [parts addObject:keycodeToDisplayName(keycode)];
     if (parts.count == 0) return @"Press keys...";
     return [parts componentsJoinedByString:@" + "];
 }
@@ -80,15 +107,26 @@ static CGEventRef recorderTapCallback(
         if (sRecorderTap != NULL) CGEventTapEnable(sRecorderTap, true);
         return event;
     }
-    if (type != kCGEventFlagsChanged) return event;
 
-    uint64_t flags = CGEventGetFlags(event);
-    uint64_t relevant = flags & (0x800000 | 0x20000 | 0x40000 | 0x80000 | 0x100000);
-    sRecordedFlags = relevant;
-
-    dispatch_async(dispatch_get_main_queue(), ^{
-        sHotkeyLabel.stringValue = flagsToDisplayString(relevant);
-    });
+    if (type == kCGEventFlagsChanged) {
+        uint64_t flags = CGEventGetFlags(event);
+        uint64_t relevant = flags & (0x800000 | 0x20000 | 0x40000 | 0x80000 | 0x100000);
+        sRecordedFlags = relevant;
+        // If no key pressed yet, show modifiers only
+        if (sRecordedKeycode < 0) {
+            dispatch_async(dispatch_get_main_queue(), ^{
+                sHotkeyLabel.stringValue = buildHotkeyDisplayString(relevant, -1);
+            });
+        }
+    } else if (type == kCGEventKeyDown) {
+        int keycode = (int)CGEventGetIntegerValueField(event, kCGKeyboardEventKeycode);
+        sRecordedKeycode = keycode;
+        uint64_t flags = sRecordedFlags; // current modifier state
+        dispatch_async(dispatch_get_main_queue(), ^{
+            sHotkeyLabel.stringValue = buildHotkeyDisplayString(flags, keycode);
+        });
+    }
+    // Ignore kCGEventKeyUp — we want to capture the key, not track release
 
     return event;
 }
@@ -122,8 +160,9 @@ static CGEventRef recorderTapCallback(
     sHotkeyConfirmBtn.hidden = NO;
     sHotkeyLabel.stringValue = @"Press keys...";
     sRecordedFlags = 0;
+    sRecordedKeycode = -1;
 
-    CGEventMask mask = CGEventMaskBit(kCGEventFlagsChanged);
+    CGEventMask mask = CGEventMaskBit(kCGEventFlagsChanged) | CGEventMaskBit(kCGEventKeyDown) | CGEventMaskBit(kCGEventKeyUp);
     sRecorderTap = CGEventTapCreate(
         kCGSessionEventTap,
         kCGHeadInsertEventTap,
@@ -146,12 +185,13 @@ static CGEventRef recorderTapCallback(
 
 - (void)hotkeyConfirmClicked:(id)sender {
     [self stopRecorder];
-    if (sRecordedFlags == 0) {
+    if (sRecordedFlags == 0 && sRecordedKeycode < 0) {
         sHotkeyLabel.stringValue = [NSString stringWithUTF8String:sHotkeyBuffer];
         return;
     }
     sConfirmedFlags = sRecordedFlags;
-    NSString *display = flagsToDisplayString(sConfirmedFlags);
+    sConfirmedKeycode = sRecordedKeycode;
+    NSString *display = buildHotkeyDisplayString(sConfirmedFlags, sConfirmedKeycode);
     strlcpy(sHotkeyBuffer, [display UTF8String], sizeof(sHotkeyBuffer));
     sHotkeyLabel.stringValue = display;
 }
@@ -185,7 +225,9 @@ void showSettingsWindow(int onboarding) {
 
         // Reset stale hotkey recorder state
         sConfirmedFlags = 0;
+        sConfirmedKeycode = -1;
         sRecordedFlags = 0;
+        sRecordedKeycode = -1;
 
         // Reset permission/download tracking for onboarding gate
         sAccessibilityGranted = NO;
@@ -570,6 +612,10 @@ const char *getSettingsHotkey(void) {
 
 uint64_t getSettingsHotkeyFlags(void) {
     return sConfirmedFlags;
+}
+
+int getSettingsHotkeyKeycode(void) {
+    return sConfirmedKeycode;
 }
 
 void runSetupEventLoop(void) {

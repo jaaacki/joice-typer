@@ -26,7 +26,7 @@ static CGEventRef probeCallback(CGEventTapProxy p, CGEventType t, CGEventRef e, 
 }
 
 int probeEventTap(void) {
-    CGEventMask mask = CGEventMaskBit(kCGEventFlagsChanged);
+    CGEventMask mask = CGEventMaskBit(kCGEventFlagsChanged) | CGEventMaskBit(kCGEventKeyDown);
     CFMachPortRef tap = CGEventTapCreate(
         kCGSessionEventTap,
         kCGHeadInsertEventTap,
@@ -51,6 +51,7 @@ void ensureNSApp(void) {
 }
 
 static uint64_t sTargetFlags = 0;
+static int sTargetKeycode = -1;
 static int sTriggered = 0;
 static CFMachPortRef sEventTap = NULL;
 static CFRunLoopSourceRef sRunLoopSource = NULL;
@@ -69,30 +70,56 @@ static CGEventRef eventTapCallback(
         return event;
     }
 
-    if (type != kCGEventFlagsChanged) {
-        return event;
-    }
-
     uint64_t flags = CGEventGetFlags(event);
     hotkeyFlagsChanged(flags);
-    int allHeld = (flags & sTargetFlags) == sTargetFlags;
 
-    if (allHeld && !sTriggered) {
-        sTriggered = 1;
-        hotkeyCallback(0);  // TriggerPressed
-    } else if (!allHeld && sTriggered) {
-        sTriggered = 0;
-        hotkeyCallback(1);  // TriggerReleased
+    if (sTargetKeycode < 0) {
+        // Modifier-only mode (existing behavior)
+        if (type != kCGEventFlagsChanged) return event;
+        int allHeld = (flags & sTargetFlags) == sTargetFlags;
+        if (allHeld && !sTriggered) {
+            sTriggered = 1;
+            hotkeyCallback(0);  // TriggerPressed
+        } else if (!allHeld && sTriggered) {
+            sTriggered = 0;
+            hotkeyCallback(1);  // TriggerReleased
+        }
+    } else {
+        // Modifier+key mode
+        int modsHeld = (sTargetFlags == 0) || ((flags & sTargetFlags) == sTargetFlags);
+        if (type == kCGEventKeyDown && modsHeld) {
+            int keycode = (int)CGEventGetIntegerValueField(event, kCGKeyboardEventKeycode);
+            if (keycode == sTargetKeycode && !sTriggered) {
+                sTriggered = 1;
+                hotkeyCallback(0);  // TriggerPressed
+            }
+        } else if (type == kCGEventKeyUp) {
+            int keycode = (int)CGEventGetIntegerValueField(event, kCGKeyboardEventKeycode);
+            if (keycode == sTargetKeycode && sTriggered) {
+                sTriggered = 0;
+                hotkeyCallback(1);  // TriggerReleased
+            }
+        } else if (type == kCGEventFlagsChanged && sTriggered) {
+            // Modifiers released while key is held — treat as release
+            if (!modsHeld) {
+                sTriggered = 0;
+                hotkeyCallback(1);  // TriggerReleased
+            }
+        }
     }
 
     return event;
 }
 
-int startHotkeyListener(uint64_t targetFlags) {
+int startHotkeyListener(uint64_t targetFlags, int targetKeycode) {
     sTargetFlags = targetFlags;
+    sTargetKeycode = targetKeycode;
     sTriggered = 0;
 
     CGEventMask mask = CGEventMaskBit(kCGEventFlagsChanged);
+    if (targetKeycode >= 0) {
+        mask |= CGEventMaskBit(kCGEventKeyDown) | CGEventMaskBit(kCGEventKeyUp);
+    }
 
     sEventTap = CGEventTapCreate(
         kCGSessionEventTap,

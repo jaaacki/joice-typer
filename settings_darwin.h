@@ -12,6 +12,7 @@ const char *getSelectedLanguage(void);
 void setSettingsHotkey(const char *displayText);
 const char *getSettingsHotkey(void);
 uint64_t getSettingsHotkeyFlags(void);
+int getSettingsHotkeyKeycode(void);
 void updateSetupDownloadProgress(double progress, long long bytesDownloaded, long long bytesTotal);
 void updateSetupDownloadComplete(void);
 void updateSetupDownloadFailed(const char *errorMsg);

@@ -27,8 +27,18 @@ var validModelSizes = map[string]bool{
 	"tiny": true, "base": true, "small": true, "medium": true,
 }
 
-var validKeys = map[string]bool{
+var validModifiers = map[string]bool{
 	"fn": true, "shift": true, "ctrl": true, "option": true, "cmd": true,
+}
+
+func isValidKey(k string) bool {
+	if validModifiers[k] {
+		return true
+	}
+	if _, ok := keyToKeycode[k]; ok {
+		return true
+	}
+	return false
 }
 
 var validLanguages = map[string]bool{
@@ -139,7 +149,7 @@ func (c Config) Validate() error {
 		return fmt.Errorf("config.Validate: trigger_key must have at least one key")
 	}
 	for _, k := range c.TriggerKey {
-		if !validKeys[k] {
+		if !isValidKey(k) {
 			return fmt.Errorf("config.Validate: unknown key %q in trigger_key", k)
 		}
 	}
