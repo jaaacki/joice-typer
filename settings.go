@@ -386,6 +386,7 @@ func OpenPreferences() {
 	// Read selections
 	selectedDevice := C.GoString(C.getSelectedDevice())
 	selectedLang := C.GoString(C.getSelectedLanguage())
+	selectedModel := C.GoString(C.getSelectedModel())
 	hotkeyFlags := uint64(C.getSettingsHotkeyFlags())
 	hotkeyKeycode := int(C.getSettingsHotkeyKeycode())
 
@@ -399,6 +400,9 @@ func OpenPreferences() {
 	cfg.InputDevice = selectedDevice
 	cfg.Language = selectedLang
 	cfg.TriggerKey = triggerKeys
+	if selectedModel != "" {
+		cfg.ModelSize = selectedModel
+	}
 
 	data, marshalErr := yaml.Marshal(&cfg)
 	if marshalErr != nil {

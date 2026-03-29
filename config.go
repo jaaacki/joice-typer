@@ -27,6 +27,19 @@ var validModelSizes = map[string]bool{
 	"tiny": true, "base": true, "small": true, "medium": true,
 }
 
+type ModelInfo struct {
+	Size        string
+	Description string
+	Bytes       int64
+}
+
+var ModelOptions = []ModelInfo{
+	{"tiny", "Tiny — 75 MB · Fastest, basic accuracy", 77691713},
+	{"base", "Base — 142 MB · Faster, fair accuracy (good balance)", 147951465},
+	{"small", "Small — 466 MB · Fast, good accuracy (recommended)", 487601967},
+	{"medium", "Medium — 1.5 GB · Slow, very accurate (worth trying)", 1533763059},
+}
+
 var validModifiers = map[string]bool{
 	"fn": true, "shift": true, "ctrl": true, "option": true, "cmd": true,
 }
