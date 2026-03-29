@@ -2,16 +2,13 @@
 #import <UserNotifications/UserNotifications.h>
 #include "notification_darwin.h"
 
-static BOOL sNotificationAuthorized = NO;
-static BOOL sNotificationAuthChecked = NO;
-
 static void ensureNotificationAuth(UNUserNotificationCenter *center) {
     static dispatch_once_t sNotificationOnce;
     dispatch_once(&sNotificationOnce, ^{
         [center requestAuthorizationWithOptions:(UNAuthorizationOptionAlert | UNAuthorizationOptionSound)
-                              completionHandler:^(BOOL granted, NSError *error) {
-            sNotificationAuthorized = granted;
-            sNotificationAuthChecked = YES;
+                              completionHandler:^(BOOL granted __unused, NSError *error __unused) {
+            // Authorization result is not stored — UNUserNotificationCenter
+            // queues requests until authorization resolves regardless.
         }];
     });
 }

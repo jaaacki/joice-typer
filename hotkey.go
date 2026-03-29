@@ -200,19 +200,9 @@ func saveBinaryHash(logger *slog.Logger) {
 	if err != nil {
 		return
 	}
-	os.WriteFile(filepath.Join(dir, ".binary-hash"), []byte(hash), 0644)
-}
-
-func readStoredHash() (string, error) { //nolint: unused — kept for future binary change detection
-	dir, err := DefaultConfigDir()
-	if err != nil {
-		return "", err
+	if err := os.WriteFile(filepath.Join(dir, ".binary-hash"), []byte(hash), 0644); err != nil {
+		logger.Warn("failed to write binary hash", "operation", "saveBinaryHash", "error", err)
 	}
-	data, err := os.ReadFile(filepath.Join(dir, ".binary-hash"))
-	if err != nil {
-		return "", err
-	}
-	return string(data), nil
 }
 
 func currentBinaryHash() (string, error) {

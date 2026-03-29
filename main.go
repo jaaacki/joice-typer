@@ -27,7 +27,10 @@ func main() {
 	// The main goroutine must stay on the main OS thread for macOS CFRunLoop.
 	runtime.LockOSThread()
 
-	defaultCfgPath, _ := DefaultConfigPath()
+	defaultCfgPath, cfgErr := DefaultConfigPath()
+	if cfgErr != nil {
+		defaultCfgPath = ""
+	}
 	configPath := flag.String("config", defaultCfgPath, "path to config file")
 	listDevices := flag.Bool("list-devices", false, "list available audio input devices and exit")
 	flag.Parse()
@@ -64,13 +67,17 @@ func isAppMode() bool {
 
 // suppressStderr redirects file descriptor 2 to a log file so whisper.cpp
 // stderr noise does not appear in app mode.
+// Best-effort: if this fails, whisper.cpp noise appears in stderr.
 func suppressStderr(logDir string) {
 	logPath := filepath.Join(logDir, "whisper-stderr.log")
 	f, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 	if err != nil {
-		return // best effort
+		return // best-effort: runs before logger exists
 	}
-	syscall.Dup2(int(f.Fd()), 2)
+	if err := syscall.Dup2(int(f.Fd()), 2); err != nil {
+		f.Close()
+		return // best-effort: if this fails, whisper.cpp noise appears in stderr
+	}
 }
 
 // runAppMode is the entry point when running inside a .app bundle.
@@ -208,7 +215,8 @@ func runAppMode() {
 
 		// Step 3: Create app components
 		recorder = NewRecorder(cfg.SampleRate, cfg.InputDevice, logger)
-		recorder.Warm() // pre-open audio stream for instant recording start
+		settingsRecorder = recorder // expose to settings.go for safe device refresh
+		recorder.Warm()             // pre-open audio stream for instant recording start
 		paster := NewPaster(logger)
 		sound = NewSound(cfg.SoundFeedback, logger)
 
@@ -296,6 +304,7 @@ func runAppMode() {
 					logger.Error("failed to close old recorder", "component", "main", "operation", "runAppMode", "error", closeErr)
 				}
 				recorder = NewRecorder(cfg.SampleRate, cfg.InputDevice, logger)
+				settingsRecorder = recorder // update settings.go reference
 				app.SetRecorder(recorder)
 				logger.Info("recorder updated", "component", "main", "operation", "runAppMode", "device", cfg.InputDevice)
 			}

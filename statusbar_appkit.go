@@ -31,9 +31,12 @@ func UpdateStatusBar(state AppState) {
 func statusBarQuitClicked() {
 	p, err := os.FindProcess(os.Getpid())
 	if err != nil {
+		os.Exit(1) // can't find own process — just exit
 		return
 	}
-	p.Signal(syscall.SIGTERM)
+	if sigErr := p.Signal(syscall.SIGTERM); sigErr != nil {
+		os.Exit(1)
+	}
 }
 
 //export statusBarPreferencesClicked

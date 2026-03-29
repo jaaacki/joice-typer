@@ -23,6 +23,7 @@ import (
 )
 
 var settingsLogger *slog.Logger
+var settingsRecorder Recorder
 
 // IsFirstRun returns true if no config file exists yet.
 func IsFirstRun() bool {
@@ -230,7 +231,7 @@ func populateLanguageList(selectedCode string) {
 func writeSetupConfig(deviceName string, language string, modelSize string, triggerKeys []string, l *slog.Logger) error {
 	cfgPath, err := DefaultConfigPath()
 	if err != nil {
-		return fmt.Errorf("writeSetupConfig: %w", err)
+		return fmt.Errorf("settings.writeSetupConfig: %w", err)
 	}
 
 	cfg := Config{
@@ -243,21 +244,21 @@ func writeSetupConfig(deviceName string, language string, modelSize string, trig
 	}
 
 	if err := cfg.Validate(); err != nil {
-		return fmt.Errorf("writeSetupConfig: invalid settings from UI: %w", err)
+		return fmt.Errorf("settings.writeSetupConfig: invalid settings from UI: %w", err)
 	}
 
 	data, err := yaml.Marshal(&cfg)
 	if err != nil {
-		return fmt.Errorf("writeSetupConfig: marshal: %w", err)
+		return fmt.Errorf("settings.writeSetupConfig: marshal: %w", err)
 	}
 
 	dir := filepath.Dir(cfgPath)
 	if err := os.MkdirAll(dir, 0755); err != nil {
-		return fmt.Errorf("writeSetupConfig: create dir: %w", err)
+		return fmt.Errorf("settings.writeSetupConfig: create dir: %w", err)
 	}
 
 	if err := atomicWriteFile(cfgPath, data, 0644); err != nil {
-		return fmt.Errorf("writeSetupConfig: write: %w", err)
+		return fmt.Errorf("settings.writeSetupConfig: write: %w", err)
 	}
 
 	l.Info("config written", "operation", "writeSetupConfig", "path", cfgPath, "device", deviceName)
@@ -336,9 +337,13 @@ func OpenPreferences() {
 		}
 	}()
 
-	// Refresh audio devices to pick up newly connected mics (e.g. Bluetooth)
-	if refreshErr := RefreshAudioDevices(); refreshErr != nil && settingsLogger != nil {
-		settingsLogger.Warn("failed to refresh audio devices", "operation", "OpenPreferences", "error", refreshErr)
+	// Refresh audio devices to pick up newly connected mics (e.g. Bluetooth).
+	// Uses the recorder's RefreshDevices to safely close warm/active streams
+	// before re-initializing PortAudio — prevents dangling stream handles.
+	if settingsRecorder != nil {
+		if refreshErr := settingsRecorder.RefreshDevices(); refreshErr != nil && settingsLogger != nil {
+			settingsLogger.Warn("failed to refresh audio devices", "operation", "OpenPreferences", "error", refreshErr)
+		}
 	}
 
 	// Pre-populate from current config

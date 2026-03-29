@@ -645,10 +645,10 @@ func doDownload(ctx context.Context, client *http.Client, url string, tmpPath st
 	closeErr := f.Close()
 
 	if copyErr != nil {
-		return fmt.Errorf("write: %w", copyErr)
+		return fmt.Errorf("transcriber.doDownload: write tmp: %w", copyErr)
 	}
 	if closeErr != nil {
-		return fmt.Errorf("close: %w", closeErr)
+		return fmt.Errorf("transcriber.doDownload: close tmp: %w", closeErr)
 	}
 
 	totalWritten := startByte + n

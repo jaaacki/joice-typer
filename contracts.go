@@ -42,6 +42,7 @@ type Recorder interface {
 	Start(ctx context.Context) error
 	Stop() ([]float32, error)
 	Snapshot() []float32 // copy of audio captured so far, without stopping
+	RefreshDevices() error // safely re-init PortAudio to pick up new devices
 	Close() error
 }
 

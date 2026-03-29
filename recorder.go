@@ -44,15 +44,30 @@ func TerminateAudio() error {
 	return portaudio.Terminate()
 }
 
-// RefreshAudioDevices re-initializes PortAudio to pick up newly
-// connected devices (e.g. Bluetooth microphones).
-func RefreshAudioDevices() error {
+// RefreshDevices safely closes any warm or active streams, re-initializes
+// PortAudio to pick up newly connected devices (e.g. Bluetooth microphones),
+// and re-warms the stream for instant recording.
+func (r *portaudioRecorder) RefreshDevices() error {
+	r.mu.Lock()
+	if r.warmStream != nil {
+		r.warmStream.Close()
+		r.warmStream = nil
+	}
+	if r.activeStream != nil {
+		r.activeStream.Abort()
+		r.activeStream = nil
+	}
+	r.mu.Unlock()
+
 	if err := portaudio.Terminate(); err != nil {
-		return fmt.Errorf("recorder.RefreshAudioDevices: terminate: %w", err)
+		return fmt.Errorf("recorder.RefreshDevices: terminate: %w", err)
 	}
 	if err := portaudio.Initialize(); err != nil {
-		return fmt.Errorf("recorder.RefreshAudioDevices: initialize: %w", err)
+		return fmt.Errorf("recorder.RefreshDevices: initialize: %w", err)
 	}
+
+	// Re-warm after refresh so next recording starts instantly
+	r.Warm()
 	return nil
 }
 
@@ -350,8 +365,14 @@ func (r *portaudioRecorder) Stop() ([]float32, error) {
 }
 
 func (r *portaudioRecorder) Close() error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	r.logger.Info("closing", "operation", "Close")
-	// Stream cleanup is handled by readLoop's defer.
+	if r.warmStream != nil {
+		r.warmStream.Close()
+		r.warmStream = nil
+	}
+	// Active stream cleanup is handled by readLoop's defer.
 	// Each readLoop owns its stream by value and closes it on exit.
 	return nil
 }

@@ -24,7 +24,8 @@ type mockRecorder struct {
 	stopFn      func() ([]float32, error)
 }
 
-func (m *mockRecorder) Warm() {}
+func (m *mockRecorder) Warm()                  {}
+func (m *mockRecorder) RefreshDevices() error { return nil }
 func (m *mockRecorder) Start(ctx context.Context) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
