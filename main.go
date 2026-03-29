@@ -177,10 +177,14 @@ func runAppMode() {
 		// Wait for [NSApp run] to start on the main thread
 		time.Sleep(200 * time.Millisecond)
 
-		// Create status bar on the main thread via dispatch_sync.
+		// Create status bar on the main thread via dispatch_async.
 		// initStatusBar touches AppKit which must be on the main thread.
 		InitStatusBarAsync()
+		// Brief wait to let the status bar render before permission polling
+		time.Sleep(100 * time.Millisecond)
 		UpdateStatusBar(StateNoPermission)
+
+		// Step 1: Check permissions
 		if err := hotkey.WaitForPermissions(startupCtx, func(acc, inp bool) {
 			if acc && inp {
 				return
