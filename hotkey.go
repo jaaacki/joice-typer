@@ -265,3 +265,22 @@ func keysToFlags(keys []string) (uint64, error) {
 	}
 	return flags, nil
 }
+
+var flagToKey = map[uint64]string{
+	flagFn:     "fn",
+	flagShift:  "shift",
+	flagCtrl:   "ctrl",
+	flagOption: "option",
+	flagCmd:    "cmd",
+}
+
+func flagsToKeys(flags uint64) []string {
+	order := []uint64{flagFn, flagShift, flagCtrl, flagOption, flagCmd}
+	var keys []string
+	for _, f := range order {
+		if flags&f != 0 {
+			keys = append(keys, flagToKey[f])
+		}
+	}
+	return keys
+}
