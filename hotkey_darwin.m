@@ -159,15 +159,23 @@ void stopHotkeyListener(void) {
 }
 
 void runMainLoop(void) {
-    // Use CFRunLoopRun instead of [NSApp run]. The CGEvent tap is a
-    // Core Foundation construct that only needs CFRunLoop. Using [NSApp run]
-    // caused [NSApp stopModal] from preferences to bleed into the hotkey
-    // event loop, killing the listener. CFRunLoop is isolated from NSApp's
-    // modal session management.
-    ensureNSApp(); // still needed for status bar and preferences window
-    CFRunLoopRun();
+    ensureNSApp();
+    [NSApp run];
 }
 
 void stopMainLoop(void) {
-    CFRunLoopStop(CFRunLoopGetMain());
+    dispatch_async(dispatch_get_main_queue(), ^{
+        [NSApp stop:nil];
+        // Post dummy event to unblock [NSApp run]
+        NSEvent *event = [NSEvent otherEventWithType:NSEventTypeApplicationDefined
+                                            location:NSMakePoint(0, 0)
+                                       modifierFlags:0
+                                           timestamp:0
+                                        windowNumber:0
+                                             context:nil
+                                             subtype:0
+                                               data1:0
+                                               data2:0];
+        [NSApp postEvent:event atStart:YES];
+    });
 }

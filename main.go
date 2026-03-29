@@ -10,6 +10,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 )
 
@@ -103,11 +104,13 @@ func runAppMode() {
 	// Create a context cancelled by SIGTERM — used for permissions and startup
 	startupCtx, startupCancel := context.WithCancel(context.Background())
 
+	var shutdownRequested atomic.Bool
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 	go func() {
 		sig := <-sigCh
 		logger.Info("received signal", "component", "main", "operation", "signal", "signal", sig.String())
+		shutdownRequested.Store(true)
 		startupCancel() // cancel permission polling and setup wizard
 		activeHotkeyMu.Lock()
 		h := activeHotkey
@@ -279,7 +282,14 @@ func runAppMode() {
 			UpdateStatusBar(StateReady)
 			continue
 		default:
-			// Normal shutdown — signal handler called Stop
+			if shutdownRequested.Load() {
+				break // real shutdown
+			}
+			// [NSApp stopModal] from preferences bled into [NSApp run].
+			// Re-enter — startHotkeyListener cleans up the old tap.
+			logger.Info("re-entering hotkey listener after modal exit",
+				"component", "main", "operation", "runAppMode")
+			continue
 		}
 		break
 	}
