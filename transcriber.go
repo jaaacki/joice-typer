@@ -53,16 +53,17 @@ var modelManifest = map[string]modelSpec{
 }
 
 type whisperTranscriber struct {
-	mu     sync.Mutex
-	ctx    *C.struct_whisper_context
-	lang   string
-	logger *slog.Logger
+	mu         sync.Mutex
+	ctx        *C.struct_whisper_context
+	lang       string
+	sampleRate int
+	logger     *slog.Logger
 }
 
-func NewTranscriber(modelPath string, modelSize string, language string, logger *slog.Logger) (Transcriber, error) {
+func NewTranscriber(ctx context.Context, modelPath string, modelSize string, language string, sampleRate int, logger *slog.Logger) (Transcriber, error) {
 	l := logger.With("component", "transcriber")
 
-	if err := ensureModel(context.Background(), modelPath, modelSize, l); err != nil {
+	if err := ensureModel(ctx, modelPath, modelSize, l); err != nil {
 		return nil, fmt.Errorf("transcriber.NewTranscriber: %w", err)
 	}
 
@@ -72,8 +73,8 @@ func NewTranscriber(modelPath string, modelSize string, language string, logger 
 	defer C.free(unsafe.Pointer(cPath))
 
 	cparams := C.whisper_context_default_params()
-	ctx := C.whisper_init_from_file_with_params(cPath, cparams)
-	if ctx == nil {
+	wctx := C.whisper_init_from_file_with_params(cPath, cparams)
+	if wctx == nil {
 		// Quarantine bad model so future startups re-download instead of failing forever
 		badPath := modelPath + ".bad"
 		if renameErr := os.Rename(modelPath, badPath); renameErr == nil {
@@ -88,13 +89,13 @@ func NewTranscriber(modelPath string, modelSize string, language string, logger 
 		cLang := C.CString(language)
 		defer C.free(unsafe.Pointer(cLang))
 		if C.whisper_lang_id(cLang) < 0 {
-			C.whisper_free(ctx)
+			C.whisper_free(wctx)
 			return nil, fmt.Errorf("transcriber.NewTranscriber: unsupported language %q", language)
 		}
 	}
 
 	l.Info("model loaded", "operation", "NewTranscriber")
-	return &whisperTranscriber{ctx: ctx, lang: language, logger: l}, nil
+	return &whisperTranscriber{ctx: wctx, lang: language, sampleRate: sampleRate, logger: l}, nil
 }
 
 type transcribeResult struct {
@@ -107,13 +108,17 @@ func (t *whisperTranscriber) Transcribe(ctx context.Context, audio []float32) (s
 		return "", fmt.Errorf("transcriber.Transcribe: empty audio buffer")
 	}
 
-	// Cap input audio duration
-	maxSamples := 16000 * maxTranscribeSeconds // assuming 16kHz
+	// Cap input audio duration using the actual configured sample rate
+	rate := t.sampleRate
+	if rate <= 0 {
+		rate = 16000
+	}
+	maxSamples := rate * maxTranscribeSeconds
 	if len(audio) > maxSamples {
 		return "", &ErrBadPayload{
 			Component: "transcriber",
 			Operation: "Transcribe",
-			Detail:    fmt.Sprintf("audio too long: %d samples (%ds at 16kHz), max %ds", len(audio), len(audio)/16000, maxTranscribeSeconds),
+			Detail:    fmt.Sprintf("audio too long: %d samples (%ds at %dHz), max %ds", len(audio), len(audio)/rate, rate, maxTranscribeSeconds),
 		}
 	}
 
@@ -198,13 +203,31 @@ func (t *whisperTranscriber) transcribeBlocking(audio []float32) (string, error)
 }
 
 func (t *whisperTranscriber) Close() error {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-
 	t.logger.Info("closing", "operation", "Close")
-	if t.ctx != nil {
-		C.whisper_free(t.ctx)
-		t.ctx = nil
+
+	// TryLock with timeout — a hung transcribeBlocking holds the mutex
+	// and we must not block shutdown forever waiting for CGO to return.
+	locked := make(chan struct{})
+	go func() {
+		t.mu.Lock()
+		close(locked)
+	}()
+
+	select {
+	case <-locked:
+		// Got the lock — safe to free
+		if t.ctx != nil {
+			C.whisper_free(t.ctx)
+			t.ctx = nil
+		}
+		t.mu.Unlock()
+	case <-time.After(5 * time.Second):
+		t.logger.Error("close timed out waiting for transcription lock — whisper context leaked",
+			"component", "transcriber", "operation", "Close")
+		return &ErrDependencyTimeout{
+			Component: "transcriber",
+			Operation: "Close",
+		}
 	}
 	return nil
 }

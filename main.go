@@ -153,7 +153,7 @@ func runAppMode() {
 	InitStatusBar()
 	UpdateStatusBar(StateLoading)
 
-	transcriber, err := NewTranscriber(modelPath, cfg.ModelSize, cfg.Language, logger)
+	transcriber, err := NewTranscriber(startupCtx, modelPath, cfg.ModelSize, cfg.Language, cfg.SampleRate, logger)
 	if err != nil {
 		logger.Error("failed to initialize transcriber", "component", "main", "operation", "runAppMode", "error", err)
 		os.Exit(1)
@@ -312,7 +312,7 @@ func runTerminalMode(configPath string) {
 	}
 
 	// --- Init transcriber (loads model -- may download on first run) ---
-	transcriber, err := NewTranscriber(modelPath, cfg.ModelSize, cfg.Language, logger)
+	transcriber, err := NewTranscriber(context.Background(), modelPath, cfg.ModelSize, cfg.Language, cfg.SampleRate, logger)
 	if err != nil {
 		logger.Error("failed to initialize transcriber",
 			"component", "main", "operation", "runTerminalMode", "error", err)
