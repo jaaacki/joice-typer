@@ -10,7 +10,7 @@ import (
 	"time"
 )
 
-const clipboardTranscribeTimeout = 30 * time.Second
+const clipboardTranscribeTimeout = 90 * time.Second
 
 // App is the orchestrator that wires hotkey events to the
 // record -> transcribe -> paste pipeline.

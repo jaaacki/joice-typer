@@ -32,7 +32,7 @@ func NewRecorder(sampleRate int, deviceName string, logger *slog.Logger) Recorde
 		sampleRate: float64(sampleRate),
 		deviceName: deviceName,
 		logger:     logger.With("component", "recorder"),
-		maxSamples: int(float64(sampleRate) * 30.0),
+		maxSamples: int(float64(sampleRate) * 90.0),
 	}
 }
 

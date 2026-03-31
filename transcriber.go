@@ -29,10 +29,10 @@ import (
 )
 
 const (
-	maxTranscribeSeconds  = 60               // reject audio longer than 60s
+	maxTranscribeSeconds  = 90               // reject audio longer than 90s
 	maxTranscribeSegments = 500              // cap whisper segments to prevent runaway
 	maxTranscribeBytes    = 50000            // cap output text to ~50KB
-	transcribeTimeout     = 30 * time.Second // hard deadline for whisper_full
+	transcribeTimeout     = 90 * time.Second // hard deadline for whisper_full
 
 	downloadMaxRetries    = 3
 	downloadRetryBaseWait = 2 * time.Second

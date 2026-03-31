@@ -341,7 +341,7 @@ void showSettingsWindow(int onboarding) {
         }
 
         // First-time window creation
-        CGFloat w = 480, h = 880;
+        CGFloat w = 480, h = 950;
         NSRect frame = NSMakeRect(0, 0, w, h);
         sSetupWindow = [[NSWindow alloc]
             initWithContentRect:frame
@@ -541,28 +541,29 @@ void showSettingsWindow(int onboarding) {
         [content addSubview:s7title];
         y -= 22;
 
+        // Description (above text box)
+        NSTextField *vocabHelp = makeLabel(@"Separate words or phrases with commas. These help the speech model recognise your terminology.", 11, NO,
+            [NSColor tertiaryLabelColor], NSMakeRect(pad + 28, y, innerW - 28, 28));
+        vocabHelp.maximumNumberOfLines = 2;
+        [content addSubview:vocabHelp];
+        y -= 32;
+
         // Text box (scrollable)
-        sVocabScrollView = [[NSScrollView alloc] initWithFrame:NSMakeRect(pad + 28, y - 50, innerW - 28, 50)];
+        sVocabScrollView = [[NSScrollView alloc] initWithFrame:NSMakeRect(pad + 28, y - 120, innerW - 28, 120)];
         sVocabScrollView.hasVerticalScroller = YES;
         sVocabScrollView.borderType = NSBezelBorder;
-        sVocabTextView = [[NSTextView alloc] initWithFrame:NSMakeRect(0, 0, innerW - 28 - 16, 50)];
+        sVocabTextView = [[NSTextView alloc] initWithFrame:NSMakeRect(0, 0, innerW - 28 - 16, 120)];
         sVocabTextView.font = [NSFont systemFontOfSize:12];
         sVocabTextView.textColor = [NSColor labelColor];
         sVocabTextView.backgroundColor = [NSColor textBackgroundColor];
-        sVocabTextView.minSize = NSMakeSize(0, 50);
+        sVocabTextView.minSize = NSMakeSize(0, 120);
         sVocabTextView.maxSize = NSMakeSize(CGFLOAT_MAX, CGFLOAT_MAX);
         sVocabTextView.verticallyResizable = YES;
         sVocabTextView.horizontallyResizable = NO;
         sVocabTextView.textContainer.widthTracksTextView = YES;
         sVocabScrollView.documentView = sVocabTextView;
         [content addSubview:sVocabScrollView];
-        y -= 56;
-
-        NSTextField *vocabHelp = makeLabel(@"Separate words or phrases with commas. These help the speech model recognise your terminology.", 11, NO,
-            [NSColor tertiaryLabelColor], NSMakeRect(pad + 28, y, innerW - 28, 28));
-        vocabHelp.maximumNumberOfLines = 2;
-        [content addSubview:vocabHelp];
-        y -= 32;
+        y -= 126;
 
         // Save button (preferences mode only — right-aligned, below vocabulary)
         NSButton *saveBtn = [[NSButton alloc] initWithFrame:NSMakeRect(w - pad - 80, y, 80, 28)];

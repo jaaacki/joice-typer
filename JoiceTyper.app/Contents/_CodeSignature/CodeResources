@@ -3,9 +3,31 @@
 <plist version="1.0">
 <dict>
 	<key>files</key>
-	<dict/>
+	<dict>
+		<key>Resources/icon.icns</key>
+		<data>
+		0jizPxf83J3IefLS1V3sXaEv3cA=
+		</data>
+	</dict>
 	<key>files2</key>
-	<dict/>
+	<dict>
+		<key>Frameworks/libportaudio.2.dylib</key>
+		<dict>
+			<key>cdhash</key>
+			<data>
+			4EyW4B86ocsAu4Udj3t+d5MjzpY=
+			</data>
+			<key>requirement</key>
+			<string>cdhash H"e04c96e01f3aa1cb00bb851d8f7b7e779323ce96"</string>
+		</dict>
+		<key>Resources/icon.icns</key>
+		<dict>
+			<key>hash2</key>
+			<data>
+			BodCuOK5wfGL3eBEL14jBql9MfWAyC/KyuhpWVU2OvE=
+			</data>
+		</dict>
+	</dict>
 	<key>rules</key>
 	<dict>
 		<key>^Resources/</key>
