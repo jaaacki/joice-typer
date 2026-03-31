@@ -563,10 +563,10 @@ void showSettingsWindow(int onboarding) {
         sVocabTextView.textContainer.widthTracksTextView = YES;
         sVocabScrollView.documentView = sVocabTextView;
         [content addSubview:sVocabScrollView];
-        y -= 126;
+        y -= (120 + 8);
 
         // Save button (preferences mode only — right-aligned, below vocabulary)
-        NSButton *saveBtn = [[NSButton alloc] initWithFrame:NSMakeRect(w - pad - 80, y, 80, 28)];
+        NSButton *saveBtn = [[NSButton alloc] initWithFrame:NSMakeRect(w - pad - 80, y - 28, 80, 28)];
         saveBtn.title = @"Save";
         saveBtn.bezelStyle = NSBezelStyleRounded;
         saveBtn.target = sSetupDelegate;
