@@ -15,6 +15,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 	"unsafe"
@@ -28,6 +29,7 @@ var settingsRecorder Recorder
 var prefsOpen int32 // atomic: 1 = preferences window is open
 
 var (
+	prefsMu     sync.Mutex // protects prefsCtx and prefsCancel
 	prefsCtx    context.Context
 	prefsCancel context.CancelFunc
 )
@@ -229,7 +231,9 @@ func modelBtn1Clicked() {
 		settingsLogger.Info("model download started", "operation", "modelBtn1Clicked", "model", selected)
 		C.updateModelButtons(3) // downloading state
 		go func() {
+			prefsMu.Lock()
 			ctx := prefsCtx
+			prefsMu.Unlock()
 			if ctx == nil {
 				ctx = context.Background()
 			}
@@ -425,7 +429,6 @@ func signalHotkeyRestart() {
 }
 
 // OpenPreferences opens the settings window in preferences mode.
-// OpenPreferences opens the settings window in preferences mode.
 // Called from the main thread (statusbar callback). Sets up the UI on the
 // main thread, then moves to a goroutine so [NSApp run] stays responsive.
 func OpenPreferences() {
@@ -437,10 +440,12 @@ func OpenPreferences() {
 	settingsLogger.Info("preferences opened", "operation", "OpenPreferences")
 
 	// Cancel any previous download still running
+	prefsMu.Lock()
 	if prefsCancel != nil {
 		prefsCancel()
 	}
 	prefsCtx, prefsCancel = context.WithCancel(context.Background())
+	prefsMu.Unlock()
 
 	cfgPath, err := DefaultConfigPath()
 	if err != nil {
@@ -518,9 +523,11 @@ func openPreferencesWait(cfg Config, cfgPath string) {
 	settingsLogger.Info("window closed", "operation", "openPreferencesWait")
 
 	// Cancel downloads from this preferences session
+	prefsMu.Lock()
 	if prefsCancel != nil {
 		prefsCancel()
 	}
+	prefsMu.Unlock()
 
 	// Stop permission polling goroutine
 	close(prefsDone)
