@@ -25,6 +25,11 @@ import (
 var settingsLogger *slog.Logger
 var settingsRecorder Recorder
 
+var (
+	prefsCtx    context.Context
+	prefsCancel context.CancelFunc
+)
+
 // IsFirstRun returns true if no config file exists yet.
 func IsFirstRun() bool {
 	path, err := DefaultConfigPath()
@@ -222,7 +227,11 @@ func modelBtn1Clicked() {
 		settingsLogger.Info("model download started", "operation", "modelBtn1Clicked", "model", selected)
 		C.updateModelButtons(3) // downloading state
 		go func() {
-			dlErr := downloadModelWithProgress(context.Background(), modelPath, selected, func(progress float64, downloaded, total int64) {
+			ctx := prefsCtx
+			if ctx == nil {
+				ctx = context.Background()
+			}
+			dlErr := downloadModelWithProgress(ctx, modelPath, selected, func(progress float64, downloaded, total int64) {
 				C.updateDownloadProgress(C.double(progress), C.longlong(downloaded), C.longlong(total))
 			}, settingsLogger)
 			if dlErr != nil {
@@ -420,6 +429,12 @@ func signalHotkeyRestart() {
 func OpenPreferences() {
 	settingsLogger.Info("preferences opened", "operation", "OpenPreferences")
 
+	// Cancel any previous download still running
+	if prefsCancel != nil {
+		prefsCancel()
+	}
+	prefsCtx, prefsCancel = context.WithCancel(context.Background())
+
 	cfgPath, err := DefaultConfigPath()
 	if err != nil {
 		settingsLogger.Error("failed to resolve config path", "operation", "OpenPreferences", "error", err)
@@ -492,6 +507,11 @@ func openPreferencesWait(cfg Config, cfgPath string) {
 	C.runSetupEventLoop()
 
 	settingsLogger.Info("window closed", "operation", "openPreferencesWait")
+
+	// Cancel downloads from this preferences session
+	if prefsCancel != nil {
+		prefsCancel()
+	}
 
 	// Stop permission polling goroutine
 	close(prefsDone)
