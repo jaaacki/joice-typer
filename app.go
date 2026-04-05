@@ -186,9 +186,9 @@ func (a *App) finalStreamTranscribe(audio []float32, lastText string) {
 	a.componentMu.RUnlock()
 
 	// Wait for the streamer's last tick to release both the busy flag
-	// and the transcriber bulkhead (up to 5s each).
+	// and the transcriber bulkhead (up to 3s each).
 	acquired := false
-	for i := 0; i < 50; i++ {
+	for i := 0; i < 30; i++ {
 		if atomic.CompareAndSwapInt32(&a.busy, 0, 1) {
 			acquired = true
 			break
@@ -205,11 +205,11 @@ func (a *App) finalStreamTranscribe(audio []float32, lastText string) {
 
 	// Also wait for the transcriber bulkhead to be free
 	if t, ok := trans.(interface{ IsInflight() bool }); ok {
-		for i := 0; i < 50; i++ {
+		for i := 0; i < 30; i++ {
 			if !t.IsInflight() {
 				break
 			}
-			if i == 49 {
+			if i == 29 {
 				a.logger.Warn("transcriber bulkhead still occupied",
 					"component", "app", "operation", "finalStreamTranscribe")
 				a.emitState(StateReady)
