@@ -19,6 +19,7 @@ type App struct {
 	transcriber    Transcriber
 	paster         Paster
 	typer          Typer
+	componentMu    sync.RWMutex // guards recorder, transcriber, paster, typer
 	sound          *Sound
 	logger         *slog.Logger
 	baseLogger     *slog.Logger
@@ -99,7 +100,13 @@ func (a *App) handlePress() {
 	a.sound.PlayStart()
 	a.emitState(StateRecording)
 
-	if err := a.recorder.Start(context.Background()); err != nil {
+	a.componentMu.RLock()
+	rec := a.recorder
+	trans := a.transcriber
+	tyr := a.typer
+	a.componentMu.RUnlock()
+
+	if err := rec.Start(context.Background()); err != nil {
 		a.logger.Error("failed to start recording",
 			"operation", "handlePress", "error", err)
 		a.sound.PlayError()
@@ -114,7 +121,7 @@ func (a *App) handlePress() {
 	atomic.StoreInt32(&a.recording, 1)
 
 	if a.typeMode == "stream" {
-		a.streamer = NewStreamer(a.transcriber, a.typer, a.recorder, a.baseLogger, a.streamInterval)
+		a.streamer = NewStreamer(trans, tyr, rec, a.baseLogger, a.streamInterval)
 		a.streamer.Start()
 	}
 }
@@ -148,7 +155,11 @@ func (a *App) handleReleaseStream() {
 		a.streamer = nil
 	}
 
-	audio, err := a.recorder.Stop()
+	a.componentMu.RLock()
+	rec := a.recorder
+	a.componentMu.RUnlock()
+
+	audio, err := rec.Stop()
 	if err != nil {
 		a.logger.Error("failed to stop recorder", "component", "app", "operation", "handleReleaseStream", "error", err)
 		a.emitState(StateReady)
@@ -169,6 +180,11 @@ func (a *App) handleReleaseStream() {
 func (a *App) finalStreamTranscribe(audio []float32, lastText string) {
 	defer a.wg.Done()
 
+	a.componentMu.RLock()
+	trans := a.transcriber
+	tyr := a.typer
+	a.componentMu.RUnlock()
+
 	// Wait for the streamer's last tick to release both the busy flag
 	// and the transcriber bulkhead (up to 5s each).
 	acquired := false
@@ -188,7 +204,7 @@ func (a *App) finalStreamTranscribe(audio []float32, lastText string) {
 	defer atomic.StoreInt32(&a.busy, 0)
 
 	// Also wait for the transcriber bulkhead to be free
-	if t, ok := a.transcriber.(interface{ IsInflight() bool }); ok {
+	if t, ok := trans.(interface{ IsInflight() bool }); ok {
 		for i := 0; i < 50; i++ {
 			if !t.IsInflight() {
 				break
@@ -208,7 +224,7 @@ func (a *App) finalStreamTranscribe(audio []float32, lastText string) {
 	transcribeCtx, cancel := context.WithTimeout(context.Background(), clipboardTranscribeTimeout)
 	defer cancel()
 
-	finalText, err := a.transcriber.Transcribe(transcribeCtx, audio)
+	finalText, err := trans.Transcribe(transcribeCtx, audio)
 	if err != nil {
 		var timeoutErr *ErrDependencyTimeout
 		if errors.As(err, &timeoutErr) {
@@ -233,13 +249,13 @@ func (a *App) finalStreamTranscribe(audio []float32, lastText string) {
 		return
 	}
 
-	if a.typer != nil && lastText != "" {
-		if err := a.typer.ReplaceAll(len([]rune(lastText)), finalText); err != nil {
+	if tyr != nil && lastText != "" {
+		if err := tyr.ReplaceAll(len([]rune(lastText)), finalText); err != nil {
 			a.logger.Error("failed to replace with final text",
 				"component", "app", "operation", "finalStreamTranscribe", "error", err)
 		}
-	} else if a.typer != nil {
-		if err := a.typer.Type(finalText); err != nil {
+	} else if tyr != nil {
+		if err := tyr.Type(finalText); err != nil {
 			a.logger.Error("failed to type final text",
 				"component", "app", "operation", "finalStreamTranscribe", "error", err)
 		}
@@ -252,7 +268,11 @@ func (a *App) finalStreamTranscribe(audio []float32, lastText string) {
 }
 
 func (a *App) handleReleaseClipboard() {
-	audio, err := a.recorder.Stop()
+	a.componentMu.RLock()
+	rec := a.recorder
+	a.componentMu.RUnlock()
+
+	audio, err := rec.Stop()
 	atomic.StoreInt32(&a.recording, 0)
 	if err != nil {
 		a.logger.Error("failed to stop recording",
@@ -279,6 +299,11 @@ func (a *App) handleReleaseClipboard() {
 func (a *App) transcribeAndPaste(audio []float32) {
 	defer a.wg.Done()
 
+	a.componentMu.RLock()
+	trans := a.transcriber
+	pst := a.paster
+	a.componentMu.RUnlock()
+
 	if !atomic.CompareAndSwapInt32(&a.busy, 0, 1) {
 		a.logger.Warn("transcription already in progress — audio from this session discarded",
 			"component", "app", "operation", "transcribeAndPaste")
@@ -290,7 +315,7 @@ func (a *App) transcribeAndPaste(audio []float32) {
 
 	transcribeCtx, cancel := context.WithTimeout(context.Background(), clipboardTranscribeTimeout)
 	defer cancel()
-	text, err := a.transcriber.Transcribe(transcribeCtx, audio)
+	text, err := trans.Transcribe(transcribeCtx, audio)
 	if err != nil {
 		var timeoutErr *ErrDependencyTimeout
 		if errors.As(err, &timeoutErr) {
@@ -315,7 +340,7 @@ func (a *App) transcribeAndPaste(audio []float32) {
 	}
 
 	// Append trailing space so consecutive dictations don't merge words.
-	if err := a.paster.Paste(text + " "); err != nil {
+	if err := pst.Paste(text + " "); err != nil {
 		a.logger.Error("paste failed",
 			"operation", "transcribeAndPaste", "error", err)
 		a.sound.PlayError()
@@ -334,8 +359,11 @@ func (a *App) IsIdle() bool {
 	if atomic.LoadInt32(&a.recording) != 0 || atomic.LoadInt32(&a.busy) != 0 {
 		return false
 	}
+	a.componentMu.RLock()
+	trans := a.transcriber
+	a.componentMu.RUnlock()
 	// Probe the transcriber bulkhead — if we can acquire and release, it's idle
-	if t, ok := a.transcriber.(interface{ IsInflight() bool }); ok {
+	if t, ok := trans.(interface{ IsInflight() bool }); ok {
 		if t.IsInflight() {
 			return false
 		}
@@ -346,13 +374,17 @@ func (a *App) IsIdle() bool {
 // SetRecorder replaces the recorder used by the app.
 // Must only be called when no recording is in progress.
 func (a *App) SetRecorder(r Recorder) {
+	a.componentMu.Lock()
 	a.recorder = r
+	a.componentMu.Unlock()
 }
 
 // SetTranscriber replaces the transcriber used by the app.
 // Must only be called when no transcription is in progress.
 func (a *App) SetTranscriber(t Transcriber) {
+	a.componentMu.Lock()
 	a.transcriber = t
+	a.componentMu.Unlock()
 }
 
 // Shutdown gracefully closes all components.
@@ -375,14 +407,19 @@ func (a *App) Shutdown() {
 			"component", "app", "operation", "Shutdown")
 	}
 
-	if a.recorder != nil {
-		if err := a.recorder.Close(); err != nil {
+	a.componentMu.RLock()
+	rec := a.recorder
+	trans := a.transcriber
+	a.componentMu.RUnlock()
+
+	if rec != nil {
+		if err := rec.Close(); err != nil {
 			a.logger.Error("failed to close recorder",
 				"component", "app", "operation", "Shutdown", "error", err)
 		}
 	}
-	if a.transcriber != nil {
-		if err := a.transcriber.Close(); err != nil {
+	if trans != nil {
+		if err := trans.Close(); err != nil {
 			a.logger.Error("failed to close transcriber",
 				"component", "app", "operation", "Shutdown", "error", err)
 		}

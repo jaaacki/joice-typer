@@ -609,6 +609,58 @@ func TestApp_IsIdle_FalseWhileBusy(t *testing.T) {
 	app.Shutdown()
 }
 
+func TestApp_SetRecorder_WhileIdle(t *testing.T) {
+	rec1 := &mockRecorder{audio: []float32{0.1}}
+	rec2 := &mockRecorder{audio: []float32{0.9}}
+	trans := &mockTranscriber{text: "from rec2"}
+	paste := &mockPaster{}
+	logger := slog.Default()
+	snd := NewSound(false, logger)
+
+	app := NewApp(rec1, trans, paste, nil, snd, "clipboard", logger)
+
+	events := make(chan HotkeyEvent, 10)
+	done := make(chan struct{})
+	go func() {
+		app.Run(events)
+		close(done)
+	}()
+
+	// Swap recorder while idle
+	app.SetRecorder(rec2)
+
+	// Press+release should use rec2
+	events <- TriggerPressed
+	time.Sleep(50 * time.Millisecond)
+	events <- TriggerReleased
+	time.Sleep(200 * time.Millisecond)
+
+	close(events)
+	<-done
+
+	rec1.mu.Lock()
+	r1Started := rec1.startCalled
+	rec1.mu.Unlock()
+
+	rec2.mu.Lock()
+	r2Started := rec2.startCalled
+	rec2.mu.Unlock()
+
+	if r1Started {
+		t.Error("rec1.Start should NOT have been called after SetRecorder(rec2)")
+	}
+	if !r2Started {
+		t.Error("rec2.Start should have been called after SetRecorder(rec2)")
+	}
+
+	paste.mu.Lock()
+	got := paste.pastedText
+	paste.mu.Unlock()
+	if got != "from rec2 " {
+		t.Errorf("expected 'from rec2 ', got %q", got)
+	}
+}
+
 func TestApp_RecorderStartFails_ContinuesListening(t *testing.T) {
 	var callCount int
 	var countMu sync.Mutex
