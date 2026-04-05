@@ -66,7 +66,11 @@ func isAppMode() bool {
 	if err != nil {
 		return false
 	}
-	return strings.Contains(exe, ".app/Contents/MacOS")
+	resolved, err := filepath.EvalSymlinks(exe)
+	if err != nil {
+		resolved = exe
+	}
+	return strings.Contains(resolved, ".app/Contents/MacOS")
 }
 
 // suppressStderr redirects fd 2 to a log file. Runs before the logger

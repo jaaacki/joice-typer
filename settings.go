@@ -15,6 +15,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"time"
 	"unsafe"
 
@@ -24,6 +25,7 @@ import (
 
 var settingsLogger *slog.Logger
 var settingsRecorder Recorder
+var prefsOpen int32 // atomic: 1 = preferences window is open
 
 var (
 	prefsCtx    context.Context
@@ -427,6 +429,11 @@ func signalHotkeyRestart() {
 // Called from the main thread (statusbar callback). Sets up the UI on the
 // main thread, then moves to a goroutine so [NSApp run] stays responsive.
 func OpenPreferences() {
+	if !atomic.CompareAndSwapInt32(&prefsOpen, 0, 1) {
+		settingsLogger.Warn("preferences already open, ignoring",
+			"operation", "OpenPreferences")
+		return
+	}
 	settingsLogger.Info("preferences opened", "operation", "OpenPreferences")
 
 	// Cancel any previous download still running
@@ -482,6 +489,8 @@ func OpenPreferences() {
 // openPreferencesWait blocks until the preferences window closes, then
 // saves config and signals a hotkey restart. Runs on a background goroutine.
 func openPreferencesWait(cfg Config, cfgPath string) {
+	defer atomic.StoreInt32(&prefsOpen, 0)
+
 	// Poll permissions in background so UI updates if user grants them
 	prefsDone := make(chan struct{})
 	go func() {

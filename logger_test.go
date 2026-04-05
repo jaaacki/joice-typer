@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"strings"
@@ -59,7 +60,8 @@ func TestTruncateIfNeeded_TruncatesLargeFile(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "test.log")
 
-	// Create a file larger than 1KB (using small limit for testing)
+	// Create a file larger than 1KB but smaller than keepBytes (1MB).
+	// Since file < keepBytes, Seek fails and it falls back to full truncate.
 	data := make([]byte, 2048)
 	if err := os.WriteFile(path, data, 0644); err != nil {
 		t.Fatalf("write test file: %v", err)
@@ -75,6 +77,52 @@ func TestTruncateIfNeeded_TruncatesLargeFile(t *testing.T) {
 	}
 	if info.Size() != 0 {
 		t.Errorf("expected truncated file to be 0 bytes, got %d", info.Size())
+	}
+}
+
+func TestTruncateIfNeeded_KeepsTail(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "test.log")
+
+	// Build a file larger than keepBytes (1MB) so tail rotation kicks in.
+	// First: 1.5MB of "old" lines, then a known "new" tail section.
+	const keepBytes = 1024 * 1024 // must match the const in logger.go
+	oldLines := bytes.Repeat([]byte("old log line\n"), (keepBytes+500000)/13)
+	newLines := bytes.Repeat([]byte("new log line\n"), keepBytes/13)
+	data := append(oldLines, newLines...)
+
+	if err := os.WriteFile(path, data, 0644); err != nil {
+		t.Fatalf("write test file: %v", err)
+	}
+
+	// maxBytes smaller than file size to trigger rotation
+	if err := truncateIfNeeded(path, int64(len(data)-1)); err != nil {
+		t.Fatalf("truncateIfNeeded: %v", err)
+	}
+
+	result, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read result: %v", err)
+	}
+
+	// Result should be smaller than original
+	if int64(len(result)) >= int64(len(data)) {
+		t.Errorf("expected rotated file to be smaller than original (%d), got %d", len(data), len(result))
+	}
+
+	// Result should be roughly keepBytes (minus partial first line)
+	if int64(len(result)) < keepBytes-100 {
+		t.Errorf("expected rotated file to be ~%d bytes, got %d", keepBytes, len(result))
+	}
+
+	// Result should contain "new log line" entries
+	if !bytes.Contains(result, []byte("new log line")) {
+		t.Error("rotated file missing expected tail content")
+	}
+
+	// Result should start at a line boundary (no partial first line)
+	if len(result) > 0 && result[0] == '\n' {
+		t.Error("rotated file starts with newline, should start at line boundary")
 	}
 }
 

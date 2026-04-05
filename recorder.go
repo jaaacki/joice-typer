@@ -71,6 +71,11 @@ func (r *portaudioRecorder) RefreshDevices() error {
 	}
 
 	r.mu.Lock()
+	// Re-check: a new recording may have started while we waited
+	if r.recording {
+		r.mu.Unlock()
+		return fmt.Errorf("recorder.RefreshDevices: recording started during wait")
+	}
 	if r.warmStream != nil {
 		if err := r.warmStream.Close(); err != nil {
 			r.logger.Warn("failed to close warm stream during refresh",

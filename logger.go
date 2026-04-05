@@ -1,7 +1,9 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -49,10 +51,32 @@ func truncateIfNeeded(path string, maxBytes int64) error {
 	if err != nil {
 		return fmt.Errorf("logger.truncateIfNeeded: stat: %w", err)
 	}
-	if info.Size() > maxBytes {
-		if err := os.Truncate(path, 0); err != nil {
-			return fmt.Errorf("logger.truncateIfNeeded: truncate: %w", err)
-		}
+	if info.Size() <= maxBytes {
+		return nil
 	}
-	return nil
+
+	// Keep the last 1MB of log data instead of destroying everything
+	const keepBytes int64 = 1 * 1024 * 1024
+
+	f, err := os.Open(path)
+	if err != nil {
+		return fmt.Errorf("logger.truncateIfNeeded: open: %w", err)
+	}
+	if _, err := f.Seek(-keepBytes, 2); err != nil {
+		f.Close()
+		// File smaller than keepBytes — shouldn't happen given size > maxBytes, but just truncate
+		return os.Truncate(path, 0)
+	}
+	tail, err := io.ReadAll(f)
+	f.Close()
+	if err != nil {
+		return fmt.Errorf("logger.truncateIfNeeded: read tail: %w", err)
+	}
+
+	// Skip first partial line
+	if idx := bytes.IndexByte(tail, '\n'); idx >= 0 {
+		tail = tail[idx+1:]
+	}
+
+	return os.WriteFile(path, tail, 0644)
 }

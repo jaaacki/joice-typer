@@ -11,6 +11,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -225,12 +226,16 @@ func currentBinaryHash() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	data, err := os.ReadFile(exe)
+	f, err := os.Open(exe)
 	if err != nil {
 		return "", err
 	}
-	h := sha256.Sum256(data)
-	return hex.EncodeToString(h[:]), nil
+	defer f.Close()
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
 // RunMainLoopOnly starts [NSApp run] without creating an event tap.

@@ -728,7 +728,7 @@ void setVocabularyText(const char *text) {
     });
 }
 
-static char sVocabBuffer[4096] = {0};
+static char sVocabBuffer[16384] = {0};
 
 const char *getVocabularyText(void) {
     if (sVocabTextView == nil) {
@@ -750,7 +750,10 @@ const char *getVocabularyText(void) {
         return sVocabBuffer;
     }
     size_t len = strlen(utf8);
-    if (len >= sizeof(sVocabBuffer)) len = sizeof(sVocabBuffer) - 1;
+    if (len >= sizeof(sVocabBuffer)) {
+        len = sizeof(sVocabBuffer) - 1;
+        NSLog(@"JoiceTyper: vocabulary truncated to %zu bytes", sizeof(sVocabBuffer) - 1);
+    }
     memcpy(sVocabBuffer, utf8, len);
     sVocabBuffer[len] = '\0';
     return sVocabBuffer;
