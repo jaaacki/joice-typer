@@ -75,13 +75,20 @@ func hotkeyCallback(eventType C.int) {
 		hotkeyLogger.Info("hotkey event", "operation", "hotkeyCallback", "event", event.String())
 	}
 	if event == TriggerReleased {
-		// Release is critical control traffic — must never be dropped.
-		// Dropping causes stranded recording state with no recovery path.
-		// Blocking send is correct: the channel has capacity 10 and the
-		// consumer processes events in microseconds. If this blocks, the
-		// app is already in a fatal state and blocking the OS callback
-		// is less harmful than silently corrupting recording state.
-		ch <- event
+		// Release is critical — must not be dropped. But blocking the OS
+		// event tap thread causes system-wide input freeze and triggers
+		// kCGEventTapDisabledByTimeout after ~1s.
+		// 200ms timeout: short enough to avoid OS timeout, long enough
+		// for any transient consumer delay.
+		select {
+		case ch <- event:
+			// delivered
+		case <-time.After(200 * time.Millisecond):
+			if hotkeyLogger != nil {
+				hotkeyLogger.Error("release event send timed out, channel blocked",
+					"operation", "hotkeyCallback")
+			}
+		}
 	} else {
 		select {
 		case ch <- event:

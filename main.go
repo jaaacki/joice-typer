@@ -179,7 +179,7 @@ func runAppMode() {
 	InitStatusBar()
 	UpdateStatusBar(StateLoading)
 
-	events := make(chan HotkeyEvent, 10)
+	events := make(chan HotkeyEvent, 32)
 	hotkey := NewHotkeyListener(cfg.TriggerKey, logger)
 
 	activeHotkeyMu.Lock()
@@ -470,7 +470,7 @@ func runTerminalMode(configPath string) {
 
 	// --- Signal handling (before model init so SIGTERM can cancel download) ---
 	startupCtx, startupCancel := context.WithCancel(context.Background())
-	events := make(chan HotkeyEvent, 10)
+	events := make(chan HotkeyEvent, 32)
 	hotkey := NewHotkeyListener(cfg.TriggerKey, logger)
 
 	sigCh := make(chan os.Signal, 1)
