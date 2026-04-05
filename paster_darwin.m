@@ -93,12 +93,14 @@ int pasteText(const char* text) {
         CFRelease(keyUp);
 
         // --- Restore clipboard after paste completes ---
-        // 50ms for the target app to consume the paste event.
+        // 150ms for the target app to consume the paste event.
+        // Electron apps (Slack, VS Code, Discord) process paste asynchronously
+        // and need more time than native apps.
         NSArray *restoreComplex = [savedItems copy];
         NSString *restoreText = [savedText copy];
         ClipboardKind restoreKind = kind;
 
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(50 * NSEC_PER_MSEC)),
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(150 * NSEC_PER_MSEC)),
                        dispatch_get_main_queue(), ^{
             // Only restore if nobody else touched the clipboard
             if ([pb changeCount] != postWriteChangeCount) return;
