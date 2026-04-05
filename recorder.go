@@ -183,13 +183,23 @@ func (r *portaudioRecorder) Start(ctx context.Context) error {
 		return fmt.Errorf("recorder.Start: already recording")
 	}
 
-	// Block new sessions until previous one is fully cleaned up
+	// Block new sessions until previous one is fully cleaned up.
+	// If a previous readLoop leaked (done not nil and not closed), wait up to
+	// 6s for the 5s watchdog in readLoop to close it.
 	if r.done != nil {
+		prevDone := r.done
+		r.mu.Unlock()
 		select {
-		case <-r.done:
+		case <-prevDone:
 			// Previous session exited
-		default:
-			return fmt.Errorf("recorder.Start: previous session still active, cannot start new recording")
+		case <-time.After(6 * time.Second):
+			r.mu.Lock() // re-acquire so defer Unlock is balanced
+			return fmt.Errorf("recorder.Start: previous session leaked, cannot start")
+		}
+		r.mu.Lock()
+		// Re-check after re-acquiring lock
+		if r.recording {
+			return fmt.Errorf("recorder.Start: already recording")
 		}
 	}
 
@@ -213,7 +223,7 @@ func (r *portaudioRecorder) Start(ctx context.Context) error {
 	} else {
 		// Cold path: open stream now (slow — can take 1-2 seconds)
 		coldStart := time.Now()
-		r.buffer = make([]float32, 512)
+		r.buffer = make([]float32, 256)
 		stream, err = r.openStream(r.buffer)
 		if err != nil {
 			r.recording = false
@@ -359,12 +369,9 @@ func (r *portaudioRecorder) Stop() ([]float32, error) {
 		select {
 		case <-done:
 		case <-time.After(500 * time.Millisecond):
-			r.logger.Error("readLoop goroutine leaked after force-abort",
+			r.logger.Error("readLoop goroutine leaked after force-abort, watchdog will clean up",
 				"operation", "Stop")
-			// Allow future sessions despite the leak — nil out done so Start() doesn't reject
-			r.mu.Lock()
-			r.done = nil
-			r.mu.Unlock()
+			// Leave done in place — Start() will wait with timeout for the 5s watchdog
 		}
 	}
 
