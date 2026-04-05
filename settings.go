@@ -450,11 +450,13 @@ func OpenPreferences() {
 	cfgPath, err := DefaultConfigPath()
 	if err != nil {
 		settingsLogger.Error("failed to resolve config path", "operation", "OpenPreferences", "error", err)
+		atomic.StoreInt32(&prefsOpen, 0)
 		return
 	}
 	cfg, err := LoadConfig(cfgPath)
 	if err != nil {
 		settingsLogger.Error("failed to load config", "operation", "OpenPreferences", "error", err)
+		atomic.StoreInt32(&prefsOpen, 0)
 		return
 	}
 
