@@ -78,7 +78,6 @@ func (s *Streamer) tick() {
 	transcribeCtx, cancel := context.WithTimeout(context.Background(), streamTranscribeTimeout)
 	defer cancel()
 	text, err := s.transcriber.Transcribe(transcribeCtx, audio)
-	cancel()
 	if err != nil {
 		var timeoutErr *ErrDependencyTimeout
 		if errors.As(err, &timeoutErr) {
