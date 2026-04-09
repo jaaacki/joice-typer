@@ -25,6 +25,7 @@ type portaudioRecorder struct {
 	logger       *slog.Logger
 	maxSamples   int
 	totalSamples int
+	unhealthy    bool
 }
 
 func NewRecorder(sampleRate int, deviceName string, logger *slog.Logger) Recorder {
@@ -91,10 +92,29 @@ func (r *portaudioRecorder) RefreshDevices() error {
 	if err := portaudio.Initialize(); err != nil {
 		return fmt.Errorf("recorder.RefreshDevices: initialize: %w", err)
 	}
+	r.mu.Lock()
+	r.unhealthy = false
+	r.mu.Unlock()
 
 	// Re-warm after refresh so next recording starts instantly
 	r.Warm()
 	return nil
+}
+
+func (r *portaudioRecorder) MarkStale(reason string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	r.unhealthy = true
+	if r.warmStream != nil {
+		if err := r.warmStream.Close(); err != nil {
+			r.logger.Warn("failed to close warm stream while marking stale",
+				"operation", "MarkStale", "reason", reason, "error", err)
+		}
+		r.warmStream = nil
+	}
+	r.logger.Info("recorder marked stale",
+		"operation", "MarkStale", "reason", reason)
 }
 
 // ListInputDevices prints available input devices to stdout.
@@ -161,6 +181,11 @@ func (r *portaudioRecorder) Warm() {
 	if r.warmStream != nil {
 		return // already warmed
 	}
+	if r.unhealthy {
+		r.logger.Warn("skipping warm while recorder backend is unhealthy",
+			"operation", "Warm")
+		return
+	}
 
 	buf := make([]float32, 256)
 	stream, err := r.openStream(buf)
@@ -207,6 +232,21 @@ func (r *portaudioRecorder) Start(ctx context.Context) error {
 			return fmt.Errorf("recorder.Start: already recording")
 		}
 	}
+	if r.unhealthy {
+		r.mu.Unlock()
+		refreshErr := r.RefreshDevices()
+		r.mu.Lock()
+		if refreshErr != nil {
+			return &ErrDependencyUnavailable{
+				Component: "recorder",
+				Operation: "Start",
+				Wrapped:   fmt.Errorf("refresh unhealthy backend: %w", refreshErr),
+			}
+		}
+		if r.recording {
+			return fmt.Errorf("recorder.Start: already recording")
+		}
+	}
 
 	r.logger.Debug("starting", "operation", "Start",
 		"sample_rate", r.sampleRate, "device", r.deviceName)
@@ -232,6 +272,7 @@ func (r *portaudioRecorder) Start(ctx context.Context) error {
 		stream, err = r.openStream(r.buffer)
 		if err != nil {
 			r.recording = false
+			r.unhealthy = true
 			return &ErrDependencyUnavailable{Component: "recorder", Operation: "Start", Wrapped: fmt.Errorf("open stream: %w", err)}
 		}
 		r.logger.Debug("cold stream opened", "operation", "Start",
@@ -241,6 +282,7 @@ func (r *portaudioRecorder) Start(ctx context.Context) error {
 	streamStartTime := time.Now()
 	if err := stream.Start(); err != nil {
 		r.recording = false
+		r.unhealthy = true
 		if closeErr := stream.Close(); closeErr != nil {
 			r.logger.Error("failed to close stream after start error",
 				"operation", "Start", "error", closeErr)
@@ -252,6 +294,7 @@ func (r *portaudioRecorder) Start(ctx context.Context) error {
 
 	r.stream = stream
 	r.activeStream = stream
+	r.unhealthy = false
 
 	done := make(chan struct{})
 	r.done = done
@@ -292,6 +335,11 @@ func (r *portaudioRecorder) readLoop(stream *portaudio.Stream, buffer []float32,
 		case <-time.After(5 * time.Second):
 			r.logger.Error("stream.Read() hung for 5s, aborting recording",
 				"operation", "readLoop")
+			r.mu.Lock()
+			if r.sessionID == sessionID {
+				r.unhealthy = true
+			}
+			r.mu.Unlock()
 			stream.Abort()
 			return
 		}
@@ -384,8 +432,25 @@ func (r *portaudioRecorder) Stop() ([]float32, error) {
 	for _, chunk := range chunks {
 		total += len(chunk)
 	}
+	r.mu.Lock()
+	unhealthy := r.unhealthy
+	r.mu.Unlock()
 	if total == 0 {
 		r.logger.Warn("no audio captured", "operation", "Stop")
+		if unhealthy {
+			if refreshErr := r.RefreshDevices(); refreshErr != nil {
+				return nil, &ErrDependencyUnavailable{
+					Component: "recorder",
+					Operation: "Stop",
+					Wrapped:   fmt.Errorf("recover unhealthy backend: %w", refreshErr),
+				}
+			}
+			return nil, &ErrDependencyUnavailable{
+				Component: "recorder",
+				Operation: "Stop",
+				Wrapped:   fmt.Errorf("recording backend became unhealthy"),
+			}
+		}
 		return []float32{}, nil
 	}
 

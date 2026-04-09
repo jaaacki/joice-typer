@@ -13,19 +13,40 @@ import (
 // --- Mock implementations ---
 
 type mockRecorder struct {
-	mu          sync.Mutex
-	startCalled bool
-	stopCalled  bool
-	closeCalled bool
-	audio       []float32
-	startErr    error
-	stopErr     error
-	startFn     func(ctx context.Context) error
-	stopFn      func() ([]float32, error)
+	mu              sync.Mutex
+	startCalled     bool
+	stopCalled      bool
+	closeCalled     bool
+	refreshCalled   bool
+	markStaleCalled bool
+	audio           []float32
+	startErr        error
+	stopErr         error
+	refreshErr      error
+	startFn         func(ctx context.Context) error
+	stopFn          func() ([]float32, error)
+	refreshFn       func() error
+	markStaleFn     func(reason string)
 }
 
-func (m *mockRecorder) Warm()                  {}
-func (m *mockRecorder) RefreshDevices() error { return nil }
+func (m *mockRecorder) Warm() {}
+func (m *mockRecorder) RefreshDevices() error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.refreshCalled = true
+	if m.refreshFn != nil {
+		return m.refreshFn()
+	}
+	return m.refreshErr
+}
+func (m *mockRecorder) MarkStale(reason string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.markStaleCalled = true
+	if m.markStaleFn != nil {
+		m.markStaleFn(reason)
+	}
+}
 func (m *mockRecorder) Start(ctx context.Context) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -711,5 +732,204 @@ func TestApp_RecorderStartFails_ContinuesListening(t *testing.T) {
 	paste.mu.Unlock()
 	if got != "hello " {
 		t.Errorf("expected 'hello ' after retry, got %q", got)
+	}
+}
+
+func TestApp_RecorderStartFailure_AutoRefreshAndRetry(t *testing.T) {
+	var startCalls int
+
+	rec := &mockRecorder{
+		audio: []float32{0.1, 0.2, 0.3},
+		startFn: func(ctx context.Context) error {
+			startCalls++
+			if startCalls == 1 {
+				return &ErrDependencyUnavailable{
+					Component: "recorder",
+					Operation: "Start",
+					Wrapped:   fmt.Errorf("Internal PortAudio error"),
+				}
+			}
+			return nil
+		},
+	}
+	trans := &mockTranscriber{text: "recovered"}
+	paste := &mockPaster{}
+	logger := slog.Default()
+	snd := NewSound(false, logger)
+	app := NewApp(rec, trans, paste, nil, snd, "clipboard", logger)
+
+	events := make(chan HotkeyEvent, 10)
+	go app.Run(events)
+
+	events <- TriggerPressed
+	time.Sleep(50 * time.Millisecond)
+	events <- TriggerReleased
+	time.Sleep(300 * time.Millisecond)
+
+	close(events)
+	app.Shutdown()
+
+	rec.mu.Lock()
+	refreshCalled := rec.refreshCalled
+	rec.mu.Unlock()
+
+	if !refreshCalled {
+		t.Fatal("expected recorder refresh after dependency-unavailable start failure")
+	}
+	if startCalls != 2 {
+		t.Fatalf("expected 2 recorder start attempts, got %d", startCalls)
+	}
+
+	paste.mu.Lock()
+	got := paste.pastedText
+	paste.mu.Unlock()
+	if got != "recovered " {
+		t.Fatalf("expected recovered transcription after retry, got %q", got)
+	}
+}
+
+func TestApp_RecorderStartFailure_RefreshFails_RemainsUsable(t *testing.T) {
+	var startCalls int
+	var refreshCalls int
+
+	rec := &mockRecorder{
+		audio: []float32{0.1, 0.2, 0.3},
+		startFn: func(ctx context.Context) error {
+			startCalls++
+			if startCalls == 1 {
+				return &ErrDependencyUnavailable{
+					Component: "recorder",
+					Operation: "Start",
+					Wrapped:   fmt.Errorf("Internal PortAudio error"),
+				}
+			}
+			return nil
+		},
+		refreshFn: func() error {
+			refreshCalls++
+			return fmt.Errorf("refresh failed")
+		},
+	}
+	trans := &mockTranscriber{text: "later success"}
+	paste := &mockPaster{}
+	logger := slog.Default()
+	snd := NewSound(false, logger)
+	app := NewApp(rec, trans, paste, nil, snd, "clipboard", logger)
+
+	events := make(chan HotkeyEvent, 10)
+	go app.Run(events)
+
+	events <- TriggerPressed
+	time.Sleep(50 * time.Millisecond)
+	events <- TriggerReleased
+	time.Sleep(150 * time.Millisecond)
+
+	events <- TriggerPressed
+	time.Sleep(50 * time.Millisecond)
+	events <- TriggerReleased
+	time.Sleep(300 * time.Millisecond)
+
+	close(events)
+	app.Shutdown()
+
+	if refreshCalls != 1 {
+		t.Fatalf("expected 1 refresh attempt, got %d", refreshCalls)
+	}
+	if startCalls != 2 {
+		t.Fatalf("expected 2 total start attempts across both presses, got %d", startCalls)
+	}
+
+	paste.mu.Lock()
+	got := paste.pastedText
+	paste.mu.Unlock()
+	if got != "later success " {
+		t.Fatalf("expected later press to still succeed, got %q", got)
+	}
+}
+
+func TestApp_RecorderStartFailure_RefreshFails_EmitsDependencyStuck(t *testing.T) {
+	rec := &mockRecorder{
+		startFn: func(ctx context.Context) error {
+			return &ErrDependencyUnavailable{
+				Component: "recorder",
+				Operation: "Start",
+				Wrapped:   fmt.Errorf("Internal PortAudio error"),
+			}
+		},
+		refreshFn: func() error {
+			return fmt.Errorf("refresh failed")
+		},
+	}
+	logger := slog.Default()
+	snd := NewSound(false, logger)
+	app := NewApp(rec, &mockTranscriber{text: "unused"}, &mockPaster{}, nil, snd, "clipboard", logger)
+
+	var states []AppState
+	var statesMu sync.Mutex
+	app.SetStateCallback(func(s AppState) {
+		statesMu.Lock()
+		states = append(states, s)
+		statesMu.Unlock()
+	})
+
+	events := make(chan HotkeyEvent, 10)
+	go app.Run(events)
+
+	events <- TriggerPressed
+	time.Sleep(100 * time.Millisecond)
+
+	close(events)
+	app.Shutdown()
+
+	statesMu.Lock()
+	defer statesMu.Unlock()
+	if len(states) == 0 {
+		t.Fatal("expected at least one state emission")
+	}
+	if states[len(states)-1] != StateDependencyStuck {
+		t.Fatalf("expected final state %v, got %v", StateDependencyStuck, states[len(states)-1])
+	}
+}
+
+func TestApp_RecorderStartFailure_DoesNotEmitRecordingState(t *testing.T) {
+	rec := &mockRecorder{
+		startFn: func(ctx context.Context) error {
+			return &ErrDependencyUnavailable{
+				Component: "recorder",
+				Operation: "Start",
+				Wrapped:   fmt.Errorf("Internal PortAudio error"),
+			}
+		},
+		refreshFn: func() error {
+			return fmt.Errorf("refresh failed")
+		},
+	}
+	logger := slog.Default()
+	snd := NewSound(false, logger)
+	app := NewApp(rec, &mockTranscriber{text: "unused"}, &mockPaster{}, nil, snd, "clipboard", logger)
+
+	var states []AppState
+	var statesMu sync.Mutex
+	app.SetStateCallback(func(s AppState) {
+		statesMu.Lock()
+		states = append(states, s)
+		statesMu.Unlock()
+	})
+
+	events := make(chan HotkeyEvent, 10)
+	go app.Run(events)
+
+	events <- TriggerPressed
+	time.Sleep(100 * time.Millisecond)
+
+	close(events)
+	app.Shutdown()
+
+	statesMu.Lock()
+	defer statesMu.Unlock()
+	for _, state := range states {
+		if state == StateRecording {
+			t.Fatalf("did not expect recording state on failed start, got %v", states)
+		}
 	}
 }

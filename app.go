@@ -97,8 +97,6 @@ func (a *App) handlePress() {
 		return
 	}
 	a.logger.Debug("trigger pressed", "operation", "handlePress")
-	a.sound.PlayStart()
-	a.emitState(StateRecording)
 
 	a.componentMu.RLock()
 	rec := a.recorder
@@ -106,11 +104,18 @@ func (a *App) handlePress() {
 	tyr := a.typer
 	a.componentMu.RUnlock()
 
-	if err := rec.Start(context.Background()); err != nil {
+	startErr := rec.Start(context.Background())
+	var depErr *ErrDependencyUnavailable
+	if errors.As(startErr, &depErr) {
+		if recovered, retryErr := a.tryRecoverRecorderAndRetry(rec); recovered {
+			startErr = retryErr
+		}
+	}
+	if startErr != nil {
 		a.logger.Error("failed to start recording",
-			"operation", "handlePress", "error", err)
+			"operation", "handlePress", "error", startErr)
 		a.sound.PlayError()
-		a.emitState(StateReady)
+		a.emitState(a.failureState(startErr))
 		return
 	}
 
@@ -118,11 +123,48 @@ func (a *App) handlePress() {
 		"operation", "handlePress",
 		"press_to_record_ms", time.Since(pressTime).Milliseconds())
 
+	a.sound.PlayStart()
+	a.emitState(StateRecording)
 	atomic.StoreInt32(&a.recording, 1)
 
 	if a.typeMode == "stream" {
 		a.streamer = NewStreamer(trans, tyr, rec, a.baseLogger, a.streamInterval)
 		a.streamer.Start()
+	}
+}
+
+func (a *App) tryRecoverRecorderAndRetry(rec Recorder) (bool, error) {
+	refreshErr := rec.RefreshDevices()
+	if refreshErr != nil {
+		a.logger.Error("failed to refresh recorder after start failure",
+			"component", "app", "operation", "tryRecoverRecorderAndRetry", "error", refreshErr)
+		return true, &ErrDependencyUnavailable{
+			Component: "app",
+			Operation: "tryRecoverRecorderAndRetry",
+			Wrapped:   refreshErr,
+		}
+	}
+
+	retryErr := rec.Start(context.Background())
+	if retryErr != nil {
+		a.logger.Error("recorder start retry failed after refresh",
+			"component", "app", "operation", "tryRecoverRecorderAndRetry", "error", retryErr)
+		return true, retryErr
+	}
+
+	a.logger.Info("recorder recovered after refresh",
+		"component", "app", "operation", "tryRecoverRecorderAndRetry")
+	return true, nil
+}
+
+func (a *App) failureState(err error) AppState {
+	var depUnavailable *ErrDependencyUnavailable
+	var depTimeout *ErrDependencyTimeout
+	switch {
+	case errors.As(err, &depUnavailable), errors.As(err, &depTimeout):
+		return StateDependencyStuck
+	default:
+		return StateReady
 	}
 }
 
@@ -162,7 +204,7 @@ func (a *App) handleReleaseStream() {
 	audio, err := rec.Stop()
 	if err != nil {
 		a.logger.Error("failed to stop recorder", "component", "app", "operation", "handleReleaseStream", "error", err)
-		a.emitState(StateReady)
+		a.emitState(a.failureState(err))
 		return
 	}
 
@@ -278,7 +320,7 @@ func (a *App) handleReleaseClipboard() {
 		a.logger.Error("failed to stop recording",
 			"operation", "handleReleaseClipboard", "error", err)
 		a.sound.PlayError()
-		a.emitState(StateReady)
+		a.emitState(a.failureState(err))
 		return
 	}
 

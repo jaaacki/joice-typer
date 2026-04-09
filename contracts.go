@@ -38,11 +38,12 @@ type HotkeyListener interface {
 // Recorder captures audio from the default input device.
 // Start begins capture. Stop ends capture and returns the audio buffer.
 type Recorder interface {
-	Warm()               // pre-open audio stream for instant Start
+	Warm() // pre-open audio stream for instant Start
 	Start(ctx context.Context) error
 	Stop() ([]float32, error)
-	Snapshot() []float32 // copy of audio captured so far, without stopping
-	RefreshDevices() error // safely re-init PortAudio to pick up new devices
+	Snapshot() []float32     // copy of audio captured so far, without stopping
+	RefreshDevices() error   // safely re-init PortAudio to pick up new devices
+	MarkStale(reason string) // invalidate warmed/backend state until refreshed
 	Close() error
 }
 

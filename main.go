@@ -181,6 +181,7 @@ func runAppMode() {
 	// This is safe — the Accessibility dialog it may trigger is a
 	// system-level (WindowServer) dialog, not an AppKit dialog.
 	InitStatusBar()
+	InitPowerObserver()
 	UpdateStatusBar(StateLoading)
 
 	events := make(chan HotkeyEvent, 32)
@@ -257,6 +258,7 @@ func runAppMode() {
 		app.SetStateCallback(func(state AppState) {
 			UpdateStatusBar(state)
 		})
+		SetPowerEventHandler(makePowerEventHandler(app, func() Recorder { return recorder }, logger))
 
 		wg.Add(1)
 		go func() {
@@ -411,6 +413,7 @@ initFinished:
 	hotkeyMu.Lock()
 	hotkeyEvents = nil
 	hotkeyMu.Unlock()
+	SetPowerEventHandler(nil)
 	close(events)
 	wg.Wait()
 
