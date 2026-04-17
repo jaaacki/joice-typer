@@ -16,7 +16,7 @@ type unsupportedRecorder struct {
 }
 
 func unsupportedAudioError() error {
-	return fmt.Errorf("audio recording is not implemented for %s/%s", runtime.GOOS, runtime.GOARCH)
+	return fmt.Errorf("JoiceTyper bootstrap build for %s/%s does not provide audio recording", runtime.GOOS, runtime.GOARCH)
 }
 
 func NewRecorder(sampleRate int, deviceName string, logger *slog.Logger) apppkg.Recorder {

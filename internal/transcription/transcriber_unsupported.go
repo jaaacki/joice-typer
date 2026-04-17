@@ -16,7 +16,7 @@ type unsupportedTranscriber struct{}
 type DownloadProgressFunc func(progress float64, bytesDownloaded, bytesTotal int64)
 
 func unsupportedTranscriptionError() error {
-	return fmt.Errorf("transcription is not implemented for %s/%s", runtime.GOOS, runtime.GOARCH)
+	return fmt.Errorf("JoiceTyper bootstrap build for %s/%s does not provide transcription", runtime.GOOS, runtime.GOARCH)
 }
 
 func NewTranscriber(ctx context.Context, modelPath string, modelSize string, language string, sampleRate int, decodeMode string, punctuationMode string, logger *slog.Logger) (apppkg.Transcriber, error) {

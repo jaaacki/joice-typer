@@ -5,9 +5,9 @@ import (
 	"fmt"
 )
 
-// ============================================================================
-// CONTRACTS — These interfaces are ABSOLUTE. Implementations must match exactly.
-// ============================================================================
+// These interfaces define the cross-package behavior expected by the runtime.
+// Platform implementations may differ internally, but must satisfy these
+// behavioral contracts.
 
 // --- Hotkey Events ---
 
@@ -27,8 +27,8 @@ const (
 // Start blocks (runs macOS CFRunLoop). Stop unblocks it.
 type HotkeyListener interface {
 	// WaitForPermissions polls until Accessibility and Input Monitoring are
-	// both granted, prompting the user via macOS dialogs. Calls onUpdate on
-	// each poll so the caller can update UI. Returns error on context cancellation.
+	// both granted. Calls onUpdate on each poll so the caller can update UI.
+	// Returns error on context cancellation.
 	WaitForPermissions(ctx context.Context, onUpdate func(accessibility, inputMonitoring bool)) error
 	RunMainLoopOnly()
 	Start(events chan<- HotkeyEvent) error

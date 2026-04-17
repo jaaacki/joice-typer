@@ -16,8 +16,6 @@ import (
 	"log/slog"
 	"os"
 	"strings"
-	"sync"
-	"sync/atomic"
 	"time"
 	"unsafe"
 
@@ -25,16 +23,6 @@ import (
 	transcriptionpkg "voicetype/internal/transcription"
 
 	"github.com/gordonklaus/portaudio"
-)
-
-var settingsLogger *slog.Logger
-var settingsRecorder Recorder
-var prefsOpen int32 // atomic: 1 = preferences window is open
-
-var (
-	prefsMu     sync.Mutex // protects prefsCtx and prefsCancel
-	prefsCtx    context.Context
-	prefsCancel context.CancelFunc
 )
 
 var postNotification = PostNotification
@@ -54,7 +42,7 @@ func IsFirstRun() bool {
 // Must be called from the main thread.
 func RunSetupWizard(ctx context.Context, logger *slog.Logger) (string, error) {
 	l := logger.With("component", "setup")
-	settingsLogger = logger.With("component", "settings")
+	SetSettingsLogger(logger.With("component", "settings"))
 	l.Info("starting setup wizard", "operation", "RunSetupWizard")
 
 	C.showSettingsWindow(1)
@@ -221,11 +209,11 @@ func modelBtn1Clicked() {
 			return
 		}
 		if removeErr := os.Remove(modelPath); removeErr != nil {
-			settingsLogger.Error("failed to delete model", "operation", "modelBtn1Clicked", "error", removeErr)
+			currentSettingsLogger().Error("failed to delete model", "operation", "modelBtn1Clicked", "error", removeErr)
 			return
 		}
 		os.Remove(modelPath + ".sha256")
-		settingsLogger.Info("model deleted", "operation", "modelBtn1Clicked", "model", selected)
+		currentSettingsLogger().Info("model deleted", "operation", "modelBtn1Clicked", "model", selected)
 		populateModelList("")
 		return
 	}
@@ -237,24 +225,22 @@ func modelBtn1Clicked() {
 
 	if _, statErr := os.Stat(modelPath); os.IsNotExist(statErr) {
 		// Not downloaded — start download
-		settingsLogger.Info("model download started", "operation", "modelBtn1Clicked", "model", selected)
+		currentSettingsLogger().Info("model download started", "operation", "modelBtn1Clicked", "model", selected)
 		C.updateModelButtons(3) // downloading state
 		go func() {
-			prefsMu.Lock()
-			ctx := prefsCtx
-			prefsMu.Unlock()
+			ctx := currentPreferencesContext()
 			if ctx == nil {
 				ctx = context.Background()
 			}
 			dlErr := transcriptionpkg.DownloadModelWithProgress(ctx, modelPath, selected, func(progress float64, downloaded, total int64) {
 				C.updateDownloadProgress(C.double(progress), C.longlong(downloaded), C.longlong(total))
-			}, settingsLogger)
+			}, currentSettingsLogger())
 			if dlErr != nil {
-				settingsLogger.Error("model download failed", "operation", "modelBtn1Clicked", "error", dlErr)
+				currentSettingsLogger().Error("model download failed", "operation", "modelBtn1Clicked", "error", dlErr)
 				C.updateModelButtons(4) // download failed
 				return
 			}
-			settingsLogger.Info("model downloaded", "operation", "modelBtn1Clicked", "model", selected)
+			currentSettingsLogger().Info("model downloaded", "operation", "modelBtn1Clicked", "model", selected)
 			C.updateSetupDownloadComplete()
 			populateModelList("")
 		}()
@@ -263,7 +249,7 @@ func modelBtn1Clicked() {
 		return
 	} else {
 		// Downloaded, not active — "Use" clicked
-		settingsLogger.Info("model use clicked", "operation", "modelBtn1Clicked", "model", selected)
+		currentSettingsLogger().Info("model use clicked", "operation", "modelBtn1Clicked", "model", selected)
 		prefsActiveModel = selected
 		cSize := C.CString(selected)
 		C.setActiveModelSize(cSize)
@@ -476,25 +462,18 @@ func boolToCInt(b bool) C.int {
 	return 0
 }
 
-var hotkeyRestartCh = make(chan struct{}, 1)
-
 // signalHotkeyRestart stops the current hotkey listener and signals the
 // main loop to reload config and restart. Called from OpenPreferences()
 // on the main thread after the modal closes. hotkey.Stop() dispatches
 // [NSApp stop:] which will cause [NSApp run] to exit on the next event
 // loop iteration (after this call returns to Cocoa).
 func signalHotkeyRestart() {
-	settingsLogger.Info("signalling hotkey restart", "operation", "signalHotkeyRestart")
-	select {
-	case hotkeyRestartCh <- struct{}{}:
-	default:
-	}
-	activeHotkeyMu.Lock()
-	h := activeHotkey
-	activeHotkeyMu.Unlock()
+	currentSettingsLogger().Info("signalling hotkey restart", "operation", "signalHotkeyRestart")
+	signalHotkeyRestartCh()
+	h := ActiveHotkey()
 	if h != nil {
 		if err := h.Stop(); err != nil {
-			settingsLogger.Warn("failed to stop hotkey for restart",
+			currentSettingsLogger().Warn("failed to stop hotkey for restart",
 				"operation", "signalHotkeyRestart", "error", err)
 		}
 	}
@@ -504,73 +483,69 @@ func signalHotkeyRestart() {
 // Called from the main thread (statusbar callback). Sets up the UI on the
 // main thread, then moves to a goroutine so [NSApp run] stays responsive.
 func OpenPreferences() {
-	if !atomic.CompareAndSwapInt32(&prefsOpen, 0, 1) {
-		settingsLogger.Warn("preferences already open, ignoring",
+	if !preferencesOpenCompareAndSwap(0, 1) {
+		currentSettingsLogger().Warn("preferences already open, ignoring",
 			"operation", "OpenPreferences")
 		return
 	}
-	settingsLogger.Info("preferences opened", "operation", "OpenPreferences")
+	currentSettingsLogger().Info("preferences opened", "operation", "OpenPreferences")
 
 	// Cancel any previous download still running
-	prefsMu.Lock()
-	if prefsCancel != nil {
-		prefsCancel()
-	}
-	prefsCtx, prefsCancel = context.WithCancel(context.Background())
-	prefsMu.Unlock()
+	prefsCtx, prefsCancel := context.WithCancel(context.Background())
+	setPreferencesContext(prefsCtx, prefsCancel)
 
 	cfgPath, err := config.DefaultConfigPath()
 	if err != nil {
-		settingsLogger.Error("failed to resolve config path", "operation", "OpenPreferences", "error", err)
-		atomic.StoreInt32(&prefsOpen, 0)
+		currentSettingsLogger().Error("failed to resolve config path", "operation", "OpenPreferences", "error", err)
+		preferencesOpenStore(0)
 		return
 	}
 	cfg, err := config.LoadConfig(cfgPath)
 	if err != nil {
-		settingsLogger.Error("failed to load config", "operation", "OpenPreferences", "error", err)
-		atomic.StoreInt32(&prefsOpen, 0)
+		currentSettingsLogger().Error("failed to load config", "operation", "OpenPreferences", "error", err)
+		preferencesOpenStore(0)
 		return
 	}
 
-	settingsLogger.Info("showing settings window", "operation", "OpenPreferences")
+	currentSettingsLogger().Info("showing settings window", "operation", "OpenPreferences")
 	C.showSettingsWindow(0)
 
-	settingsLogger.Info("setting permission state", "operation", "OpenPreferences")
+	currentSettingsLogger().Info("setting permission state", "operation", "OpenPreferences")
 	C.setPrefsPermissionState()
 
 	// Refresh audio devices to pick up newly connected mics (e.g. Bluetooth).
-	if settingsRecorder != nil {
-		if refreshErr := settingsRecorder.RefreshDevices(); refreshErr != nil {
-			settingsLogger.Warn("failed to refresh audio devices", "operation", "OpenPreferences", "error", refreshErr)
+	if recorder := currentSettingsRecorder(); recorder != nil {
+		if refreshErr := recorder.RefreshDevices(); refreshErr != nil {
+			currentSettingsLogger().Warn("failed to refresh audio devices", "operation", "OpenPreferences", "error", refreshErr)
 		}
 	}
 
-	settingsLogger.Info("populating UI fields", "operation", "OpenPreferences")
+	currentSettingsLogger().Info("populating UI fields", "operation", "OpenPreferences")
 	populateLanguageList(cfg.Language)
 	populateDecodeModeList(cfg.DecodeMode)
 	populatePunctuationModeList(cfg.PunctuationMode)
 	prefsActiveModel = cfg.ModelSize
 	populateModelList(cfg.ModelSize)
-	populateMicList(cfg.InputDevice, settingsLogger)
+	populateMicList(cfg.InputDevice, currentSettingsLogger())
 
 	display := FormatHotkeyDisplay(cfg.TriggerKey)
 	cDisplay := C.CString(display)
 	C.setSettingsHotkey(cDisplay)
 	C.free(unsafe.Pointer(cDisplay))
 
-	settingsLogger.Info("setting vocabulary", "operation", "OpenPreferences", "length", len(cfg.Vocabulary))
+	currentSettingsLogger().Info("setting vocabulary", "operation", "OpenPreferences", "length", len(cfg.Vocabulary))
 	cVocab := C.CString(cfg.Vocabulary)
 	C.setVocabularyText(cVocab)
 	C.free(unsafe.Pointer(cVocab))
 
-	settingsLogger.Info("UI setup complete, starting wait goroutine", "operation", "OpenPreferences")
+	currentSettingsLogger().Info("UI setup complete, starting wait goroutine", "operation", "OpenPreferences")
 	go openPreferencesWait(cfg, cfgPath)
 }
 
 // openPreferencesWait blocks until the preferences window closes, then
 // saves config and signals a hotkey restart. Runs on a background goroutine.
 func openPreferencesWait(cfg config.Config, cfgPath string) {
-	defer atomic.StoreInt32(&prefsOpen, 0)
+	defer preferencesOpenStore(0)
 
 	// Poll permissions in background so UI updates if user grants them
 	prefsDone := make(chan struct{})
@@ -593,17 +568,13 @@ func openPreferencesWait(cfg config.Config, cfgPath string) {
 	}()
 
 	// Block until user closes the window
-	settingsLogger.Info("waiting for window close", "operation", "openPreferencesWait")
+	currentSettingsLogger().Info("waiting for window close", "operation", "openPreferencesWait")
 	C.runSetupEventLoop()
 
-	settingsLogger.Info("window closed", "operation", "openPreferencesWait")
+	currentSettingsLogger().Info("window closed", "operation", "openPreferencesWait")
 
 	// Cancel downloads from this preferences session
-	prefsMu.Lock()
-	if prefsCancel != nil {
-		prefsCancel()
-	}
-	prefsMu.Unlock()
+	cancelPreferencesContext()
 
 	// Stop permission polling goroutine
 	close(prefsDone)
@@ -616,23 +587,23 @@ func openPreferencesWait(cfg config.Config, cfgPath string) {
 	}
 
 	if C.isSetupComplete() == 0 {
-		settingsLogger.Info("preferences cancelled", "operation", "openPreferencesWait")
+		currentSettingsLogger().Info("preferences cancelled", "operation", "openPreferencesWait")
 		return
 	}
 
 	// Read selections
-	settingsLogger.Info("reading selections", "operation", "openPreferencesWait")
+	currentSettingsLogger().Info("reading selections", "operation", "openPreferencesWait")
 	selectedDevice := C.GoString(C.getSelectedDevice())
 	selectedLang := C.GoString(C.getSelectedLanguage())
 	selectedDecodeMode, err := requireSettingSelection("decode_mode", C.GoString(C.getSelectedDecodeMode()))
 	if err != nil {
-		settingsLogger.Error("invalid decode mode selection", "operation", "openPreferencesWait", "error", err)
+		currentSettingsLogger().Error("invalid decode mode selection", "operation", "openPreferencesWait", "error", err)
 		reportSettingsSaveError(err.Error())
 		return
 	}
 	selectedPunctuationMode, err := requireSettingSelection("punctuation_mode", C.GoString(C.getSelectedPunctuationMode()))
 	if err != nil {
-		settingsLogger.Error("invalid punctuation mode selection", "operation", "openPreferencesWait", "error", err)
+		currentSettingsLogger().Error("invalid punctuation mode selection", "operation", "openPreferencesWait", "error", err)
 		reportSettingsSaveError(err.Error())
 		return
 	}
@@ -658,23 +629,23 @@ func openPreferencesWait(cfg config.Config, cfgPath string) {
 	}
 
 	if err := cfg.Validate(); err != nil {
-		settingsLogger.Error("invalid settings from UI, not saving", "operation", "OpenPreferences", "error", err)
+		currentSettingsLogger().Error("invalid settings from UI, not saving", "operation", "OpenPreferences", "error", err)
 		reportSettingsSaveError(err.Error())
 		return
 	}
 
-	settingsLogger.Info("saving config", "operation", "openPreferencesWait",
+	currentSettingsLogger().Info("saving config", "operation", "openPreferencesWait",
 		"device", cfg.InputDevice, "language", cfg.Language,
 		"model", cfg.ModelSize, "decode_mode", cfg.DecodeMode,
 		"punctuation_mode", cfg.PunctuationMode, "vocabulary_length", len(cfg.Vocabulary))
 
 	if writeErr := config.SaveConfig(cfgPath, cfg); writeErr != nil {
-		settingsLogger.Error("failed to write config", "operation", "openPreferencesWait", "error", writeErr)
+		currentSettingsLogger().Error("failed to write config", "operation", "openPreferencesWait", "error", writeErr)
 		reportSettingsSaveError(writeErr.Error())
 		return
 	}
 
-	settingsLogger.Info("config saved", "operation", "openPreferencesWait")
+	currentSettingsLogger().Info("config saved", "operation", "openPreferencesWait")
 	signalHotkeyRestart()
 }
 

@@ -24,10 +24,10 @@ func runUnsupported(args []string, stdout io.Writer, stderr io.Writer, goos stri
 		return 0
 	}
 	if *listDevices {
-		fmt.Fprintf(stderr, "JoiceTyper audio device listing is not implemented for %s/%s yet\n", goos, goarch)
+		fmt.Fprintf(stderr, "JoiceTyper bootstrap build for %s/%s does not provide audio device listing yet\n", goos, goarch)
 		return 1
 	}
 
-	fmt.Fprintf(stderr, "JoiceTyper desktop runtime is not implemented for %s/%s yet\n", goos, goarch)
+	fmt.Fprintf(stderr, "JoiceTyper bootstrap build for %s/%s does not provide the desktop runtime yet\n", goos, goarch)
 	return 1
 }

@@ -81,24 +81,24 @@ func isAppMode() bool {
 	return strings.Contains(resolved, ".app/Contents/MacOS")
 }
 
-// suppressStderr redirects fd 2 to a log file. Runs before the logger
-// exists, so errors cannot be logged. Failure is acceptable: whisper.cpp
-// noise appears in stderr instead of being captured.
-func suppressStderr(logDir string) {
+// suppressStderr redirects fd 2 to a log file before the logger exists.
+// Any failure is returned so startup can report it after logger init.
+func suppressStderr(logDir string) error {
 	logPath := filepath.Join(logDir, "whisper-stderr.log")
 	f, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 	if err != nil {
-		return // best-effort: runs before logger exists
+		return fmt.Errorf("open stderr log %s: %w", logPath, err)
 	}
 	if err := syscall.Dup2(int(f.Fd()), 2); err != nil {
 		f.Close()
-		return // best-effort: if this fails, whisper.cpp noise appears in stderr
+		return fmt.Errorf("redirect stderr to %s: %w", logPath, err)
 	}
 	// Dup2 succeeded — fd 2 now points to the file. Close the original
 	// descriptor to avoid leaking it for the process lifetime.
 	if closeErr := f.Close(); closeErr != nil {
 		fmt.Fprintf(os.Stderr, "warning: failed to close original stderr fd: %v\n", closeErr)
 	}
+	return nil
 }
 
 // runAppMode is the entry point when running inside a .app bundle.
@@ -109,8 +109,8 @@ func runAppMode() {
 		os.Exit(1)
 	}
 
-	// Suppress whisper.cpp stderr spam
-	suppressStderr(logDir)
+	// Redirect whisper.cpp stderr spam into the app log area before logger init.
+	stderrRedirectErr := suppressStderr(logDir)
 
 	logger, logCleanup, err := loggingpkg.SetupLogger(logDir)
 	if err != nil {
@@ -118,6 +118,10 @@ func runAppMode() {
 		os.Exit(1)
 	}
 	defer logCleanup()
+	if stderrRedirectErr != nil {
+		logger.Warn("failed to redirect stderr",
+			"component", "main", "operation", "runAppMode", "error", stderrRedirectErr)
+	}
 
 	platformpkg.SetSettingsLogger(logger.With("component", "settings"))
 	logger.Info("app starting", "component", "main", "operation", "runAppMode", "version", version.Version)
