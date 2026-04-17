@@ -323,15 +323,12 @@ initFinished:
 		case <-platformpkg.HotkeyRestartCh():
 			logger.Info("restarting hotkey with new config", "component", "main", "operation", "runAppMode")
 			// Reload config and recreate listener
-			oldCfg := cfg
-			cfg, err = config.LoadConfig(cfgPath)
+			newCfg, err := config.LoadConfig(cfgPath)
 			if err != nil {
 				logger.Error("failed to reload config, keeping current hotkey",
 					"component", "main", "operation", "runAppMode", "error", err)
 				continue // retry with existing hotkey
 			}
-			hotkey = platformpkg.NewHotkeyListener(cfg.TriggerKey, logger)
-			platformpkg.SetActiveHotkey(hotkey)
 
 			// Wait for app to become idle before swapping dependencies
 			for i := 0; i < 50; i++ { // 5 seconds max
@@ -347,57 +344,34 @@ initFinished:
 				continue // re-enter hotkey loop with existing config
 			}
 
-			// Recreate recorder if input device changed
-			if oldCfg.InputDevice != cfg.InputDevice {
-				if closeErr := recorder.Close(); closeErr != nil {
-					logger.Error("failed to close old recorder", "component", "main", "operation", "runAppMode", "error", closeErr)
-				}
-				recorder = audiopkg.NewRecorder(cfg.SampleRate, cfg.InputDevice, logger)
-				platformpkg.SetSettingsRecorder(recorder)
-				app.SetRecorder(recorder)
-				logger.Info("recorder updated", "component", "main", "operation", "runAppMode", "device", cfg.InputDevice)
+			runtimeState := &runtimeConfigState{
+				cfg:         cfg,
+				hotkey:      hotkey,
+				recorder:    recorder,
+				transcriber: transcriber,
+			}
+			if err := applyReloadedConfig(runtimeState, app, newCfg, logger, runtimeReloadDeps{
+				newHotkey:           platformpkg.NewHotkeyListener,
+				newRecorder:         audiopkg.NewRecorder,
+				defaultModelPath:    config.DefaultModelPath,
+				newTranscriber:      transcriptionpkg.NewTranscriber,
+				setActiveHotkey:     platformpkg.SetActiveHotkey,
+				setSettingsRecorder: platformpkg.SetSettingsRecorder,
+				updateStatusBar:     platformpkg.UpdateStatusBar,
+				postNotification:    platformpkg.PostNotification,
+				formatHotkeyDisplay: platformpkg.FormatHotkeyDisplay,
+				setStatusBarText:    platformpkg.SetStatusBarHotkeyText,
+			}); err != nil {
+				logger.Error("failed to apply reloaded config, keeping current runtime",
+					"component", "main", "operation", "runAppMode", "error", err)
+				platformpkg.UpdateStatusBar(apppkg.StateReady)
+				continue
 			}
 
-			// Recreate transcriber if language, model, decode mode, or punctuation mode changed.
-			// Create new BEFORE closing old — if creation fails, keep the working one.
-			if oldCfg.Language != cfg.Language || oldCfg.ModelSize != cfg.ModelSize ||
-				oldCfg.DecodeMode != cfg.DecodeMode || oldCfg.PunctuationMode != cfg.PunctuationMode {
-				newModelPath, pathErr := config.DefaultModelPath(cfg.ModelSize)
-				if pathErr != nil {
-					logger.Error("failed to resolve model path for transcriber reload",
-						"component", "main", "operation", "runAppMode", "error", pathErr)
-					continue
-				}
-				platformpkg.UpdateStatusBar(apppkg.StateLoading)
-				platformpkg.PostNotification("JoiceTyper", "Loading speech model...")
-				reloadCtx, reloadCancel := context.WithTimeout(context.Background(), 5*time.Minute)
-				newTranscriber, tErr := transcriptionpkg.NewTranscriber(reloadCtx, newModelPath, cfg.ModelSize, cfg.Language, cfg.SampleRate, cfg.DecodeMode, cfg.PunctuationMode, logger)
-				reloadCancel()
-				if tErr != nil {
-					logger.Error("failed to recreate transcriber, keeping old",
-						"component", "main", "operation", "runAppMode", "error", tErr)
-				} else {
-					oldTranscriber := transcriber
-					transcriber = newTranscriber
-					newTranscriber.SetVocabulary(cfg.Vocabulary)
-					app.SetTranscriber(newTranscriber)
-					logger.Info("transcriber updated", "component", "main", "operation", "runAppMode",
-						"language", cfg.Language, "decode_mode", cfg.DecodeMode, "punctuation_mode", cfg.PunctuationMode)
-					if closeErr := oldTranscriber.Close(); closeErr != nil {
-						logger.Error("failed to close old transcriber", "component", "main", "operation", "runAppMode", "error", closeErr)
-					}
-				}
-			}
-
-			// Update vocabulary if changed
-			if oldCfg.Vocabulary != cfg.Vocabulary {
-				transcriber.SetVocabulary(cfg.Vocabulary)
-				logger.Info("vocabulary updated", "component", "main", "operation", "runAppMode")
-			}
-
-			hotkeyDisplay := platformpkg.FormatHotkeyDisplay(cfg.TriggerKey)
-			platformpkg.SetStatusBarHotkeyText(strings.ReplaceAll(hotkeyDisplay, " + ", "+"))
-			platformpkg.UpdateStatusBar(apppkg.StateReady)
+			cfg = runtimeState.cfg
+			hotkey = runtimeState.hotkey
+			recorder = runtimeState.recorder
+			transcriber = runtimeState.transcriber
 			continue
 		default:
 			if shutdownRequested.Load() {

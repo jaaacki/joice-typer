@@ -451,3 +451,53 @@ func TestDefaultConfigDir_MigratesDarwinLegacyDotConfigDir(t *testing.T) {
 		t.Fatalf("expected migrate mkdir target %q, got %q", filepath.Dir(newDir), mkdirTarget)
 	}
 }
+
+func TestDefaultConfigDir_MigratesRealDarwinLegacyTree(t *testing.T) {
+	originalUserConfigDir := userConfigDir
+	originalUserHomeDir := userHomeDir
+	originalStatPath := statPath
+	originalMkdirAll := mkdirAll
+	originalRenamePath := renamePath
+	originalGOOS := runtimeGOOS
+	defer func() {
+		userConfigDir = originalUserConfigDir
+		userHomeDir = originalUserHomeDir
+		statPath = originalStatPath
+		mkdirAll = originalMkdirAll
+		renamePath = originalRenamePath
+		runtimeGOOS = originalGOOS
+	}()
+
+	homeDir := filepath.Join(t.TempDir(), "home")
+	legacyDir := filepath.Join(homeDir, ".config", "voicetype")
+	legacyConfigPath := filepath.Join(legacyDir, "config.yaml")
+	if err := os.MkdirAll(legacyDir, 0755); err != nil {
+		t.Fatalf("mkdir legacy dir: %v", err)
+	}
+	if err := os.WriteFile(legacyConfigPath, []byte("trigger_key: [fn, shift]\nmodel_size: small\nsample_rate: 16000\n"), 0644); err != nil {
+		t.Fatalf("write legacy config: %v", err)
+	}
+
+	configRoot := filepath.Join(homeDir, "Library", "Application Support")
+	userConfigDir = func() (string, error) { return configRoot, nil }
+	userHomeDir = func() (string, error) { return homeDir, nil }
+	statPath = os.Stat
+	mkdirAll = os.MkdirAll
+	renamePath = os.Rename
+	runtimeGOOS = "darwin"
+
+	gotDir, err := DefaultConfigDir()
+	if err != nil {
+		t.Fatalf("DefaultConfigDir: %v", err)
+	}
+	wantDir := filepath.Join(configRoot, "JoiceTyper")
+	if gotDir != wantDir {
+		t.Fatalf("expected migrated dir %q, got %q", wantDir, gotDir)
+	}
+	if _, err := os.Stat(filepath.Join(wantDir, "config.yaml")); err != nil {
+		t.Fatalf("expected migrated config at new path, got %v", err)
+	}
+	if _, err := os.Stat(legacyDir); !os.IsNotExist(err) {
+		t.Fatalf("expected legacy dir to be moved away, stat err=%v", err)
+	}
+}
