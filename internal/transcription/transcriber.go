@@ -76,6 +76,11 @@ type decodeConfig struct {
 	beamSize int
 }
 
+var (
+	renameFile = os.Rename
+	removeFile = os.Remove
+)
+
 func decodeConfigForMode(mode string) decodeConfig {
 	if mode == "greedy" {
 		return decodeConfig{strategy: "greedy"}
@@ -98,12 +103,7 @@ func NewTranscriber(ctx context.Context, modelPath string, modelSize string, lan
 	cparams := C.whisper_context_default_params()
 	wctx := C.whisper_init_from_file_with_params(cPath, cparams)
 	if wctx == nil {
-		// Quarantine bad model so future startups re-download instead of failing forever
-		badPath := modelPath + ".bad"
-		if renameErr := os.Rename(modelPath, badPath); renameErr == nil {
-			l.Warn("quarantined corrupt model", "operation", "NewTranscriber",
-				"bad_path", filepath.Base(badPath))
-		}
+		quarantineModel(modelPath, "", l, "NewTranscriber")
 		return nil, &apppkg.ErrBadPayload{Component: "transcriber", Operation: "NewTranscriber", Detail: "model corrupt or incompatible"}
 	}
 
@@ -113,7 +113,7 @@ func NewTranscriber(ctx context.Context, modelPath string, modelSize string, lan
 		defer C.free(unsafe.Pointer(cLang))
 		if C.whisper_lang_id(cLang) < 0 {
 			C.whisper_free(wctx)
-			return nil, fmt.Errorf("transcriber.NewTranscriber: unsupported language %q", language)
+			return nil, &apppkg.ErrBadPayload{Component: "transcriber", Operation: "NewTranscriber", Detail: fmt.Sprintf("unsupported language %q", language)}
 		}
 	}
 
@@ -462,8 +462,7 @@ func validateCachedModel(modelPath string, modelSize string, logger *slog.Logger
 	if currentHash != spec.sha256 {
 		l.Warn("model hash mismatch — quarantining",
 			"expected", spec.sha256, "actual", currentHash)
-		os.Rename(modelPath, modelPath+".bad")
-		os.Remove(hashPath)
+		quarantineModel(modelPath, hashPath, l, "validateCachedModel")
 		return false
 	}
 
@@ -474,6 +473,23 @@ func validateCachedModel(modelPath string, modelSize string, logger *slog.Logger
 	}
 	l.Info("model verified", "model_size", modelSize)
 	return true
+}
+
+func quarantineModel(modelPath string, hashPath string, logger *slog.Logger, operation string) {
+	badPath := modelPath + ".bad"
+	if err := renameFile(modelPath, badPath); err != nil {
+		logger.Warn("failed to quarantine bad model",
+			"operation", operation, "model_path", modelPath, "bad_path", badPath, "error", err)
+	} else {
+		logger.Warn("quarantined bad model",
+			"operation", operation, "bad_path", filepath.Base(badPath))
+	}
+	if hashPath != "" {
+		if err := removeFile(hashPath); err != nil && !os.IsNotExist(err) {
+			logger.Warn("failed to remove model hash cache",
+				"operation", operation, "hash_path", hashPath, "error", err)
+		}
+	}
 }
 
 // ensureModel checks if the model file exists and downloads it if not.

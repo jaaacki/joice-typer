@@ -137,3 +137,31 @@ func TestValidateCachedModel_WritesActualHashSidecar(t *testing.T) {
 		t.Fatalf("expected sidecar hash %q, got %q", expectedHash, got)
 	}
 }
+
+func TestQuarantineModel_RemovalFailuresDoNotPanic(t *testing.T) {
+	originalRename := renameFile
+	originalRemove := removeFile
+	defer func() {
+		renameFile = originalRename
+		removeFile = originalRemove
+	}()
+
+	var renamedFrom, renamedTo, removedPath string
+	renameFile = func(oldpath, newpath string) error {
+		renamedFrom, renamedTo = oldpath, newpath
+		return nil
+	}
+	removeFile = func(path string) error {
+		removedPath = path
+		return os.ErrPermission
+	}
+
+	quarantineModel("/tmp/model.bin", "/tmp/model.bin.sha256", slog.Default(), "test")
+
+	if renamedFrom != "/tmp/model.bin" || renamedTo != "/tmp/model.bin.bad" {
+		t.Fatalf("expected model rename, got from=%q to=%q", renamedFrom, renamedTo)
+	}
+	if removedPath != "/tmp/model.bin.sha256" {
+		t.Fatalf("expected hash sidecar removal attempt, got %q", removedPath)
+	}
+}

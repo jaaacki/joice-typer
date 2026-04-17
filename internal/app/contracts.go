@@ -35,7 +35,8 @@ type HotkeyListener interface {
 	Stop() error
 }
 
-// Recorder captures audio from the default input device.
+// Recorder captures audio from the configured input device, or the system
+// default input device when no explicit device is configured.
 // Start begins capture. Stop ends capture and returns the audio buffer.
 type Recorder interface {
 	Warm() // pre-open audio stream for instant Start

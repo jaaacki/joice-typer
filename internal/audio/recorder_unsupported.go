@@ -27,7 +27,7 @@ func InitAudio() error {
 }
 
 func TerminateAudio() error {
-	return nil
+	return apppkg.UnsupportedDependencyError("recorder", "TerminateAudio", "audio recording", runtime.GOOS, runtime.GOARCH)
 }
 
 func ListInputDevices() error {
@@ -55,5 +55,5 @@ func (r *unsupportedRecorder) RefreshDevices() error {
 func (r *unsupportedRecorder) MarkStale(reason string) {}
 
 func (r *unsupportedRecorder) Close() error {
-	return nil
+	return apppkg.UnsupportedDependencyError("recorder", "Close", "audio recording", runtime.GOOS, runtime.GOARCH)
 }

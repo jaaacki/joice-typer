@@ -4,6 +4,7 @@ package launcher
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -96,7 +97,7 @@ func suppressStderr(logDir string) error {
 	// Dup2 succeeded — fd 2 now points to the file. Close the original
 	// descriptor to avoid leaking it for the process lifetime.
 	if closeErr := f.Close(); closeErr != nil {
-		fmt.Fprintf(os.Stderr, "warning: failed to close original stderr fd: %v\n", closeErr)
+		return errors.Join(fmt.Errorf("close original stderr log fd %s", logPath), closeErr)
 	}
 	return nil
 }

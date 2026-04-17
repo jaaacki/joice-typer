@@ -33,5 +33,5 @@ func (t *unsupportedTranscriber) Transcribe(ctx context.Context, audio []float32
 func (t *unsupportedTranscriber) SetVocabulary(vocab string) {}
 
 func (t *unsupportedTranscriber) Close() error {
-	return nil
+	return apppkg.UnsupportedDependencyError("transcriber", "Close", "transcription", runtime.GOOS, runtime.GOARCH)
 }
