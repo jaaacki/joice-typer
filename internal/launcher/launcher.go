@@ -16,7 +16,12 @@ import (
 	"syscall"
 	"time"
 
+	apppkg "voicetype/internal/app"
+	audiopkg "voicetype/internal/audio"
 	config "voicetype/internal/config"
+	loggingpkg "voicetype/internal/logging"
+	platformpkg "voicetype/internal/platform"
+	transcriptionpkg "voicetype/internal/transcription"
 	version "voicetype/internal/version"
 )
 
@@ -39,18 +44,18 @@ func Main() {
 	}
 
 	if *listDevices {
-		if err := InitAudio(); err != nil {
+		if err := audiopkg.InitAudio(); err != nil {
 			fmt.Fprintf(os.Stderr, "fatal: %v\n", err)
 			os.Exit(1)
 		}
-		if err := ListInputDevices(); err != nil {
+		if err := audiopkg.ListInputDevices(); err != nil {
 			fmt.Fprintf(os.Stderr, "fatal: %v\n", err)
-			if tErr := TerminateAudio(); tErr != nil {
+			if tErr := audiopkg.TerminateAudio(); tErr != nil {
 				fmt.Fprintf(os.Stderr, "warning: failed to terminate audio: %v\n", tErr)
 			}
 			os.Exit(1)
 		}
-		if tErr := TerminateAudio(); tErr != nil {
+		if tErr := audiopkg.TerminateAudio(); tErr != nil {
 			fmt.Fprintf(os.Stderr, "warning: failed to terminate audio: %v\n", tErr)
 		}
 		return
@@ -107,23 +112,23 @@ func runAppMode() {
 	// Suppress whisper.cpp stderr spam
 	suppressStderr(logDir)
 
-	logger, logCleanup, err := SetupLogger(logDir)
+	logger, logCleanup, err := loggingpkg.SetupLogger(logDir)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "fatal: %v\n", err)
 		os.Exit(1)
 	}
 	defer logCleanup()
 
-	SetSettingsLogger(logger.With("component", "settings"))
+	platformpkg.SetSettingsLogger(logger.With("component", "settings"))
 	logger.Info("app starting", "component", "main", "operation", "runAppMode", "version", version.Version)
 
 	// Init PortAudio early (needed for device listing in setup wizard)
-	if err := InitAudio(); err != nil {
+	if err := audiopkg.InitAudio(); err != nil {
 		logger.Error("failed to initialize audio", "component", "main", "operation", "runAppMode", "error", err)
 		os.Exit(1)
 	}
 	defer func() {
-		if tErr := TerminateAudio(); tErr != nil {
+		if tErr := audiopkg.TerminateAudio(); tErr != nil {
 			logger.Error("failed to terminate audio", "component", "main", "operation", "runAppMode", "error", tErr)
 		}
 	}()
@@ -139,7 +144,7 @@ func runAppMode() {
 		logger.Info("received signal", "component", "main", "operation", "signal", "signal", sig.String())
 		shutdownRequested.Store(true)
 		startupCancel() // cancel permission polling and setup wizard
-		h := ActiveHotkey()
+		h := platformpkg.ActiveHotkey()
 		if h != nil {
 			if stopErr := h.Stop(); stopErr != nil {
 				logger.Error("failed to stop hotkey", "component", "main", "operation", "signal", "error", stopErr)
@@ -148,10 +153,10 @@ func runAppMode() {
 	}()
 
 	// First-run: show setup wizard
-	firstRun := IsFirstRun()
+	firstRun := platformpkg.IsFirstRun()
 	logger.Info("first run check", "component", "main", "operation", "runAppMode", "first_run", firstRun)
 	if firstRun {
-		selectedDevice, setupErr := RunSetupWizard(startupCtx, logger)
+		selectedDevice, setupErr := platformpkg.RunSetupWizard(startupCtx, logger)
 		if setupErr != nil {
 			logger.Error("setup wizard failed", "component", "main", "operation", "runAppMode", "error", setupErr)
 			os.Exit(1)
@@ -181,22 +186,22 @@ func runAppMode() {
 	// Create status bar on the main thread BEFORE [NSApp run].
 	// This is safe — the Accessibility dialog it may trigger is a
 	// system-level (WindowServer) dialog, not an AppKit dialog.
-	InitStatusBar()
-	InitPowerObserver()
-	UpdateStatusBar(StateLoading)
+	platformpkg.InitStatusBar()
+	platformpkg.InitPowerObserver()
+	platformpkg.UpdateStatusBar(apppkg.StateLoading)
 
-	events := make(chan HotkeyEvent, 32)
-	hotkey := NewHotkeyListener(cfg.TriggerKey, logger)
+	events := make(chan apppkg.HotkeyEvent, 32)
+	hotkey := platformpkg.NewHotkeyListener(cfg.TriggerKey, logger)
 
-	SetActiveHotkey(hotkey)
+	platformpkg.SetActiveHotkey(hotkey)
 
 	// Launch all heavy init work in a background goroutine.
 	initDone := make(chan error, 1)
 	var (
-		app         *App
-		recorder    Recorder
-		transcriber Transcriber
-		sound       *Sound
+		app         *apppkg.App
+		recorder    apppkg.Recorder
+		transcriber apppkg.Transcriber
+		sound       *apppkg.Sound
 		wg          sync.WaitGroup
 	)
 
@@ -208,10 +213,10 @@ func runAppMode() {
 			if acc && inp {
 				return
 			}
-			UpdateStatusBar(StateNoPermission)
+			platformpkg.UpdateStatusBar(apppkg.StateNoPermission)
 			if !notified {
 				notified = true
-				PostNotification("JoiceTyper needs permissions",
+				platformpkg.PostNotification("JoiceTyper needs permissions",
 					"Click the JoiceTyper menu bar icon → Preferences to grant Accessibility and Input Monitoring.")
 			}
 		}); err != nil {
@@ -224,9 +229,9 @@ func runAppMode() {
 		}
 
 		// Step 2: Load model (may download on first run)
-		UpdateStatusBar(StateLoading)
+		platformpkg.UpdateStatusBar(apppkg.StateLoading)
 		var tErr error
-		transcriber, tErr = NewTranscriber(startupCtx, modelPath, cfg.ModelSize, cfg.Language, cfg.SampleRate, cfg.DecodeMode, cfg.PunctuationMode, logger)
+		transcriber, tErr = transcriptionpkg.NewTranscriber(startupCtx, modelPath, cfg.ModelSize, cfg.Language, cfg.SampleRate, cfg.DecodeMode, cfg.PunctuationMode, logger)
 		if tErr != nil {
 			initDone <- tErr
 			if stopErr := hotkey.Stop(); stopErr != nil {
@@ -242,17 +247,17 @@ func runAppMode() {
 		}
 
 		// Step 3: Create app components
-		recorder = NewRecorder(cfg.SampleRate, cfg.InputDevice, logger)
-		SetSettingsRecorder(recorder)
-		recorder.Warm()             // pre-open audio stream for instant recording start
-		paster := NewPaster(logger)
-		sound = NewSound(cfg.SoundFeedback, logger)
+		recorder = audiopkg.NewRecorder(cfg.SampleRate, cfg.InputDevice, logger)
+		platformpkg.SetSettingsRecorder(recorder)
+		recorder.Warm() // pre-open audio stream for instant recording start
+		paster := platformpkg.NewPaster(logger)
+		sound = apppkg.NewSound(cfg.SoundFeedback, logger)
 
-		app = NewApp(recorder, transcriber, paster, sound, logger)
-		app.SetStateCallback(func(state AppState) {
-			UpdateStatusBar(state)
+		app = apppkg.NewApp(recorder, transcriber, paster, sound, logger)
+		app.SetStateCallback(func(state apppkg.AppState) {
+			platformpkg.UpdateStatusBar(state)
 		})
-		SetPowerEventHandler(makePowerEventHandler(app, func() Recorder { return recorder }, logger))
+		platformpkg.SetPowerEventHandler(platformpkg.MakePowerEventHandler(app, func() apppkg.Recorder { return recorder }, logger))
 
 		wg.Add(1)
 		go func() {
@@ -261,11 +266,11 @@ func runAppMode() {
 			app.Shutdown()
 		}()
 
-		hotkeyDisplay := formatHotkeyDisplay(cfg.TriggerKey)
-		SetStatusBarHotkeyText(strings.ReplaceAll(hotkeyDisplay, " + ", "+"))
-		UpdateStatusBar(StateReady)
+		hotkeyDisplay := platformpkg.FormatHotkeyDisplay(cfg.TriggerKey)
+		platformpkg.SetStatusBarHotkeyText(strings.ReplaceAll(hotkeyDisplay, " + ", "+"))
+		platformpkg.UpdateStatusBar(apppkg.StateReady)
 		sound.PlayReady()
-		PostNotification("JoiceTyper is ready", "Hold "+hotkeyDisplay+" to dictate.")
+		platformpkg.PostNotification("JoiceTyper is ready", "Hold "+hotkeyDisplay+" to dictate.")
 		logger.Info("ready", "component", "main", "operation", "runAppMode", "trigger_key", cfg.TriggerKey)
 
 		initDone <- nil
@@ -286,7 +291,7 @@ func runAppMode() {
 		case err := <-initDone:
 			if err != nil {
 				logger.Error("startup failed", "component", "main", "operation", "runAppMode", "error", err)
-				ClearHotkeyEvents()
+				platformpkg.ClearHotkeyEvents()
 				close(events)
 				return
 			}
@@ -310,7 +315,7 @@ initFinished:
 		// hotkey.Start() returned — CFRunLoopStop was called.
 		// Either from signal handler (shutdown) or signalHotkeyRestart (prefs).
 		select {
-		case <-hotkeyRestartCh:
+		case <-platformpkg.HotkeyRestartCh():
 			logger.Info("restarting hotkey with new config", "component", "main", "operation", "runAppMode")
 			// Reload config and recreate listener
 			oldCfg := cfg
@@ -320,8 +325,8 @@ initFinished:
 					"component", "main", "operation", "runAppMode", "error", err)
 				continue // retry with existing hotkey
 			}
-			hotkey = NewHotkeyListener(cfg.TriggerKey, logger)
-			SetActiveHotkey(hotkey)
+			hotkey = platformpkg.NewHotkeyListener(cfg.TriggerKey, logger)
+			platformpkg.SetActiveHotkey(hotkey)
 
 			// Wait for app to become idle before swapping dependencies
 			for i := 0; i < 50; i++ { // 5 seconds max
@@ -333,7 +338,7 @@ initFinished:
 			if !app.IsIdle() {
 				logger.Error("app not idle after 5s, skipping dependency swap",
 					"component", "main", "operation", "runAppMode")
-				UpdateStatusBar(StateReady)
+				platformpkg.UpdateStatusBar(apppkg.StateReady)
 				continue // re-enter hotkey loop with existing config
 			}
 
@@ -342,8 +347,8 @@ initFinished:
 				if closeErr := recorder.Close(); closeErr != nil {
 					logger.Error("failed to close old recorder", "component", "main", "operation", "runAppMode", "error", closeErr)
 				}
-				recorder = NewRecorder(cfg.SampleRate, cfg.InputDevice, logger)
-				SetSettingsRecorder(recorder)
+				recorder = audiopkg.NewRecorder(cfg.SampleRate, cfg.InputDevice, logger)
+				platformpkg.SetSettingsRecorder(recorder)
 				app.SetRecorder(recorder)
 				logger.Info("recorder updated", "component", "main", "operation", "runAppMode", "device", cfg.InputDevice)
 			}
@@ -358,10 +363,10 @@ initFinished:
 						"component", "main", "operation", "runAppMode", "error", pathErr)
 					continue
 				}
-				UpdateStatusBar(StateLoading)
-				PostNotification("JoiceTyper", "Loading speech model...")
+				platformpkg.UpdateStatusBar(apppkg.StateLoading)
+				platformpkg.PostNotification("JoiceTyper", "Loading speech model...")
 				reloadCtx, reloadCancel := context.WithTimeout(context.Background(), 5*time.Minute)
-				newTranscriber, tErr := NewTranscriber(reloadCtx, newModelPath, cfg.ModelSize, cfg.Language, cfg.SampleRate, cfg.DecodeMode, cfg.PunctuationMode, logger)
+				newTranscriber, tErr := transcriptionpkg.NewTranscriber(reloadCtx, newModelPath, cfg.ModelSize, cfg.Language, cfg.SampleRate, cfg.DecodeMode, cfg.PunctuationMode, logger)
 				reloadCancel()
 				if tErr != nil {
 					logger.Error("failed to recreate transcriber, keeping old",
@@ -385,9 +390,9 @@ initFinished:
 				logger.Info("vocabulary updated", "component", "main", "operation", "runAppMode")
 			}
 
-			hotkeyDisplay := formatHotkeyDisplay(cfg.TriggerKey)
-			SetStatusBarHotkeyText(strings.ReplaceAll(hotkeyDisplay, " + ", "+"))
-			UpdateStatusBar(StateReady)
+			hotkeyDisplay := platformpkg.FormatHotkeyDisplay(cfg.TriggerKey)
+			platformpkg.SetStatusBarHotkeyText(strings.ReplaceAll(hotkeyDisplay, " + ", "+"))
+			platformpkg.UpdateStatusBar(apppkg.StateReady)
 			continue
 		default:
 			if shutdownRequested.Load() {
@@ -402,8 +407,8 @@ initFinished:
 		break
 	}
 
-	ClearHotkeyEvents()
-	SetPowerEventHandler(nil)
+	platformpkg.ClearHotkeyEvents()
+	platformpkg.SetPowerEventHandler(nil)
 	close(events)
 	wg.Wait()
 
@@ -427,7 +432,7 @@ func runTerminalMode(configPath string) {
 	}
 
 	// --- Setup logger ---
-	logger, logCleanup, err := SetupLogger(logDir)
+	logger, logCleanup, err := loggingpkg.SetupLogger(logDir)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "fatal: %v\n", err)
 		os.Exit(1)
@@ -447,13 +452,13 @@ func runTerminalMode(configPath string) {
 	)
 
 	// --- Init PortAudio ---
-	if err := InitAudio(); err != nil {
+	if err := audiopkg.InitAudio(); err != nil {
 		logger.Error("failed to initialize audio",
 			"component", "main", "operation", "runTerminalMode", "error", err)
 		os.Exit(1)
 	}
 	defer func() {
-		if err := TerminateAudio(); err != nil {
+		if err := audiopkg.TerminateAudio(); err != nil {
 			logger.Error("failed to terminate audio",
 				"component", "main", "operation", "runTerminalMode", "error", err)
 		}
@@ -469,8 +474,8 @@ func runTerminalMode(configPath string) {
 
 	// --- Signal handling (before model init so SIGTERM can cancel download) ---
 	startupCtx, startupCancel := context.WithCancel(context.Background())
-	events := make(chan HotkeyEvent, 32)
-	hotkey := NewHotkeyListener(cfg.TriggerKey, logger)
+	events := make(chan apppkg.HotkeyEvent, 32)
+	hotkey := platformpkg.NewHotkeyListener(cfg.TriggerKey, logger)
 
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
@@ -488,7 +493,7 @@ func runTerminalMode(configPath string) {
 	}()
 
 	// --- Init transcriber (loads model -- may download on first run) ---
-	transcriber, err := NewTranscriber(startupCtx, modelPath, cfg.ModelSize, cfg.Language, cfg.SampleRate, cfg.DecodeMode, cfg.PunctuationMode, logger)
+	transcriber, err := transcriptionpkg.NewTranscriber(startupCtx, modelPath, cfg.ModelSize, cfg.Language, cfg.SampleRate, cfg.DecodeMode, cfg.PunctuationMode, logger)
 	if err != nil {
 		logger.Error("failed to initialize transcriber",
 			"component", "main", "operation", "runTerminalMode", "error", err)
@@ -496,16 +501,16 @@ func runTerminalMode(configPath string) {
 	}
 
 	// --- Init recorder ---
-	recorder := NewRecorder(cfg.SampleRate, cfg.InputDevice, logger)
+	recorder := audiopkg.NewRecorder(cfg.SampleRate, cfg.InputDevice, logger)
 
 	// --- Init paster ---
-	paster := NewPaster(logger)
+	paster := platformpkg.NewPaster(logger)
 
 	// --- Init sound ---
-	sound := NewSound(cfg.SoundFeedback, logger)
+	sound := apppkg.NewSound(cfg.SoundFeedback, logger)
 
 	// --- Create app ---
-	app := NewApp(recorder, transcriber, paster, sound, logger)
+	app := apppkg.NewApp(recorder, transcriber, paster, sound, logger)
 
 	// --- Start event processing goroutine ---
 	var wg sync.WaitGroup
@@ -530,7 +535,7 @@ func runTerminalMode(configPath string) {
 	}
 
 	// Nil the global channel to prevent late C callbacks from sending on closed channel
-	ClearHotkeyEvents()
+	platformpkg.ClearHotkeyEvents()
 	close(events)
 
 	// Wait for the app goroutine to finish processing and shut down
