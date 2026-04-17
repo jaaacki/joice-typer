@@ -44,6 +44,25 @@ make app
 open JoiceTyper.app
 ```
 
+## Versioning
+
+`VERSION` is the single source of truth for releases.
+
+- checked-in version: `VERSION`
+- release tag format: `vX.Y.Z`
+- app bundle and Go binary both derive their version from `VERSION`
+
+Typical release flow:
+
+```bash
+printf '1.0.0\n' > VERSION
+git add VERSION
+git commit -m "release: bump version to 1.0.0"
+git tag v1.0.0
+make release-check
+make dmg
+```
+
 On first launch, a setup wizard guides you through granting Accessibility permission, selecting a microphone, and downloading the speech model.
 
 ## Configuration

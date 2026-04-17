@@ -33,7 +33,13 @@ func main() {
 	}
 	configPath := flag.String("config", defaultCfgPath, "path to config file")
 	listDevices := flag.Bool("list-devices", false, "list available audio input devices and exit")
+	showVersion := flag.Bool("version", false, "print version and exit")
 	flag.Parse()
+
+	if *showVersion {
+		fmt.Println(FormatVersion(Version))
+		return
+	}
 
 	if *listDevices {
 		if err := InitAudio(); err != nil {
@@ -112,7 +118,7 @@ func runAppMode() {
 	defer logCleanup()
 
 	settingsLogger = logger.With("component", "settings")
-	logger.Info("app starting", "component", "main", "operation", "runAppMode")
+	logger.Info("app starting", "component", "main", "operation", "runAppMode", "version", Version)
 
 	// Init PortAudio early (needed for device listing in setup wizard)
 	if err := InitAudio(); err != nil {
@@ -443,6 +449,7 @@ func runTerminalMode(configPath string) {
 
 	logger.Info("starting voicetype",
 		"component", "main", "operation", "runTerminalMode",
+		"version", Version,
 		"config_path", configPath,
 		"model_size", cfg.ModelSize,
 		"trigger_key", cfg.TriggerKey,

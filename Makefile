@@ -1,10 +1,13 @@
-.PHONY: all setup build clean download-model whisper test app dmg
+.PHONY: all setup build clean download-model whisper test app dmg release-check
 
 WHISPER_DIR := third_party/whisper.cpp
 WHISPER_BUILD := $(WHISPER_DIR)/build
 MODEL_DIR := $(HOME)/.config/voicetype/models
 MODEL_FILE := $(MODEL_DIR)/ggml-small.bin
 MODEL_URL := https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin
+VERSION_FILE := VERSION
+VERSION := $(shell tr -d '[:space:]' < $(VERSION_FILE))
+GO_LDFLAGS := -X 'main.Version=$(VERSION)'
 
 all: whisper build
 
@@ -21,7 +24,7 @@ whisper:
 	cd $(WHISPER_DIR) && cmake --build build --config Release -j$$(sysctl -n hw.ncpu)
 
 build: whisper
-	CGO_ENABLED=1 go build -o voicetype .
+	CGO_ENABLED=1 go build -ldflags "$(GO_LDFLAGS)" -o voicetype .
 
 download-model: $(MODEL_FILE)
 
@@ -31,6 +34,7 @@ $(MODEL_FILE):
 
 APP_NAME := JoiceTyper
 APP_BUNDLE := $(APP_NAME).app
+PLIST_TEMPLATE := Info.plist.tmpl
 
 clean:
 	rm -f voicetype
@@ -46,7 +50,7 @@ app: build
 	mkdir -p $(APP_BUNDLE)/Contents/Resources
 	mkdir -p $(APP_BUNDLE)/Contents/Frameworks
 	cp voicetype $(APP_BUNDLE)/Contents/MacOS/$(APP_NAME)
-	cp Info.plist $(APP_BUNDLE)/Contents/
+	sed "s/{{VERSION}}/$(VERSION)/g" $(PLIST_TEMPLATE) > $(APP_BUNDLE)/Contents/Info.plist
 	@if [ -f icon.icns ]; then cp icon.icns $(APP_BUNDLE)/Contents/Resources/; fi
 	@# Bundle PortAudio dylib and fix load path
 	cp /opt/homebrew/opt/portaudio/lib/libportaudio.2.dylib $(APP_BUNDLE)/Contents/Frameworks/
@@ -57,7 +61,7 @@ app: build
 	codesign --force --sign - $(APP_BUNDLE)
 	@echo "Built $(APP_BUNDLE)"
 
-DMG_NAME := $(APP_NAME).dmg
+DMG_NAME := $(APP_NAME)-$(VERSION).dmg
 DMG_STAGING := dmg-staging
 
 dmg: app
@@ -72,3 +76,10 @@ dmg: app
 		$(DMG_NAME)
 	rm -rf $(DMG_STAGING)
 	@echo "Built $(DMG_NAME)"
+
+RELEASE_TAG ?= $(shell git describe --tags --exact-match 2>/dev/null || true)
+
+release-check:
+	@test -n "$(RELEASE_TAG)" || (echo "fatal: no release tag provided or checked out" && exit 1)
+	@test "v$(VERSION)" = "$(RELEASE_TAG)" || (echo "fatal: release tag $(RELEASE_TAG) does not match VERSION $(VERSION)" && exit 1)
+	@echo "Release tag $(RELEASE_TAG) matches VERSION $(VERSION)"
