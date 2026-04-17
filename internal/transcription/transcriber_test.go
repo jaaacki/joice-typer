@@ -2,7 +2,15 @@
 
 package transcription
 
-import "testing"
+import (
+	"crypto/sha256"
+	"encoding/hex"
+	"log/slog"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
 
 func TestDecodeConfigForMode_Greedy(t *testing.T) {
 	cfg := decodeConfigForMode("greedy")
@@ -60,5 +68,72 @@ func TestApplyPunctuationMode_ConservativePreservesOuterWhitespace(t *testing.T)
 	want := "  Hello world.\nSecond line.  \n"
 	if got := applyPunctuationMode("conservative", input); got != want {
 		t.Fatalf("expected conservative cleanup %q, got %q", want, got)
+	}
+}
+
+func TestValidateCachedModel_DoesNotTrustSidecarWithoutHashing(t *testing.T) {
+	dir := t.TempDir()
+	modelPath := filepath.Join(dir, "ggml-test.bin")
+	modelBytes := []byte("actual-model-content")
+	if err := os.WriteFile(modelPath, modelBytes, 0644); err != nil {
+		t.Fatalf("write model: %v", err)
+	}
+	info, err := os.Stat(modelPath)
+	if err != nil {
+		t.Fatalf("stat model: %v", err)
+	}
+
+	originalManifest := modelManifest
+	defer func() { modelManifest = originalManifest }()
+	modelManifest = map[string]modelSpec{
+		"test": {
+			sha256:   strings.Repeat("a", 64),
+			exactLen: info.Size(),
+		},
+	}
+
+	sidecar := filepath.Join(dir, "ggml-test.bin.sha256")
+	cached := modelManifest["test"].sha256 + ":" + "0" + ":" + "0"
+	if err := os.WriteFile(sidecar, []byte(cached), 0644); err != nil {
+		t.Fatalf("write sidecar: %v", err)
+	}
+
+	if validateCachedModel(modelPath, "test", slog.Default()) {
+		t.Fatal("expected validation to fail after hashing real file")
+	}
+	if _, err := os.Stat(modelPath + ".bad"); err != nil {
+		t.Fatalf("expected bad model quarantine, got %v", err)
+	}
+}
+
+func TestValidateCachedModel_WritesActualHashSidecar(t *testing.T) {
+	dir := t.TempDir()
+	modelPath := filepath.Join(dir, "ggml-test.bin")
+	modelBytes := []byte("actual-model-content")
+	if err := os.WriteFile(modelPath, modelBytes, 0644); err != nil {
+		t.Fatalf("write model: %v", err)
+	}
+
+	sum := sha256.Sum256(modelBytes)
+	expectedHash := hex.EncodeToString(sum[:])
+
+	originalManifest := modelManifest
+	defer func() { modelManifest = originalManifest }()
+	modelManifest = map[string]modelSpec{
+		"test": {
+			sha256:   expectedHash,
+			exactLen: int64(len(modelBytes)),
+		},
+	}
+
+	if !validateCachedModel(modelPath, "test", slog.Default()) {
+		t.Fatal("expected valid model to pass")
+	}
+	sidecarData, err := os.ReadFile(modelPath + ".sha256")
+	if err != nil {
+		t.Fatalf("read sidecar: %v", err)
+	}
+	if got := strings.TrimSpace(string(sidecarData)); got != expectedHash {
+		t.Fatalf("expected sidecar hash %q, got %q", expectedHash, got)
 	}
 }

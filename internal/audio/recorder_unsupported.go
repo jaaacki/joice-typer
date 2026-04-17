@@ -4,7 +4,6 @@ package audio
 
 import (
 	"context"
-	"fmt"
 	"log/slog"
 	"runtime"
 
@@ -16,7 +15,7 @@ type unsupportedRecorder struct {
 }
 
 func unsupportedAudioError() error {
-	return fmt.Errorf("JoiceTyper bootstrap build for %s/%s does not provide audio recording", runtime.GOOS, runtime.GOARCH)
+	return apppkg.UnsupportedDependencyError("recorder", "unsupported", "audio recording", runtime.GOOS, runtime.GOARCH)
 }
 
 func NewRecorder(sampleRate int, deviceName string, logger *slog.Logger) apppkg.Recorder {

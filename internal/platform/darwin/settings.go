@@ -26,6 +26,18 @@ import (
 )
 
 var postNotification = PostNotification
+var defaultModelPath = config.DefaultModelPath
+var removeFile = os.Remove
+
+func resolveModelPathForSettings(modelSize string, operation string) (string, bool) {
+	modelPath, err := defaultModelPath(modelSize)
+	if err != nil {
+		currentSettingsLogger().Error("failed to resolve model path", "operation", operation, "model", modelSize, "error", err)
+		reportSettingsSaveError(err.Error())
+		return "", false
+	}
+	return modelPath, true
+}
 
 // IsFirstRun returns true if no config file exists yet.
 func IsFirstRun() bool {
@@ -204,22 +216,24 @@ func modelBtn1Clicked() {
 	if deleteConfirmPending {
 		// "Confirm?" was clicked — actually delete
 		deleteConfirmPending = false
-		modelPath, err := config.DefaultModelPath(selected)
-		if err != nil {
+		modelPath, ok := resolveModelPathForSettings(selected, "modelBtn1Clicked")
+		if !ok {
 			return
 		}
-		if removeErr := os.Remove(modelPath); removeErr != nil {
+		if removeErr := removeFile(modelPath); removeErr != nil {
 			currentSettingsLogger().Error("failed to delete model", "operation", "modelBtn1Clicked", "error", removeErr)
 			return
 		}
-		os.Remove(modelPath + ".sha256")
+		if removeErr := removeFile(modelPath + ".sha256"); removeErr != nil && !os.IsNotExist(removeErr) {
+			currentSettingsLogger().Warn("failed to delete model hash cache", "operation", "modelBtn1Clicked", "error", removeErr)
+		}
 		currentSettingsLogger().Info("model deleted", "operation", "modelBtn1Clicked", "model", selected)
 		populateModelList("")
 		return
 	}
 
-	modelPath, err := config.DefaultModelPath(selected)
-	if err != nil {
+	modelPath, ok := resolveModelPathForSettings(selected, "modelBtn1Clicked")
+	if !ok {
 		return
 	}
 
@@ -283,8 +297,8 @@ func updateModelButtonState() {
 	if selected == "" {
 		return
 	}
-	modelPath, err := config.DefaultModelPath(selected)
-	if err != nil {
+	modelPath, ok := resolveModelPathForSettings(selected, "updateModelButtonState")
+	if !ok {
 		return
 	}
 	if _, statErr := os.Stat(modelPath); os.IsNotExist(statErr) {
@@ -312,7 +326,7 @@ func populateModelList(selectSize string) {
 	defaultIdx := 0
 	for i, m := range config.ModelOptions {
 		sizes[i] = C.CString(m.Size)
-		modelPath, pathErr := config.DefaultModelPath(m.Size)
+		modelPath, pathErr := defaultModelPath(m.Size)
 		cached := ""
 		if pathErr == nil {
 			if _, err := os.Stat(modelPath); err == nil {

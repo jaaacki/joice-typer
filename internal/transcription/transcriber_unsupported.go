@@ -4,7 +4,6 @@ package transcription
 
 import (
 	"context"
-	"fmt"
 	"log/slog"
 	"runtime"
 
@@ -16,7 +15,7 @@ type unsupportedTranscriber struct{}
 type DownloadProgressFunc func(progress float64, bytesDownloaded, bytesTotal int64)
 
 func unsupportedTranscriptionError() error {
-	return fmt.Errorf("JoiceTyper bootstrap build for %s/%s does not provide transcription", runtime.GOOS, runtime.GOARCH)
+	return apppkg.UnsupportedDependencyError("transcriber", "unsupported", "transcription", runtime.GOOS, runtime.GOARCH)
 }
 
 func NewTranscriber(ctx context.Context, modelPath string, modelSize string, language string, sampleRate int, decodeMode string, punctuationMode string, logger *slog.Logger) (apppkg.Transcriber, error) {

@@ -257,12 +257,12 @@ func (c Config) Validate() error {
 }
 
 func DefaultConfigDir() (string, error) {
-	home, err := os.UserHomeDir()
+	configRoot, err := os.UserConfigDir()
 	if err != nil {
 		return "", fmt.Errorf("config.DefaultConfigDir: %w", err)
 	}
-	newDir := filepath.Join(home, "Library", "Application Support", "JoiceTyper")
-	oldDir := filepath.Join(home, ".config", "voicetype")
+	newDir := appConfigDir(configRoot)
+	oldDir := legacyConfigDir(configRoot)
 
 	// Migrate from old config path if it exists and new path doesn't.
 	if _, err := os.Stat(oldDir); err == nil {

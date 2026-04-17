@@ -86,3 +86,28 @@ func TestReportSettingsSaveError_PostsNotification(t *testing.T) {
 		t.Fatalf("expected notification body to include original error, got %q", gotBody)
 	}
 }
+
+func TestResolveModelPathForSettings_ReportsNotification(t *testing.T) {
+	originalPath := defaultModelPath
+	originalNotify := postNotification
+	defer func() {
+		defaultModelPath = originalPath
+		postNotification = originalNotify
+	}()
+
+	defaultModelPath = func(modelSize string) (string, error) {
+		return "", os.ErrPermission
+	}
+
+	var gotTitle, gotBody string
+	postNotification = func(title, body string) {
+		gotTitle, gotBody = title, body
+	}
+
+	if _, ok := resolveModelPathForSettings("small", "testOp"); ok {
+		t.Fatal("expected resolveModelPathForSettings to fail")
+	}
+	if gotTitle == "" || !strings.Contains(gotBody, "permission denied") {
+		t.Fatalf("expected notification for model path failure, got title=%q body=%q", gotTitle, gotBody)
+	}
+}

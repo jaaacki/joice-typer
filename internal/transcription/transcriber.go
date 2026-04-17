@@ -21,7 +21,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -442,28 +441,10 @@ func validateCachedModel(modelPath string, modelSize string, logger *slog.Logger
 		return false
 	}
 
-	// Check sidecar: if file size + mtime match what was stored alongside
-	// the hash, trust the cached verification without re-hashing.
+	// Always hash the cached model file before trusting it. The sidecar is
+	// only a mirror of the last verified hash, not a source of trust.
 	hashPath := modelPath + ".sha256"
-	sidecarData, sidecarErr := os.ReadFile(hashPath)
-	if sidecarErr == nil {
-		parts := strings.SplitN(strings.TrimSpace(string(sidecarData)), ":", 3)
-		if len(parts) == 3 {
-			cachedHash := parts[0]
-			cachedSize, sizeErr := strconv.ParseInt(parts[1], 10, 64)
-			cachedMtime, mtimeErr := strconv.ParseInt(parts[2], 10, 64)
-			if sizeErr != nil || mtimeErr != nil {
-				l.Warn("malformed sidecar, will re-hash",
-					"model_size", modelSize, "size_err", sizeErr, "mtime_err", mtimeErr)
-			}
-			if cachedHash == spec.sha256 && cachedSize == info.Size() && cachedMtime == info.ModTime().Unix() {
-				l.Info("model verified via cached metadata", "model_size", modelSize)
-				return true
-			}
-		}
-	}
 
-	// Sidecar missing, stale, or metadata mismatch — full hash required.
 	l.Info("hashing model file", "model_size", modelSize, "size", info.Size())
 	f, err := os.Open(modelPath)
 	if err != nil {
@@ -486,8 +467,8 @@ func validateCachedModel(modelPath string, modelSize string, logger *slog.Logger
 		return false
 	}
 
-	// Hash matches — write sidecar with metadata for fast-path next time
-	sidecar := fmt.Sprintf("%s:%d:%d", currentHash, info.Size(), info.ModTime().Unix())
+	// Hash matches — write the verified hash as a sidecar for diagnostics.
+	sidecar := currentHash
 	if err := os.WriteFile(hashPath, []byte(sidecar), 0644); err != nil {
 		l.Warn("failed to write hash cache", "error", err)
 	}
