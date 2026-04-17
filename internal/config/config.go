@@ -1,4 +1,4 @@
-package main
+package config
 
 import (
 	"bytes"
@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 
 	"gopkg.in/yaml.v3"
+	"voicetype/internal/keys"
 )
 
 //go:embed config_default.yaml
@@ -58,14 +59,19 @@ var validPunctuationModes = map[string]bool{
 	"opinionated":  true,
 }
 
+func IsValidDecodeMode(mode string) bool {
+	return validDecodeModes[mode]
+}
+
+func IsValidPunctuationMode(mode string) bool {
+	return validPunctuationModes[mode]
+}
+
 func isValidKey(k string) bool {
 	if validModifiers[k] {
 		return true
 	}
-	if _, ok := keyToKeycode[k]; ok {
-		return true
-	}
-	return false
+	return keys.IsKey(k)
 }
 
 var validLanguages = map[string]bool{
@@ -197,6 +203,30 @@ func LoadConfig(path string) (Config, error) {
 	}
 
 	return cfg, nil
+}
+
+func SaveConfig(path string, cfg Config) error {
+	if err := cfg.Validate(); err != nil {
+		return fmt.Errorf("config.SaveConfig: %w", err)
+	}
+
+	cfg.LegacyTypeMode = ""
+
+	data, err := yaml.Marshal(&cfg)
+	if err != nil {
+		return fmt.Errorf("config.SaveConfig: marshal: %w", err)
+	}
+
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return fmt.Errorf("config.SaveConfig: create dir: %w", err)
+	}
+
+	if err := atomicWriteFile(path, data, 0644); err != nil {
+		return fmt.Errorf("config.SaveConfig: write: %w", err)
+	}
+
+	return nil
 }
 
 func (c Config) Validate() error {

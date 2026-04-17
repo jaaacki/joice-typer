@@ -7,6 +7,8 @@ import (
 	"sync"
 	"time"
 
+	config "voicetype/internal/config"
+
 	"github.com/gordonklaus/portaudio"
 )
 
@@ -136,7 +138,7 @@ func ListInputDevices() error {
 }
 
 func listDevicesConfigHint() string {
-	cfgPath, err := DefaultConfigPath()
+	cfgPath, err := config.DefaultConfigPath()
 	if err != nil {
 		return "~/Library/Application Support/JoiceTyper/config.yaml"
 	}

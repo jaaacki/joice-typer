@@ -13,6 +13,9 @@ import (
 	"sync/atomic"
 	"syscall"
 	"time"
+
+	config "voicetype/internal/config"
+	version "voicetype/internal/version"
 )
 
 // activeHotkey holds the current hotkey listener for stop/restart.
@@ -27,7 +30,7 @@ func main() {
 	// The main goroutine must stay on the main OS thread for macOS CFRunLoop.
 	runtime.LockOSThread()
 
-	defaultCfgPath, defaultCfgErr := DefaultConfigPath()
+	defaultCfgPath, defaultCfgErr := config.DefaultConfigPath()
 	if defaultCfgErr != nil {
 		fmt.Fprintf(os.Stderr, "warning: could not resolve default config path: %v\n", defaultCfgErr)
 	}
@@ -37,7 +40,7 @@ func main() {
 	flag.Parse()
 
 	if *showVersion {
-		fmt.Println(FormatVersion(Version))
+		fmt.Println(version.FormatVersion(version.Version))
 		return
 	}
 
@@ -101,7 +104,7 @@ func suppressStderr(logDir string) {
 
 // runAppMode is the entry point when running inside a .app bundle.
 func runAppMode() {
-	logDir, err := DefaultConfigDir()
+	logDir, err := config.DefaultConfigDir()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "fatal: %v\n", err)
 		os.Exit(1)
@@ -118,7 +121,7 @@ func runAppMode() {
 	defer logCleanup()
 
 	settingsLogger = logger.With("component", "settings")
-	logger.Info("app starting", "component", "main", "operation", "runAppMode", "version", Version)
+	logger.Info("app starting", "component", "main", "operation", "runAppMode", "version", version.Version)
 
 	// Init PortAudio early (needed for device listing in setup wizard)
 	if err := InitAudio(); err != nil {
@@ -165,19 +168,19 @@ func runAppMode() {
 	}
 
 	// Load config (now exists after setup)
-	cfgPath, err := DefaultConfigPath()
+	cfgPath, err := config.DefaultConfigPath()
 	if err != nil {
 		logger.Error("failed to resolve config path", "component", "main", "operation", "runAppMode", "error", err)
 		os.Exit(1)
 	}
-	cfg, err := LoadConfig(cfgPath)
+	cfg, err := config.LoadConfig(cfgPath)
 	if err != nil {
 		logger.Error("failed to load config", "component", "main", "operation", "runAppMode", "error", err)
 		os.Exit(1)
 	}
 
 	// Load model
-	modelPath, err := DefaultModelPath(cfg.ModelSize)
+	modelPath, err := config.DefaultModelPath(cfg.ModelSize)
 	if err != nil {
 		logger.Error("failed to resolve model path", "component", "main", "operation", "runAppMode", "error", err)
 		os.Exit(1)
@@ -323,7 +326,7 @@ initFinished:
 			logger.Info("restarting hotkey with new config", "component", "main", "operation", "runAppMode")
 			// Reload config and recreate listener
 			oldCfg := cfg
-			cfg, err = LoadConfig(cfgPath)
+			cfg, err = config.LoadConfig(cfgPath)
 			if err != nil {
 				logger.Error("failed to reload config, keeping current hotkey",
 					"component", "main", "operation", "runAppMode", "error", err)
@@ -363,7 +366,7 @@ initFinished:
 			// Create new BEFORE closing old — if creation fails, keep the working one.
 			if oldCfg.Language != cfg.Language || oldCfg.ModelSize != cfg.ModelSize ||
 				oldCfg.DecodeMode != cfg.DecodeMode || oldCfg.PunctuationMode != cfg.PunctuationMode {
-				newModelPath, pathErr := DefaultModelPath(cfg.ModelSize)
+				newModelPath, pathErr := config.DefaultModelPath(cfg.ModelSize)
 				if pathErr != nil {
 					logger.Error("failed to resolve model path for transcriber reload",
 						"component", "main", "operation", "runAppMode", "error", pathErr)
@@ -426,14 +429,14 @@ initFinished:
 // runTerminalMode is the entry point for CLI invocations.
 func runTerminalMode(configPath string) {
 	// --- Load config ---
-	cfg, err := LoadConfig(configPath)
+	cfg, err := config.LoadConfig(configPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "fatal: %v\n", err)
 		os.Exit(1)
 	}
 
 	// --- Resolve log directory ---
-	logDir, err := DefaultConfigDir()
+	logDir, err := config.DefaultConfigDir()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "fatal: %v\n", err)
 		os.Exit(1)
@@ -449,7 +452,7 @@ func runTerminalMode(configPath string) {
 
 	logger.Info("starting voicetype",
 		"component", "main", "operation", "runTerminalMode",
-		"version", Version,
+		"version", version.Version,
 		"config_path", configPath,
 		"model_size", cfg.ModelSize,
 		"trigger_key", cfg.TriggerKey,
@@ -473,7 +476,7 @@ func runTerminalMode(configPath string) {
 	}()
 
 	// --- Resolve model path ---
-	modelPath, err := DefaultModelPath(cfg.ModelSize)
+	modelPath, err := config.DefaultModelPath(cfg.ModelSize)
 	if err != nil {
 		logger.Error("failed to resolve model path",
 			"component", "main", "operation", "runTerminalMode", "error", err)

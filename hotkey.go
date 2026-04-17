@@ -17,6 +17,9 @@ import (
 	"path/filepath"
 	"sync"
 	"time"
+
+	config "voicetype/internal/config"
+	keydefs "voicetype/internal/keys"
 )
 
 func (e HotkeyEvent) String() string {
@@ -120,30 +123,6 @@ var keyToFlag = map[string]uint64{
 	"cmd":    flagCmd,
 }
 
-var keyToKeycode = map[string]int{
-	"a": 0x00, "s": 0x01, "d": 0x02, "f": 0x03, "h": 0x04,
-	"g": 0x05, "z": 0x06, "x": 0x07, "c": 0x08, "v": 0x09,
-	"b": 0x0B, "q": 0x0C, "w": 0x0D, "e": 0x0E, "r": 0x0F,
-	"y": 0x10, "t": 0x11, "1": 0x12, "2": 0x13, "3": 0x14,
-	"4": 0x15, "6": 0x16, "5": 0x17, "7": 0x1A, "8": 0x1C,
-	"9": 0x19, "0": 0x1D, "p": 0x23, "o": 0x1F, "i": 0x22,
-	"u": 0x20, "l": 0x25, "j": 0x26, "k": 0x28, "n": 0x2D,
-	"m": 0x2E, "space": 0x31, "tab": 0x30, "return": 0x24,
-	"escape": 0x35, "delete": 0x33,
-	"f1": 0x7A, "f2": 0x78, "f3": 0x63, "f4": 0x76,
-	"f5": 0x60, "f6": 0x61, "f7": 0x62, "f8": 0x64,
-	"f9": 0x65, "f10": 0x6D, "f11": 0x67, "f12": 0x6F,
-}
-
-var keycodeToKey map[int]string // reverse map, built in init
-
-func init() {
-	keycodeToKey = make(map[int]string, len(keyToKeycode))
-	for k, v := range keyToKeycode {
-		keycodeToKey[v] = k
-	}
-}
-
 type cgEventHotkeyListener struct {
 	triggerKeys []string
 	logger      *slog.Logger
@@ -210,7 +189,7 @@ func saveBinaryHash(logger *slog.Logger) {
 		logger.Warn("failed to hash binary for save", "operation", "saveBinaryHash", "error", err)
 		return
 	}
-	dir, err := DefaultConfigDir()
+	dir, err := config.DefaultConfigDir()
 	if err != nil {
 		logger.Warn("failed to resolve config dir for hash save",
 			"operation", "saveBinaryHash", "error", err)
@@ -281,13 +260,13 @@ func (h *cgEventHotkeyListener) Stop() error {
 
 // parseHotkey separates trigger keys into modifier flags and an optional keycode.
 // Returns (flags, keycode, error). keycode is -1 if no regular key is specified.
-func parseHotkey(keys []string) (uint64, int, error) {
+func parseHotkey(triggerKeys []string) (uint64, int, error) {
 	var flags uint64
 	keycode := -1
-	for _, k := range keys {
+	for _, k := range triggerKeys {
 		if f, ok := keyToFlag[k]; ok {
 			flags |= f
-		} else if kc, ok := keyToKeycode[k]; ok {
+		} else if kc, ok := keydefs.Keycode(k); ok {
 			if keycode >= 0 {
 				return 0, -1, fmt.Errorf("hotkey.parseHotkey: only one regular key allowed, got %q and existing key", k)
 			}
@@ -322,11 +301,11 @@ func flagsToKeys(flags uint64) []string {
 }
 
 func hotkeyToKeys(flags uint64, keycode int) []string {
-	keys := flagsToKeys(flags)
+	triggerKeys := flagsToKeys(flags)
 	if keycode >= 0 {
-		if name, ok := keycodeToKey[keycode]; ok {
-			keys = append(keys, name)
+		if name, ok := keydefs.KeyName(keycode); ok {
+			triggerKeys = append(triggerKeys, name)
 		}
 	}
-	return keys
+	return triggerKeys
 }

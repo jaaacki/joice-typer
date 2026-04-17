@@ -7,7 +7,7 @@ MODEL_FILE := $(MODEL_DIR)/ggml-small.bin
 MODEL_URL := https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin
 VERSION_FILE := VERSION
 VERSION := $(shell tr -d '[:space:]' < $(VERSION_FILE))
-GO_LDFLAGS := -X 'main.Version=$(VERSION)'
+GO_LDFLAGS := -X 'voicetype/internal/version.Version=$(VERSION)'
 
 all: whisper build
 

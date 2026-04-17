@@ -13,15 +13,15 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 	"unsafe"
 
+	config "voicetype/internal/config"
+
 	"github.com/gordonklaus/portaudio"
-	"gopkg.in/yaml.v3"
 )
 
 var settingsLogger *slog.Logger
@@ -38,7 +38,7 @@ var postNotification = PostNotification
 
 // IsFirstRun returns true if no config file exists yet.
 func IsFirstRun() bool {
-	path, err := DefaultConfigPath()
+	path, err := config.DefaultConfigPath()
 	if err != nil {
 		return true
 	}
@@ -213,7 +213,7 @@ func modelBtn1Clicked() {
 	if deleteConfirmPending {
 		// "Confirm?" was clicked — actually delete
 		deleteConfirmPending = false
-		modelPath, err := DefaultModelPath(selected)
+		modelPath, err := config.DefaultModelPath(selected)
 		if err != nil {
 			return
 		}
@@ -227,7 +227,7 @@ func modelBtn1Clicked() {
 		return
 	}
 
-	modelPath, err := DefaultModelPath(selected)
+	modelPath, err := config.DefaultModelPath(selected)
 	if err != nil {
 		return
 	}
@@ -294,7 +294,7 @@ func updateModelButtonState() {
 	if selected == "" {
 		return
 	}
-	modelPath, err := DefaultModelPath(selected)
+	modelPath, err := config.DefaultModelPath(selected)
 	if err != nil {
 		return
 	}
@@ -318,12 +318,12 @@ func populateModelList(selectSize string) {
 	C.setActiveModelSize(cSize)
 	C.free(unsafe.Pointer(cSize))
 
-	sizes := make([]*C.char, len(ModelOptions))
-	descs := make([]*C.char, len(ModelOptions))
+	sizes := make([]*C.char, len(config.ModelOptions))
+	descs := make([]*C.char, len(config.ModelOptions))
 	defaultIdx := 0
-	for i, m := range ModelOptions {
+	for i, m := range config.ModelOptions {
 		sizes[i] = C.CString(m.Size)
-		modelPath, pathErr := DefaultModelPath(m.Size)
+		modelPath, pathErr := config.DefaultModelPath(m.Size)
 		cached := ""
 		if pathErr == nil {
 			if _, err := os.Stat(modelPath); err == nil {
@@ -335,7 +335,7 @@ func populateModelList(selectSize string) {
 			defaultIdx = i
 		}
 	}
-	C.populateSettingsModels(&sizes[0], &descs[0], C.int(len(ModelOptions)), C.int(defaultIdx))
+	C.populateSettingsModels(&sizes[0], &descs[0], C.int(len(config.ModelOptions)), C.int(defaultIdx))
 	for _, s := range sizes {
 		C.free(unsafe.Pointer(s))
 	}
@@ -346,17 +346,17 @@ func populateModelList(selectSize string) {
 }
 
 func populateLanguageList(selectedCode string) {
-	codes := make([]*C.char, len(WhisperLanguages))
-	names := make([]*C.char, len(WhisperLanguages))
+	codes := make([]*C.char, len(config.WhisperLanguages))
+	names := make([]*C.char, len(config.WhisperLanguages))
 	defaultIdx := 0
-	for i, lang := range WhisperLanguages {
+	for i, lang := range config.WhisperLanguages {
 		codes[i] = C.CString(lang.Code)
 		names[i] = C.CString(lang.Name)
 		if lang.Code == selectedCode {
 			defaultIdx = i
 		}
 	}
-	C.populateSettingsLanguages(&codes[0], &names[0], C.int(len(WhisperLanguages)), C.int(defaultIdx))
+	C.populateSettingsLanguages(&codes[0], &names[0], C.int(len(config.WhisperLanguages)), C.int(defaultIdx))
 	for _, c := range codes {
 		C.free(unsafe.Pointer(c))
 	}
@@ -366,17 +366,17 @@ func populateLanguageList(selectedCode string) {
 }
 
 func populateDecodeModeList(selectedCode string) {
-	codes := make([]*C.char, len(DecodeModeOptions))
-	names := make([]*C.char, len(DecodeModeOptions))
+	codes := make([]*C.char, len(config.DecodeModeOptions))
+	names := make([]*C.char, len(config.DecodeModeOptions))
 	defaultIdx := 0
-	for i, opt := range DecodeModeOptions {
+	for i, opt := range config.DecodeModeOptions {
 		codes[i] = C.CString(opt.Code)
 		names[i] = C.CString(opt.Name)
 		if opt.Code == selectedCode {
 			defaultIdx = i
 		}
 	}
-	C.populateSettingsDecodeModes(&codes[0], &names[0], C.int(len(DecodeModeOptions)), C.int(defaultIdx))
+	C.populateSettingsDecodeModes(&codes[0], &names[0], C.int(len(config.DecodeModeOptions)), C.int(defaultIdx))
 	for _, c := range codes {
 		C.free(unsafe.Pointer(c))
 	}
@@ -386,17 +386,17 @@ func populateDecodeModeList(selectedCode string) {
 }
 
 func populatePunctuationModeList(selectedCode string) {
-	codes := make([]*C.char, len(PunctuationModeOptions))
-	names := make([]*C.char, len(PunctuationModeOptions))
+	codes := make([]*C.char, len(config.PunctuationModeOptions))
+	names := make([]*C.char, len(config.PunctuationModeOptions))
 	defaultIdx := 0
-	for i, opt := range PunctuationModeOptions {
+	for i, opt := range config.PunctuationModeOptions {
 		codes[i] = C.CString(opt.Code)
 		names[i] = C.CString(opt.Name)
 		if opt.Code == selectedCode {
 			defaultIdx = i
 		}
 	}
-	C.populateSettingsPunctuationModes(&codes[0], &names[0], C.int(len(PunctuationModeOptions)), C.int(defaultIdx))
+	C.populateSettingsPunctuationModes(&codes[0], &names[0], C.int(len(config.PunctuationModeOptions)), C.int(defaultIdx))
 	for _, c := range codes {
 		C.free(unsafe.Pointer(c))
 	}
@@ -412,11 +412,11 @@ func requireSettingSelection(fieldName string, value string) (string, error) {
 	}
 	switch fieldName {
 	case "decode_mode":
-		if !validDecodeModes[value] {
+		if !config.IsValidDecodeMode(value) {
 			return "", fmt.Errorf("settings.requireSettingSelection: invalid %s selection %q", fieldName, value)
 		}
 	case "punctuation_mode":
-		if !validPunctuationModes[value] {
+		if !config.IsValidPunctuationMode(value) {
 			return "", fmt.Errorf("settings.requireSettingSelection: invalid %s selection %q", fieldName, value)
 		}
 	}
@@ -428,7 +428,7 @@ func reportSettingsSaveError(detail string) {
 }
 
 func writeSetupConfig(deviceName string, language string, modelSize string, triggerKeys []string, l *slog.Logger) error {
-	cfgPath, err := DefaultConfigPath()
+	cfgPath, err := config.DefaultConfigPath()
 	if err != nil {
 		return fmt.Errorf("settings.writeSetupConfig: %w", err)
 	}
@@ -442,7 +442,7 @@ func writeSetupConfig(deviceName string, language string, modelSize string, trig
 		return fmt.Errorf("settings.writeSetupConfig: %w", err)
 	}
 
-	cfg := Config{
+	cfg := config.Config{
 		TriggerKey:      triggerKeys,
 		ModelSize:       modelSize,
 		Language:        language,
@@ -458,17 +458,7 @@ func writeSetupConfig(deviceName string, language string, modelSize string, trig
 		return fmt.Errorf("settings.writeSetupConfig: invalid settings from UI: %w", err)
 	}
 
-	data, err := yaml.Marshal(&cfg)
-	if err != nil {
-		return fmt.Errorf("settings.writeSetupConfig: marshal: %w", err)
-	}
-
-	dir := filepath.Dir(cfgPath)
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		return fmt.Errorf("settings.writeSetupConfig: create dir: %w", err)
-	}
-
-	if err := atomicWriteFile(cfgPath, data, 0644); err != nil {
+	if err := config.SaveConfig(cfgPath, cfg); err != nil {
 		return fmt.Errorf("settings.writeSetupConfig: write: %w", err)
 	}
 
@@ -526,13 +516,13 @@ func OpenPreferences() {
 	prefsCtx, prefsCancel = context.WithCancel(context.Background())
 	prefsMu.Unlock()
 
-	cfgPath, err := DefaultConfigPath()
+	cfgPath, err := config.DefaultConfigPath()
 	if err != nil {
 		settingsLogger.Error("failed to resolve config path", "operation", "OpenPreferences", "error", err)
 		atomic.StoreInt32(&prefsOpen, 0)
 		return
 	}
-	cfg, err := LoadConfig(cfgPath)
+	cfg, err := config.LoadConfig(cfgPath)
 	if err != nil {
 		settingsLogger.Error("failed to load config", "operation", "OpenPreferences", "error", err)
 		atomic.StoreInt32(&prefsOpen, 0)
@@ -576,7 +566,7 @@ func OpenPreferences() {
 
 // openPreferencesWait blocks until the preferences window closes, then
 // saves config and signals a hotkey restart. Runs on a background goroutine.
-func openPreferencesWait(cfg Config, cfgPath string) {
+func openPreferencesWait(cfg config.Config, cfgPath string) {
 	defer atomic.StoreInt32(&prefsOpen, 0)
 
 	// Poll permissions in background so UI updates if user grants them
@@ -675,13 +665,7 @@ func openPreferencesWait(cfg Config, cfgPath string) {
 		"model", cfg.ModelSize, "decode_mode", cfg.DecodeMode,
 		"punctuation_mode", cfg.PunctuationMode, "vocabulary_length", len(cfg.Vocabulary))
 
-	data, marshalErr := yaml.Marshal(&cfg)
-	if marshalErr != nil {
-		settingsLogger.Error("failed to marshal config", "operation", "openPreferencesWait", "error", marshalErr)
-		reportSettingsSaveError(marshalErr.Error())
-		return
-	}
-	if writeErr := atomicWriteFile(cfgPath, data, 0644); writeErr != nil {
+	if writeErr := config.SaveConfig(cfgPath, cfg); writeErr != nil {
 		settingsLogger.Error("failed to write config", "operation", "openPreferencesWait", "error", writeErr)
 		reportSettingsSaveError(writeErr.Error())
 		return

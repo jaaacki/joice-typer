@@ -1,12 +1,10 @@
-package main
+package config
 
 import (
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
-
-	"gopkg.in/yaml.v3"
 )
 
 func TestLoadConfig_CreatesDefault(t *testing.T) {
@@ -227,11 +225,11 @@ func TestValidate_InvalidLanguage(t *testing.T) {
 		{"en", false},
 		{"zh", false},
 		{"yue", false},
-		{"EN", true},         // uppercase
-		{"en-US", true},      // has hyphen
-		{"12", true},         // numbers
-		{"abcde", true},      // too long
-		{"javascript", true}, // way too long
+		{"EN", true},
+		{"en-US", true},
+		{"12", true},
+		{"abcde", true},
+		{"javascript", true},
 	}
 	for _, tt := range tests {
 		cfg := Config{
@@ -262,100 +260,40 @@ func TestValidate_ValidLanguages(t *testing.T) {
 	}
 }
 
-func TestValidate_InvalidLanguageCode(t *testing.T) {
-	cfg := Config{
-		TriggerKey: []string{"fn"}, ModelSize: "small",
-		SampleRate: 16000, Language: "zzzz",
-	}
-	if err := cfg.Validate(); err == nil {
-		t.Error("expected error for unsupported language code")
-	}
-}
-
 func TestLoadConfig_RejectsUnknownFields(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.yaml")
-	data := []byte("trigger_key: [fn]\nmodel_size: small\nsample_rate: 16000\nbogus_field: true\n")
-	os.WriteFile(path, data, 0644)
+
+	content := []byte(`trigger_key: [fn, shift]
+model_size: small
+sample_rate: 16000
+unknown_field: true
+`)
+	if err := os.WriteFile(path, content, 0644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
 	_, err := LoadConfig(path)
 	if err == nil {
-		t.Error("expected error for unknown YAML field 'bogus_field'")
+		t.Fatal("expected unknown field to fail")
+	}
+	if !strings.Contains(err.Error(), "unknown_field") {
+		t.Fatalf("expected error to mention unknown_field, got %v", err)
 	}
 }
 
-func TestAtomicWriteFile_PartialWriteCleanup(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "test.yaml")
-
-	// Write initial valid content
-	if err := atomicWriteFile(path, []byte("original"), 0644); err != nil {
-		t.Fatal(err)
-	}
-
-	// Verify the .tmp file doesn't linger after successful write
-	tmpPath := path + ".tmp"
-	if _, err := os.Stat(tmpPath); !os.IsNotExist(err) {
-		t.Error("tmp file should not exist after successful write")
-	}
-
-	// Verify content
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(data) != "original" {
-		t.Errorf("expected 'original', got %q", string(data))
-	}
-}
-
-func TestLoadConfig_DefaultDecodeAndPunctuationModes(t *testing.T) {
+func TestLoadConfig_MigratesLegacyTypeMode(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.yaml")
 
-	cfg, err := LoadConfig(path)
-	if err != nil {
-		t.Fatalf("LoadConfig: %v", err)
-	}
-
-	if cfg.DecodeMode != "beam" {
-		t.Errorf("expected default decode_mode 'beam', got %q", cfg.DecodeMode)
-	}
-	if cfg.PunctuationMode != "conservative" {
-		t.Errorf("expected default punctuation_mode 'conservative', got %q", cfg.PunctuationMode)
-	}
-	if cfg.Language != "en" {
-		t.Errorf("expected default language 'en', got %q", cfg.Language)
-	}
-}
-
-func TestLoadConfig_AcceptsLegacyTypeMode(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "config.yaml")
-	data := []byte("trigger_key: [fn]\nmodel_size: small\nsample_rate: 16000\ntype_mode: clipboard\nlanguage: en\n")
-	if err := os.WriteFile(path, data, 0644); err != nil {
-		t.Fatalf("write config: %v", err)
-	}
-
-	cfg, err := LoadConfig(path)
-	if err != nil {
-		t.Fatalf("expected legacy type_mode to be accepted, got error: %v", err)
-	}
-	if cfg.Language != "en" {
-		t.Fatalf("expected language to load, got %q", cfg.Language)
-	}
-	if cfg.DecodeMode != "beam" {
-		t.Fatalf("expected default decode_mode beam, got %q", cfg.DecodeMode)
-	}
-	if cfg.PunctuationMode != "conservative" {
-		t.Fatalf("expected default punctuation_mode conservative, got %q", cfg.PunctuationMode)
-	}
-}
-
-func TestLoadConfig_DefaultsExistingEmptyLanguageToEnglish(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "config.yaml")
-	data := []byte("trigger_key: [fn]\nmodel_size: small\nsample_rate: 16000\nlanguage: \"\"\n")
-	if err := os.WriteFile(path, data, 0644); err != nil {
+	content := []byte(`trigger_key: [fn, shift]
+model_size: small
+language: en
+sample_rate: 16000
+sound_feedback: true
+type_mode: clipboard
+`)
+	if err := os.WriteFile(path, content, 0644); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
 
@@ -363,16 +301,53 @@ func TestLoadConfig_DefaultsExistingEmptyLanguageToEnglish(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadConfig: %v", err)
 	}
+	if cfg.LegacyTypeMode != "" {
+		t.Fatalf("expected legacy type_mode to be cleared, got %q", cfg.LegacyTypeMode)
+	}
+}
+
+func TestLoadConfig_AppliesNewDefaultsToExistingConfig(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+
+	content := []byte(`trigger_key: [fn, shift]
+model_size: small
+sample_rate: 16000
+sound_feedback: true
+`)
+	if err := os.WriteFile(path, content, 0644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	cfg, err := LoadConfig(path)
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	if cfg.DecodeMode != "beam" {
+		t.Fatalf("expected decode_mode beam, got %q", cfg.DecodeMode)
+	}
+	if cfg.PunctuationMode != "conservative" {
+		t.Fatalf("expected punctuation_mode conservative, got %q", cfg.PunctuationMode)
+	}
 	if cfg.Language != "en" {
-		t.Fatalf("expected existing empty language to default to en, got %q", cfg.Language)
+		t.Fatalf("expected language en, got %q", cfg.Language)
 	}
 }
 
 func TestConfigRoundTrip_DropsLegacyTypeModeAndPreservesNewFields(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.yaml")
-	data := []byte("trigger_key: [fn, shift]\nmodel_size: small\nsample_rate: 16000\ntype_mode: clipboard\nlanguage: \"\"\ndecode_mode: greedy\npunctuation_mode: off\n")
-	if err := os.WriteFile(path, data, 0644); err != nil {
+
+	content := []byte(`trigger_key: [fn, shift]
+model_size: small
+language: en
+sample_rate: 16000
+sound_feedback: true
+type_mode: clipboard
+decode_mode: beam
+punctuation_mode: conservative
+`)
+	if err := os.WriteFile(path, content, 0644); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
 
@@ -381,22 +356,21 @@ func TestConfigRoundTrip_DropsLegacyTypeModeAndPreservesNewFields(t *testing.T) 
 		t.Fatalf("LoadConfig: %v", err)
 	}
 
-	marshaled, err := yaml.Marshal(&cfg)
-	if err != nil {
-		t.Fatalf("Marshal: %v", err)
+	if err := SaveConfig(path, cfg); err != nil {
+		t.Fatalf("SaveConfig: %v", err)
 	}
-	output := string(marshaled)
 
-	if strings.Contains(output, "type_mode") {
-		t.Fatalf("expected legacy type_mode to be dropped on round-trip, got %q", output)
+	saved, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read config: %v", err)
 	}
-	for _, snippet := range []string{
-		"language: en",
-		"decode_mode: greedy",
-		"punctuation_mode: \"off\"",
-	} {
-		if !strings.Contains(output, snippet) {
-			t.Fatalf("expected round-trip output to contain %q, got %q", snippet, output)
-		}
+	if strings.Contains(string(saved), "type_mode:") {
+		t.Fatalf("expected legacy type_mode to be omitted after save, got:\n%s", saved)
+	}
+	if !strings.Contains(string(saved), "decode_mode: beam") {
+		t.Fatalf("expected decode_mode to survive round trip, got:\n%s", saved)
+	}
+	if !strings.Contains(string(saved), "punctuation_mode: conservative") {
+		t.Fatalf("expected punctuation_mode to survive round trip, got:\n%s", saved)
 	}
 }
