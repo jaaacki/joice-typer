@@ -1,4 +1,6 @@
-package main
+//go:build darwin
+
+package launcher
 
 import (
 	"context"
@@ -18,15 +20,7 @@ import (
 	version "voicetype/internal/version"
 )
 
-// activeHotkey holds the current hotkey listener for stop/restart.
-// Protected by activeHotkeyMu. Used by signalHotkeyRestart() in settings.go
-// and the signal handler.
-var (
-	activeHotkeyMu sync.Mutex
-	activeHotkey   HotkeyListener
-)
-
-func main() {
+func Main() {
 	// The main goroutine must stay on the main OS thread for macOS CFRunLoop.
 	runtime.LockOSThread()
 
@@ -120,7 +114,7 @@ func runAppMode() {
 	}
 	defer logCleanup()
 
-	settingsLogger = logger.With("component", "settings")
+	SetSettingsLogger(logger.With("component", "settings"))
 	logger.Info("app starting", "component", "main", "operation", "runAppMode", "version", version.Version)
 
 	// Init PortAudio early (needed for device listing in setup wizard)
@@ -145,9 +139,7 @@ func runAppMode() {
 		logger.Info("received signal", "component", "main", "operation", "signal", "signal", sig.String())
 		shutdownRequested.Store(true)
 		startupCancel() // cancel permission polling and setup wizard
-		activeHotkeyMu.Lock()
-		h := activeHotkey
-		activeHotkeyMu.Unlock()
+		h := ActiveHotkey()
 		if h != nil {
 			if stopErr := h.Stop(); stopErr != nil {
 				logger.Error("failed to stop hotkey", "component", "main", "operation", "signal", "error", stopErr)
@@ -196,9 +188,7 @@ func runAppMode() {
 	events := make(chan HotkeyEvent, 32)
 	hotkey := NewHotkeyListener(cfg.TriggerKey, logger)
 
-	activeHotkeyMu.Lock()
-	activeHotkey = hotkey
-	activeHotkeyMu.Unlock()
+	SetActiveHotkey(hotkey)
 
 	// Launch all heavy init work in a background goroutine.
 	initDone := make(chan error, 1)
@@ -253,7 +243,7 @@ func runAppMode() {
 
 		// Step 3: Create app components
 		recorder = NewRecorder(cfg.SampleRate, cfg.InputDevice, logger)
-		settingsRecorder = recorder // expose to settings.go for safe device refresh
+		SetSettingsRecorder(recorder)
 		recorder.Warm()             // pre-open audio stream for instant recording start
 		paster := NewPaster(logger)
 		sound = NewSound(cfg.SoundFeedback, logger)
@@ -296,9 +286,7 @@ func runAppMode() {
 		case err := <-initDone:
 			if err != nil {
 				logger.Error("startup failed", "component", "main", "operation", "runAppMode", "error", err)
-				hotkeyMu.Lock()
-				hotkeyEvents = nil
-				hotkeyMu.Unlock()
+				ClearHotkeyEvents()
 				close(events)
 				return
 			}
@@ -333,9 +321,7 @@ initFinished:
 				continue // retry with existing hotkey
 			}
 			hotkey = NewHotkeyListener(cfg.TriggerKey, logger)
-			activeHotkeyMu.Lock()
-			activeHotkey = hotkey
-			activeHotkeyMu.Unlock()
+			SetActiveHotkey(hotkey)
 
 			// Wait for app to become idle before swapping dependencies
 			for i := 0; i < 50; i++ { // 5 seconds max
@@ -357,7 +343,7 @@ initFinished:
 					logger.Error("failed to close old recorder", "component", "main", "operation", "runAppMode", "error", closeErr)
 				}
 				recorder = NewRecorder(cfg.SampleRate, cfg.InputDevice, logger)
-				settingsRecorder = recorder // update settings.go reference
+				SetSettingsRecorder(recorder)
 				app.SetRecorder(recorder)
 				logger.Info("recorder updated", "component", "main", "operation", "runAppMode", "device", cfg.InputDevice)
 			}
@@ -416,9 +402,7 @@ initFinished:
 		break
 	}
 
-	hotkeyMu.Lock()
-	hotkeyEvents = nil
-	hotkeyMu.Unlock()
+	ClearHotkeyEvents()
 	SetPowerEventHandler(nil)
 	close(events)
 	wg.Wait()
@@ -546,9 +530,7 @@ func runTerminalMode(configPath string) {
 	}
 
 	// Nil the global channel to prevent late C callbacks from sending on closed channel
-	hotkeyMu.Lock()
-	hotkeyEvents = nil
-	hotkeyMu.Unlock()
+	ClearHotkeyEvents()
 	close(events)
 
 	// Wait for the app goroutine to finish processing and shut down

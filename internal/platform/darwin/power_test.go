@@ -1,4 +1,6 @@
-package main
+//go:build darwin
+
+package darwin
 
 import (
 	"context"
@@ -11,7 +13,7 @@ func TestPowerEventHandler_SleepMarksRecorderStale(t *testing.T) {
 	rec := &mockRecorder{}
 	app := NewApp(rec, &mockTranscriber{}, &mockPaster{}, NewSound(false, slog.Default()), slog.Default())
 
-	handler := makePowerEventHandler(app, func() Recorder { return rec }, slog.Default())
+	handler := MakePowerEventHandler(app, func() Recorder { return rec }, slog.Default())
 	handler(PowerEventSleep)
 
 	rec.mu.Lock()
@@ -25,7 +27,7 @@ func TestPowerEventHandler_WakeRefreshesWhenIdle(t *testing.T) {
 	rec := &mockRecorder{}
 	app := NewApp(rec, &mockTranscriber{}, &mockPaster{}, NewSound(false, slog.Default()), slog.Default())
 
-	handler := makePowerEventHandler(app, func() Recorder { return rec }, slog.Default())
+	handler := MakePowerEventHandler(app, func() Recorder { return rec }, slog.Default())
 	handler(PowerEventWake)
 
 	rec.mu.Lock()
@@ -52,7 +54,7 @@ func TestPowerEventHandler_WakeSkipsRefreshWhenBusy(t *testing.T) {
 	events <- TriggerReleased
 	time.Sleep(100 * time.Millisecond)
 
-	handler := makePowerEventHandler(app, func() Recorder { return rec }, slog.Default())
+	handler := MakePowerEventHandler(app, func() Recorder { return rec }, slog.Default())
 	handler(PowerEventWake)
 
 	close(blockCh)

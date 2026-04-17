@@ -1,4 +1,6 @@
-package main
+//go:build darwin
+
+package darwin
 
 /*
 #cgo LDFLAGS: -framework Cocoa

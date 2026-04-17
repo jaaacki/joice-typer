@@ -1,4 +1,4 @@
-.PHONY: all setup build clean download-model whisper test app dmg release-check
+.PHONY: all setup build clean download-model whisper test app dmg release-check build-windows-amd64
 
 WHISPER_DIR := third_party/whisper.cpp
 WHISPER_BUILD := $(WHISPER_DIR)/build
@@ -24,7 +24,7 @@ whisper:
 	cd $(WHISPER_DIR) && cmake --build build --config Release -j$$(sysctl -n hw.ncpu)
 
 build: whisper
-	CGO_ENABLED=1 go build -ldflags "$(GO_LDFLAGS)" -o voicetype .
+	CGO_ENABLED=1 go build -ldflags "$(GO_LDFLAGS)" -o voicetype ./cmd/joicetyper
 
 download-model: $(MODEL_FILE)
 
@@ -83,3 +83,7 @@ release-check:
 	@test -n "$(RELEASE_TAG)" || (echo "fatal: no release tag provided or checked out" && exit 1)
 	@test "v$(VERSION)" = "$(RELEASE_TAG)" || (echo "fatal: release tag $(RELEASE_TAG) does not match VERSION $(VERSION)" && exit 1)
 	@echo "Release tag $(RELEASE_TAG) matches VERSION $(VERSION)"
+
+build-windows-amd64:
+	mkdir -p build/windows-amd64
+	GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -ldflags "$(GO_LDFLAGS)" -o build/windows-amd64/joicetyper.exe ./cmd/joicetyper

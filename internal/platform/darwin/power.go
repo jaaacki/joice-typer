@@ -1,4 +1,6 @@
-package main
+//go:build darwin
+
+package darwin
 
 /*
 #cgo LDFLAGS: -framework Cocoa
@@ -50,7 +52,7 @@ func powerEventCallback(eventType C.int) {
 	}
 }
 
-func makePowerEventHandler(app *App, recorder func() Recorder, logger *slog.Logger) func(PowerEvent) {
+func MakePowerEventHandler(app *App, recorder func() Recorder, logger *slog.Logger) func(PowerEvent) {
 	l := logger.With("component", "power")
 	return func(event PowerEvent) {
 		rec := recorder()

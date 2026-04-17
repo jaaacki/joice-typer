@@ -1,4 +1,6 @@
-package main
+//go:build darwin
+
+package darwin
 
 /*
 #cgo LDFLAGS: -framework Cocoa -framework ApplicationServices
@@ -20,6 +22,7 @@ import (
 	"unsafe"
 
 	config "voicetype/internal/config"
+	transcriptionpkg "voicetype/internal/transcription"
 
 	"github.com/gordonklaus/portaudio"
 )
@@ -243,7 +246,7 @@ func modelBtn1Clicked() {
 			if ctx == nil {
 				ctx = context.Background()
 			}
-			dlErr := downloadModelWithProgress(ctx, modelPath, selected, func(progress float64, downloaded, total int64) {
+			dlErr := transcriptionpkg.DownloadModelWithProgress(ctx, modelPath, selected, func(progress float64, downloaded, total int64) {
 				C.updateDownloadProgress(C.double(progress), C.longlong(downloaded), C.longlong(total))
 			}, settingsLogger)
 			if dlErr != nil {
@@ -550,7 +553,7 @@ func OpenPreferences() {
 	populateModelList(cfg.ModelSize)
 	populateMicList(cfg.InputDevice, settingsLogger)
 
-	display := formatHotkeyDisplay(cfg.TriggerKey)
+	display := FormatHotkeyDisplay(cfg.TriggerKey)
 	cDisplay := C.CString(display)
 	C.setSettingsHotkey(cDisplay)
 	C.free(unsafe.Pointer(cDisplay))
@@ -675,7 +678,7 @@ func openPreferencesWait(cfg config.Config, cfgPath string) {
 	signalHotkeyRestart()
 }
 
-func formatHotkeyDisplay(keys []string) string {
+func FormatHotkeyDisplay(keys []string) string {
 	nameMap := map[string]string{
 		"fn": "Fn", "shift": "Shift", "ctrl": "Ctrl",
 		"option": "Option", "cmd": "Cmd",
