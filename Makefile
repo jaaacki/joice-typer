@@ -2,7 +2,8 @@
 
 WHISPER_DIR := third_party/whisper.cpp
 WHISPER_BUILD := $(WHISPER_DIR)/build
-MODEL_DIR := $(HOME)/.config/voicetype/models
+APP_SUPPORT_DIR := $(HOME)/Library/Application Support/JoiceTyper
+MODEL_DIR := $(APP_SUPPORT_DIR)/models
 MODEL_FILE := $(MODEL_DIR)/ggml-small.bin
 MODEL_URL := https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin
 VERSION_FILE := VERSION
@@ -34,12 +35,14 @@ build: whisper
 download-model: $(MODEL_FILE)
 
 $(MODEL_FILE):
-	mkdir -p $(MODEL_DIR)
-	curl -L --progress-bar -o $(MODEL_FILE) $(MODEL_URL)
+	mkdir -p "$(MODEL_DIR)"
+	curl -L --progress-bar -o "$(MODEL_FILE)" "$(MODEL_URL)"
 
 APP_NAME := JoiceTyper
 APP_BUNDLE := $(APP_NAME).app
 PLIST_TEMPLATE := Info.plist.tmpl
+PORTAUDIO_PREFIX ?= $(shell brew --prefix portaudio 2>/dev/null || echo /opt/homebrew/opt/portaudio)
+PORTAUDIO_DYLIB := $(PORTAUDIO_PREFIX)/lib/libportaudio.2.dylib
 
 clean:
 	rm -rf build
@@ -58,8 +61,8 @@ app: build
 	sed "s/{{VERSION}}/$(VERSION)/g" $(PLIST_TEMPLATE) > $(APP_BUNDLE)/Contents/Info.plist
 	@if [ -f icon.icns ]; then cp icon.icns $(APP_BUNDLE)/Contents/Resources/; fi
 	@# Bundle PortAudio dylib and fix load path
-	cp /opt/homebrew/opt/portaudio/lib/libportaudio.2.dylib $(APP_BUNDLE)/Contents/Frameworks/
-	install_name_tool -change /opt/homebrew/opt/portaudio/lib/libportaudio.2.dylib \
+	cp "$(PORTAUDIO_DYLIB)" $(APP_BUNDLE)/Contents/Frameworks/
+	install_name_tool -change "$(PORTAUDIO_DYLIB)" \
 		@executable_path/../Frameworks/libportaudio.2.dylib \
 		$(APP_BUNDLE)/Contents/MacOS/$(APP_NAME)
 	codesign --force --sign - $(APP_BUNDLE)/Contents/Frameworks/libportaudio.2.dylib
