@@ -10,6 +10,10 @@ static NSTextField *sStep2Status = nil;
 static NSPopUpButton *sMicDropdown = nil;
 static NSPopUpButton *sLangDropdown = nil;
 static char sSelectedLangBuffer[8] = {0};
+static NSPopUpButton *sDecodeDropdown = nil;
+static char sSelectedDecodeBuffer[16] = {0};
+static NSPopUpButton *sPunctuationDropdown = nil;
+static char sSelectedPunctuationBuffer[32] = {0};
 static NSPopUpButton *sModelDropdown = nil;
 static NSButton *sModelBtn1 = nil;      // "In Use" / "Use" / "Download"
 static NSButton *sModelBtn2 = nil;      // "Delete" / "Confirm?" / "Cancel"
@@ -21,6 +25,7 @@ static NSTextField *sStep7Status = nil;
 static NSScrollView *sVocabScrollView = nil;
 static NSTextView *sVocabTextView = nil;
 static NSButton *sContinueButton = nil;
+static NSButton *sSaveButton = nil;
 static BOOL sSetupComplete = NO;
 static NSTextField *sStep1Indicator = nil;
 static NSTextField *sStep2Indicator = nil;
@@ -31,7 +36,6 @@ static char sSelectedDeviceBuffer[512] = {0};
 
 static BOOL sAccessibilityGranted = NO;
 static BOOL sInputMonitoringGranted = NO;
-static BOOL sDownloadComplete = NO;
 static BOOL sIsOnboarding = YES;
 static dispatch_semaphore_t sWindowDone = NULL;
 
@@ -296,10 +300,9 @@ void showSettingsWindow(int onboarding) {
         sRecordedFlags = 0;
         sRecordedKeycode = -1;
 
-        // Reset permission/download tracking for onboarding gate
+        // Reset permission tracking for onboarding gate
         sAccessibilityGranted = NO;
         sInputMonitoringGranted = NO;
-        sDownloadComplete = NO;
 
         sIsOnboarding = (onboarding != 0);
         sSetupComplete = NO;
@@ -312,6 +315,7 @@ void showSettingsWindow(int onboarding) {
             // In prefs mode: no Save button — auto-saves on close (red X).
             // In onboarding mode: button visible, enabled when permissions granted.
             sContinueButton.hidden = !sIsOnboarding;
+            sSaveButton.hidden = sIsOnboarding;
             sContinueButton.enabled = NO;
 
             // Reset step indicators to initial state
@@ -341,7 +345,7 @@ void showSettingsWindow(int onboarding) {
         }
 
         // First-time window creation
-        CGFloat w = 480, h = 950;
+        CGFloat w = 480, h = 1060;
         NSRect frame = NSMakeRect(0, 0, w, h);
         sSetupWindow = [[NSWindow alloc]
             initWithContentRect:frame
@@ -453,12 +457,34 @@ void showSettingsWindow(int onboarding) {
         [content addSubview:sLangDropdown];
         y -= 36;
 
-        // Step 5: Hotkey
-        NSTextField *s5HkIndicator = makeLabel(@"\u2328\uFE0F", 16, NO, [NSColor labelColor], NSMakeRect(pad, y, 24, 24));
-        [content addSubview:s5HkIndicator];
-        NSTextField *s5title = makeLabel(@"5. Hotkey", 13, YES,
+        // Step 5: Decode mode
+        NSTextField *s5DecodeIndicator = makeLabel(@"\u2699\uFE0F", 16, NO, [NSColor labelColor], NSMakeRect(pad, y, 24, 24));
+        [content addSubview:s5DecodeIndicator];
+        NSTextField *s5title = makeLabel(@"5. Decode Quality", 13, YES,
             [NSColor labelColor], NSMakeRect(pad + 28, y, innerW - 28, 20));
         [content addSubview:s5title];
+        y -= 28;
+        sDecodeDropdown = [[NSPopUpButton alloc] initWithFrame:NSMakeRect(pad + 28, y, innerW - 28, 26) pullsDown:NO];
+        [content addSubview:sDecodeDropdown];
+        y -= 36;
+
+        // Step 6: Punctuation mode
+        NSTextField *s6PunctuationIndicator = makeLabel(@"\u270D\uFE0F", 16, NO, [NSColor labelColor], NSMakeRect(pad, y, 24, 24));
+        [content addSubview:s6PunctuationIndicator];
+        NSTextField *s6title = makeLabel(@"6. Punctuation", 13, YES,
+            [NSColor labelColor], NSMakeRect(pad + 28, y, innerW - 28, 20));
+        [content addSubview:s6title];
+        y -= 28;
+        sPunctuationDropdown = [[NSPopUpButton alloc] initWithFrame:NSMakeRect(pad + 28, y, innerW - 28, 26) pullsDown:NO];
+        [content addSubview:sPunctuationDropdown];
+        y -= 36;
+
+        // Step 7: Hotkey
+        NSTextField *s7HkIndicator = makeLabel(@"\u2328\uFE0F", 16, NO, [NSColor labelColor], NSMakeRect(pad, y, 24, 24));
+        [content addSubview:s7HkIndicator];
+        NSTextField *s7title = makeLabel(@"7. Hotkey", 13, YES,
+            [NSColor labelColor], NSMakeRect(pad + 28, y, innerW - 28, 20));
+        [content addSubview:s7title];
         y -= 28;
 
         sHotkeyLabel = makeLabel(@"Fn + Shift", 12, NO,
@@ -490,12 +516,12 @@ void showSettingsWindow(int onboarding) {
 
         y -= 36;
 
-        // Step 6: Speech Model
+        // Step 8: Speech Model
         sStep6Indicator = makeLabel(@"\U0001F9E0", 16, NO, [NSColor labelColor], NSMakeRect(pad, y, 24, 24));
         [content addSubview:sStep6Indicator];
-        NSTextField *s6title = makeLabel(@"6. Speech Model", 13, YES,
+        NSTextField *s8title = makeLabel(@"8. Speech Model", 13, YES,
             [NSColor labelColor], NSMakeRect(pad + 28, y, innerW - 28, 20));
-        [content addSubview:s6title];
+        [content addSubview:s8title];
         y -= 28;
         sModelDropdown = [[NSPopUpButton alloc] initWithFrame:NSMakeRect(pad + 28, y, innerW - 28, 26) pullsDown:NO];
         sModelDropdown.target = sSetupDelegate;
@@ -533,12 +559,12 @@ void showSettingsWindow(int onboarding) {
         [content addSubview:sProgressLabel];
         y -= 28;
 
-        // Step 7: Words You Use Often
-        NSTextField *s7VocabIndicator = makeLabel(@"\U0001F4AC", 16, NO, [NSColor labelColor], NSMakeRect(pad, y, 24, 24));
-        [content addSubview:s7VocabIndicator];
-        NSTextField *s7title = makeLabel(@"7. Words You Use Often", 13, YES,
+        // Step 9: Words You Use Often
+        NSTextField *s9VocabIndicator = makeLabel(@"\U0001F4AC", 16, NO, [NSColor labelColor], NSMakeRect(pad, y, 24, 24));
+        [content addSubview:s9VocabIndicator];
+        NSTextField *s9title = makeLabel(@"9. Words You Use Often", 13, YES,
             [NSColor labelColor], NSMakeRect(pad + 28, y, innerW - 28, 20));
-        [content addSubview:s7title];
+        [content addSubview:s9title];
         y -= 22;
 
         // Description (above text box)
@@ -566,13 +592,13 @@ void showSettingsWindow(int onboarding) {
         y -= (120 + 8);
 
         // Save button (preferences mode only — right-aligned, below vocabulary)
-        NSButton *saveBtn = [[NSButton alloc] initWithFrame:NSMakeRect(w - pad - 80, y - 28, 80, 28)];
-        saveBtn.title = @"Save";
-        saveBtn.bezelStyle = NSBezelStyleRounded;
-        saveBtn.target = sSetupDelegate;
-        saveBtn.action = @selector(continueClicked:);
-        saveBtn.hidden = sIsOnboarding;
-        [content addSubview:saveBtn];
+        sSaveButton = [[NSButton alloc] initWithFrame:NSMakeRect(w - pad - 80, y - 28, 80, 28)];
+        sSaveButton.title = @"Save";
+        sSaveButton.bezelStyle = NSBezelStyleRounded;
+        sSaveButton.target = sSetupDelegate;
+        sSaveButton.action = @selector(continueClicked:);
+        sSaveButton.hidden = sIsOnboarding;
+        [content addSubview:sSaveButton];
         y -= 36;
 
         // Continue button (bottom right, initially disabled)
@@ -641,7 +667,6 @@ void populateSetupDevices(const char **deviceNames, int count, int defaultIndex)
 
 void updateSetupDownloadComplete(void) {
     dispatch_async(dispatch_get_main_queue(), ^{
-        sDownloadComplete = YES;
         sStep6Indicator.stringValue = @"\u2705";
     });
 }
@@ -679,8 +704,7 @@ void setPrefsPermissionState(void) {
 
         sStep3Indicator.stringValue = @"\U0001F3A4";
 
-        // Download step: model already loaded if we got this far
-        sDownloadComplete = YES;
+        // Model step: current configuration is already using a resolved model.
         sStep6Indicator.stringValue = @"\u2705";
 
         refreshContinueState();
@@ -689,7 +713,6 @@ void setPrefsPermissionState(void) {
 
 void updateSetupReady(void) {
     dispatch_async(dispatch_get_main_queue(), ^{
-        sDownloadComplete = YES;
         sContinueButton.title = @"Start JoiceTyper";
         refreshContinueState();
     });
@@ -789,6 +812,70 @@ const char *getSelectedLanguage(void) {
     memcpy(sSelectedLangBuffer, utf8, len);
     sSelectedLangBuffer[len] = '\0';
     return sSelectedLangBuffer;
+}
+
+void populateSettingsDecodeModes(const char **codes, const char **names, int count, int defaultIndex) {
+    [sDecodeDropdown removeAllItems];
+    for (int i = 0; i < count; i++) {
+        NSString *title = [NSString stringWithUTF8String:names[i]];
+        [sDecodeDropdown addItemWithTitle:title];
+        [sDecodeDropdown lastItem].representedObject = [NSString stringWithUTF8String:codes[i]];
+    }
+    if (defaultIndex >= 0 && defaultIndex < count) {
+        [sDecodeDropdown selectItemAtIndex:defaultIndex];
+    }
+}
+
+const char *getSelectedDecodeMode(void) {
+    if (sDecodeDropdown == nil || sDecodeDropdown.selectedItem == nil) {
+        sSelectedDecodeBuffer[0] = '\0';
+        return sSelectedDecodeBuffer;
+    }
+    NSString *code = sDecodeDropdown.selectedItem.representedObject;
+    const char *utf8 = [code UTF8String];
+    if (utf8 == NULL) {
+        sSelectedDecodeBuffer[0] = '\0';
+        return sSelectedDecodeBuffer;
+    }
+    size_t len = strlen(utf8);
+    if (len >= sizeof(sSelectedDecodeBuffer)) {
+        len = sizeof(sSelectedDecodeBuffer) - 1;
+    }
+    memcpy(sSelectedDecodeBuffer, utf8, len);
+    sSelectedDecodeBuffer[len] = '\0';
+    return sSelectedDecodeBuffer;
+}
+
+void populateSettingsPunctuationModes(const char **codes, const char **names, int count, int defaultIndex) {
+    [sPunctuationDropdown removeAllItems];
+    for (int i = 0; i < count; i++) {
+        NSString *title = [NSString stringWithUTF8String:names[i]];
+        [sPunctuationDropdown addItemWithTitle:title];
+        [sPunctuationDropdown lastItem].representedObject = [NSString stringWithUTF8String:codes[i]];
+    }
+    if (defaultIndex >= 0 && defaultIndex < count) {
+        [sPunctuationDropdown selectItemAtIndex:defaultIndex];
+    }
+}
+
+const char *getSelectedPunctuationMode(void) {
+    if (sPunctuationDropdown == nil || sPunctuationDropdown.selectedItem == nil) {
+        sSelectedPunctuationBuffer[0] = '\0';
+        return sSelectedPunctuationBuffer;
+    }
+    NSString *code = sPunctuationDropdown.selectedItem.representedObject;
+    const char *utf8 = [code UTF8String];
+    if (utf8 == NULL) {
+        sSelectedPunctuationBuffer[0] = '\0';
+        return sSelectedPunctuationBuffer;
+    }
+    size_t len = strlen(utf8);
+    if (len >= sizeof(sSelectedPunctuationBuffer)) {
+        len = sizeof(sSelectedPunctuationBuffer) - 1;
+    }
+    memcpy(sSelectedPunctuationBuffer, utf8, len);
+    sSelectedPunctuationBuffer[len] = '\0';
+    return sSelectedPunctuationBuffer;
 }
 
 void setSettingsHotkey(const char *displayText) {

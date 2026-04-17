@@ -8,7 +8,7 @@ import (
 
 func TestPowerEventHandler_SleepMarksRecorderStale(t *testing.T) {
 	rec := &mockRecorder{}
-	app := NewApp(rec, &mockTranscriber{}, &mockPaster{}, nil, NewSound(false, slog.Default()), "clipboard", slog.Default())
+	app := NewApp(rec, &mockTranscriber{}, &mockPaster{}, NewSound(false, slog.Default()), slog.Default())
 
 	handler := makePowerEventHandler(app, func() Recorder { return rec }, slog.Default())
 	handler(PowerEventSleep)
@@ -22,7 +22,7 @@ func TestPowerEventHandler_SleepMarksRecorderStale(t *testing.T) {
 
 func TestPowerEventHandler_WakeRefreshesWhenIdle(t *testing.T) {
 	rec := &mockRecorder{}
-	app := NewApp(rec, &mockTranscriber{}, &mockPaster{}, nil, NewSound(false, slog.Default()), "clipboard", slog.Default())
+	app := NewApp(rec, &mockTranscriber{}, &mockPaster{}, NewSound(false, slog.Default()), slog.Default())
 
 	handler := makePowerEventHandler(app, func() Recorder { return rec }, slog.Default())
 	handler(PowerEventWake)
@@ -36,7 +36,7 @@ func TestPowerEventHandler_WakeRefreshesWhenIdle(t *testing.T) {
 
 func TestPowerEventHandler_WakeSkipsRefreshWhenBusy(t *testing.T) {
 	rec := &mockRecorder{}
-	app := NewApp(rec, &mockTranscriber{}, &mockPaster{}, nil, NewSound(false, slog.Default()), "clipboard", slog.Default())
+	app := NewApp(rec, &mockTranscriber{}, &mockPaster{}, NewSound(false, slog.Default()), slog.Default())
 	atomic.StoreInt32(&app.busy, 1)
 
 	handler := makePowerEventHandler(app, func() Recorder { return rec }, slog.Default())

@@ -227,7 +227,7 @@ func runAppMode() {
 		// Step 2: Load model (may download on first run)
 		UpdateStatusBar(StateLoading)
 		var tErr error
-		transcriber, tErr = NewTranscriber(startupCtx, modelPath, cfg.ModelSize, cfg.Language, cfg.SampleRate, logger)
+		transcriber, tErr = NewTranscriber(startupCtx, modelPath, cfg.ModelSize, cfg.Language, cfg.SampleRate, cfg.DecodeMode, cfg.PunctuationMode, logger)
 		if tErr != nil {
 			initDone <- tErr
 			if stopErr := hotkey.Stop(); stopErr != nil {
@@ -249,12 +249,7 @@ func runAppMode() {
 		paster := NewPaster(logger)
 		sound = NewSound(cfg.SoundFeedback, logger)
 
-		var typer Typer
-		if cfg.TypeMode == "stream" {
-			typer = NewTyper(logger)
-		}
-
-		app = NewApp(recorder, transcriber, paster, typer, sound, cfg.TypeMode, logger)
+		app = NewApp(recorder, transcriber, paster, sound, logger)
 		app.SetStateCallback(func(state AppState) {
 			UpdateStatusBar(state)
 		})
@@ -358,9 +353,10 @@ initFinished:
 				logger.Info("recorder updated", "component", "main", "operation", "runAppMode", "device", cfg.InputDevice)
 			}
 
-			// Recreate transcriber if language or model changed.
+			// Recreate transcriber if language, model, decode mode, or punctuation mode changed.
 			// Create new BEFORE closing old — if creation fails, keep the working one.
-			if oldCfg.Language != cfg.Language || oldCfg.ModelSize != cfg.ModelSize {
+			if oldCfg.Language != cfg.Language || oldCfg.ModelSize != cfg.ModelSize ||
+				oldCfg.DecodeMode != cfg.DecodeMode || oldCfg.PunctuationMode != cfg.PunctuationMode {
 				newModelPath, pathErr := DefaultModelPath(cfg.ModelSize)
 				if pathErr != nil {
 					logger.Error("failed to resolve model path for transcriber reload",
@@ -370,7 +366,7 @@ initFinished:
 				UpdateStatusBar(StateLoading)
 				PostNotification("JoiceTyper", "Loading speech model...")
 				reloadCtx, reloadCancel := context.WithTimeout(context.Background(), 5*time.Minute)
-				newTranscriber, tErr := NewTranscriber(reloadCtx, newModelPath, cfg.ModelSize, cfg.Language, cfg.SampleRate, logger)
+				newTranscriber, tErr := NewTranscriber(reloadCtx, newModelPath, cfg.ModelSize, cfg.Language, cfg.SampleRate, cfg.DecodeMode, cfg.PunctuationMode, logger)
 				reloadCancel()
 				if tErr != nil {
 					logger.Error("failed to recreate transcriber, keeping old",
@@ -380,7 +376,8 @@ initFinished:
 					transcriber = newTranscriber
 					newTranscriber.SetVocabulary(cfg.Vocabulary)
 					app.SetTranscriber(newTranscriber)
-					logger.Info("transcriber updated", "component", "main", "operation", "runAppMode", "language", cfg.Language)
+					logger.Info("transcriber updated", "component", "main", "operation", "runAppMode",
+						"language", cfg.Language, "decode_mode", cfg.DecodeMode, "punctuation_mode", cfg.PunctuationMode)
 					if closeErr := oldTranscriber.Close(); closeErr != nil {
 						logger.Error("failed to close old transcriber", "component", "main", "operation", "runAppMode", "error", closeErr)
 					}
@@ -451,7 +448,8 @@ func runTerminalMode(configPath string) {
 		"trigger_key", cfg.TriggerKey,
 		"language", cfg.Language,
 		"sample_rate", cfg.SampleRate,
-		"type_mode", cfg.TypeMode,
+		"decode_mode", cfg.DecodeMode,
+		"punctuation_mode", cfg.PunctuationMode,
 	)
 
 	// --- Init PortAudio ---
@@ -496,7 +494,7 @@ func runTerminalMode(configPath string) {
 	}()
 
 	// --- Init transcriber (loads model -- may download on first run) ---
-	transcriber, err := NewTranscriber(startupCtx, modelPath, cfg.ModelSize, cfg.Language, cfg.SampleRate, logger)
+	transcriber, err := NewTranscriber(startupCtx, modelPath, cfg.ModelSize, cfg.Language, cfg.SampleRate, cfg.DecodeMode, cfg.PunctuationMode, logger)
 	if err != nil {
 		logger.Error("failed to initialize transcriber",
 			"component", "main", "operation", "runTerminalMode", "error", err)
@@ -512,14 +510,8 @@ func runTerminalMode(configPath string) {
 	// --- Init sound ---
 	sound := NewSound(cfg.SoundFeedback, logger)
 
-	// --- Init typer (stream mode only) ---
-	var typer Typer
-	if cfg.TypeMode == "stream" {
-		typer = NewTyper(logger)
-	}
-
 	// --- Create app ---
-	app := NewApp(recorder, transcriber, paster, typer, sound, cfg.TypeMode, logger)
+	app := NewApp(recorder, transcriber, paster, sound, logger)
 
 	// --- Start event processing goroutine ---
 	var wg sync.WaitGroup

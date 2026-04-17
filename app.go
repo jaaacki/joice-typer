@@ -8,6 +8,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"unicode"
 )
 
 const clipboardTranscribeTimeout = 90 * time.Second
@@ -15,22 +16,18 @@ const clipboardTranscribeTimeout = 90 * time.Second
 // App is the orchestrator that wires hotkey events to the
 // record -> transcribe -> paste pipeline.
 type App struct {
-	recorder       Recorder
-	transcriber    Transcriber
-	paster         Paster
-	typer          Typer
-	componentMu    sync.RWMutex // guards recorder, transcriber, paster, typer
-	sound          *Sound
-	logger         *slog.Logger
-	baseLogger     *slog.Logger
-	busy           int32 // atomic flag: 1 = transcribing/finalizing
-	recording      int32 // atomic flag: 1 = recording in progress
-	stateMu        sync.RWMutex
-	onStateChange  func(AppState)
-	typeMode       string
-	streamInterval time.Duration
-	streamer       *Streamer
-	wg             sync.WaitGroup
+	recorder      Recorder
+	transcriber   Transcriber
+	paster        Paster
+	componentMu   sync.RWMutex // guards recorder, transcriber, and paster
+	sound         *Sound
+	logger        *slog.Logger
+	baseLogger    *slog.Logger
+	busy          int32 // atomic flag: 1 = transcribing/finalizing
+	recording     int32 // atomic flag: 1 = recording in progress
+	stateMu       sync.RWMutex
+	onStateChange func(AppState)
+	wg            sync.WaitGroup
 }
 
 // NewApp creates an App with all components pre-constructed.
@@ -38,22 +35,17 @@ func NewApp(
 	recorder Recorder,
 	transcriber Transcriber,
 	paster Paster,
-	typer Typer,
 	sound *Sound,
-	typeMode string,
 	logger *slog.Logger,
 ) *App {
 	return &App{
-		recorder:       recorder,
-		transcriber:    transcriber,
-		paster:         paster,
-		typer:          typer,
-		sound:          sound,
-		baseLogger:     logger,
-		logger:         logger.With("component", "app"),
-		onStateChange:  func(AppState) {}, // no-op default
-		typeMode:       typeMode,
-		streamInterval: 1 * time.Second,
+		recorder:      recorder,
+		transcriber:   transcriber,
+		paster:        paster,
+		sound:         sound,
+		baseLogger:    logger,
+		logger:        logger.With("component", "app"),
+		onStateChange: func(AppState) {}, // no-op default
 	}
 }
 
@@ -100,8 +92,6 @@ func (a *App) handlePress() {
 
 	a.componentMu.RLock()
 	rec := a.recorder
-	trans := a.transcriber
-	tyr := a.typer
 	a.componentMu.RUnlock()
 
 	startErr := rec.Start(context.Background())
@@ -126,11 +116,6 @@ func (a *App) handlePress() {
 	a.sound.PlayStart()
 	a.emitState(StateRecording)
 	atomic.StoreInt32(&a.recording, 1)
-
-	if a.typeMode == "stream" {
-		a.streamer = NewStreamer(trans, tyr, rec, a.baseLogger, a.streamInterval)
-		a.streamer.Start()
-	}
 }
 
 func (a *App) tryRecoverRecorderAndRetry(rec Recorder) (bool, error) {
@@ -174,139 +159,7 @@ func (a *App) handleRelease() {
 		return
 	}
 	a.logger.Debug("trigger released", "operation", "handleRelease")
-
-	if a.typeMode == "stream" {
-		a.handleReleaseStream()
-	} else {
-		a.handleReleaseClipboard()
-	}
-}
-
-func (a *App) handleReleaseStream() {
-	if atomic.LoadInt32(&a.recording) == 0 {
-		a.logger.Debug("not recording, ignoring release", "operation", "handleReleaseStream")
-		return
-	}
-	atomic.StoreInt32(&a.recording, 0)
-	a.sound.PlayStop()
-
-	lastText := ""
-	if a.streamer != nil {
-		lastText = a.streamer.LastText()
-		a.streamer.Stop()
-		a.streamer = nil
-	}
-
-	a.componentMu.RLock()
-	rec := a.recorder
-	a.componentMu.RUnlock()
-
-	audio, err := rec.Stop()
-	if err != nil {
-		a.logger.Error("failed to stop recorder", "component", "app", "operation", "handleReleaseStream", "error", err)
-		a.emitState(a.failureState(err))
-		return
-	}
-
-	if len(audio) == 0 {
-		a.logger.Warn("no audio captured", "component", "app", "operation", "handleReleaseStream")
-		a.emitState(StateReady)
-		return
-	}
-
-	// Run final transcription async — don't block the event loop
-	a.wg.Add(1)
-	go a.finalStreamTranscribe(audio, lastText)
-}
-
-func (a *App) finalStreamTranscribe(audio []float32, lastText string) {
-	defer a.wg.Done()
-
-	a.componentMu.RLock()
-	trans := a.transcriber
-	tyr := a.typer
-	a.componentMu.RUnlock()
-
-	// Wait for the streamer's last tick to release both the busy flag
-	// and the transcriber bulkhead (up to 3s each).
-	acquired := false
-	for i := 0; i < 30; i++ {
-		if atomic.CompareAndSwapInt32(&a.busy, 0, 1) {
-			acquired = true
-			break
-		}
-		time.Sleep(100 * time.Millisecond)
-	}
-	if !acquired {
-		a.logger.Warn("timed out waiting for busy flag",
-			"component", "app", "operation", "finalStreamTranscribe")
-		a.emitState(StateReady)
-		return
-	}
-	defer atomic.StoreInt32(&a.busy, 0)
-
-	// Also wait for the transcriber bulkhead to be free
-	if t, ok := trans.(interface{ IsInflight() bool }); ok {
-		for i := 0; i < 30; i++ {
-			if !t.IsInflight() {
-				break
-			}
-			if i == 29 {
-				a.logger.Warn("transcriber bulkhead still occupied",
-					"component", "app", "operation", "finalStreamTranscribe")
-				a.emitState(StateReady)
-				return
-			}
-			time.Sleep(100 * time.Millisecond)
-		}
-	}
-
-	a.emitState(StateTranscribing)
-
-	transcribeCtx, cancel := context.WithTimeout(context.Background(), clipboardTranscribeTimeout)
-	defer cancel()
-
-	finalText, err := trans.Transcribe(transcribeCtx, audio)
-	if err != nil {
-		var timeoutErr *ErrDependencyTimeout
-		if errors.As(err, &timeoutErr) {
-			a.logger.Error("transcription timed out — speech engine may be stuck",
-				"component", "app", "operation", "finalStreamTranscribe", "error", err)
-			a.emitState(StateDependencyStuck)
-			time.Sleep(2 * time.Second)
-		} else {
-			a.logger.Error("final transcription failed",
-				"component", "app", "operation", "finalStreamTranscribe", "error", err)
-		}
-		a.sound.PlayError()
-		a.emitState(StateReady)
-		return
-	}
-
-	finalText = strings.TrimSpace(finalText)
-	if finalText == "" {
-		a.logger.Warn("no speech detected",
-			"component", "app", "operation", "finalStreamTranscribe")
-		a.emitState(StateReady)
-		return
-	}
-
-	if tyr != nil && lastText != "" {
-		if err := tyr.ReplaceAll(len([]rune(lastText)), finalText); err != nil {
-			a.logger.Error("failed to replace with final text",
-				"component", "app", "operation", "finalStreamTranscribe", "error", err)
-		}
-	} else if tyr != nil {
-		if err := tyr.Type(finalText); err != nil {
-			a.logger.Error("failed to type final text",
-				"component", "app", "operation", "finalStreamTranscribe", "error", err)
-		}
-	}
-
-	a.logger.Info("stream complete",
-		"component", "app", "operation", "finalStreamTranscribe",
-		"text_length", len(finalText))
-	a.emitState(StateReady)
+	a.handleReleaseClipboard()
 }
 
 func (a *App) handleReleaseClipboard() {
@@ -381,8 +234,8 @@ func (a *App) transcribeAndPaste(audio []float32) {
 		return
 	}
 
-	// Append trailing space so consecutive dictations don't merge words.
-	if err := pst.Paste(text + " "); err != nil {
+	// Add a separator only for sentence-like output; raw text should pass through unchanged.
+	if err := pst.Paste(formatPasteText(text)); err != nil {
 		a.logger.Error("paste failed",
 			"operation", "transcribeAndPaste", "error", err)
 		a.sound.PlayError()
@@ -393,6 +246,20 @@ func (a *App) transcribeAndPaste(audio []float32) {
 	a.logger.Info("text pasted", "operation", "transcribeAndPaste",
 		"text_length", len(text))
 	a.emitState(StateReady)
+}
+
+func formatPasteText(text string) string {
+	trimmed := strings.TrimRightFunc(text, unicode.IsSpace)
+	if trimmed == "" {
+		return text
+	}
+	if hasTerminalPunctuation(trimmed) {
+		if trimmed != text {
+			return text
+		}
+		return text + " "
+	}
+	return text
 }
 
 // IsIdle returns true if no recording, transcription, or native CGO work is in flight.

@@ -119,44 +119,6 @@ func (m *mockPaster) Paste(text string) error {
 	return m.err
 }
 
-type mockTyper struct {
-	mu         sync.Mutex
-	typed      string
-	backspaced int
-}
-
-func (m *mockTyper) Type(text string) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.typed += text
-	return nil
-}
-
-func (m *mockTyper) Backspace(count int) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.backspaced += count
-	runes := []rune(m.typed)
-	if count > len(runes) {
-		count = len(runes)
-	}
-	m.typed = string(runes[:len(runes)-count])
-	return nil
-}
-
-func (m *mockTyper) ReplaceAll(oldLen int, newText string) error {
-	if err := m.Backspace(oldLen); err != nil {
-		return err
-	}
-	return m.Type(newText)
-}
-
-func (m *mockTyper) getText() string {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	return m.typed
-}
-
 // --- Tests ---
 
 func TestApp_HappyPath(t *testing.T) {
@@ -166,7 +128,7 @@ func TestApp_HappyPath(t *testing.T) {
 	logger := slog.Default()
 	snd := NewSound(false, logger)
 
-	app := NewApp(rec, trans, paste, nil, snd, "clipboard", logger)
+	app := NewApp(rec, trans, paste, snd, logger)
 
 	var states []AppState
 	var statesMu sync.Mutex
@@ -214,7 +176,7 @@ func TestApp_HappyPath(t *testing.T) {
 	paste.mu.Lock()
 	got := paste.pastedText
 	paste.mu.Unlock()
-	if got != "hello world " {
+	if got != "hello world" {
 		t.Errorf("expected pasted text 'hello world', got %q", got)
 	}
 
@@ -233,7 +195,7 @@ func TestApp_TranscriptionError_ContinuesListening(t *testing.T) {
 	logger := slog.Default()
 	snd := NewSound(false, logger)
 
-	app := NewApp(rec, trans, paste, nil, snd, "clipboard", logger)
+	app := NewApp(rec, trans, paste, snd, logger)
 
 	events := make(chan HotkeyEvent, 10)
 	done := make(chan struct{})
@@ -276,8 +238,26 @@ func TestApp_TranscriptionError_ContinuesListening(t *testing.T) {
 	paste.mu.Lock()
 	got := paste.pastedText
 	paste.mu.Unlock()
-	if got != "recovered " {
-		t.Errorf("expected pasted text 'recovered ' after error recovery, got %q", got)
+	if got != "recovered" {
+		t.Errorf("expected pasted text 'recovered' after error recovery, got %q", got)
+	}
+}
+
+func TestFormatPasteText_AppendsSpaceAfterSentence(t *testing.T) {
+	if got := formatPasteText("Hello world."); got != "Hello world. " {
+		t.Fatalf("expected trailing separator after sentence, got %q", got)
+	}
+}
+
+func TestFormatPasteText_PreservesRawTextWithoutTrailingSpace(t *testing.T) {
+	if got := formatPasteText("ls -la"); got != "ls -la" {
+		t.Fatalf("expected raw text without forced trailing space, got %q", got)
+	}
+}
+
+func TestFormatPasteText_DoesNotDoubleAppendAfterTrailingWhitespace(t *testing.T) {
+	if got := formatPasteText("Hello world. "); got != "Hello world. " {
+		t.Fatalf("expected existing trailing separator to be preserved, got %q", got)
 	}
 }
 
@@ -288,7 +268,7 @@ func TestApp_EmptyAudio_NoPaste(t *testing.T) {
 	logger := slog.Default()
 	snd := NewSound(false, logger)
 
-	app := NewApp(rec, trans, paste, nil, snd, "clipboard", logger)
+	app := NewApp(rec, trans, paste, snd, logger)
 
 	events := make(chan HotkeyEvent, 10)
 	done := make(chan struct{})
@@ -325,7 +305,7 @@ func TestApp_EmptyText_NoPaste(t *testing.T) {
 	logger := slog.Default()
 	snd := NewSound(false, logger)
 
-	app := NewApp(rec, trans, paste, nil, snd, "clipboard", logger)
+	app := NewApp(rec, trans, paste, snd, logger)
 
 	events := make(chan HotkeyEvent, 10)
 	done := make(chan struct{})
@@ -363,7 +343,7 @@ func TestApp_TranscribeDrop_ResetsStateToReady(t *testing.T) {
 	logger := slog.Default()
 	snd := NewSound(false, logger)
 
-	app := NewApp(rec, trans, paste, nil, snd, "clipboard", logger)
+	app := NewApp(rec, trans, paste, snd, logger)
 
 	var states []AppState
 	var statesMu sync.Mutex
@@ -397,7 +377,7 @@ func TestApp_Shutdown_ClosesBoth(t *testing.T) {
 	logger := slog.Default()
 	snd := NewSound(false, logger)
 
-	app := NewApp(rec, trans, paste, nil, snd, "clipboard", logger)
+	app := NewApp(rec, trans, paste, snd, logger)
 	app.Shutdown()
 
 	rec.mu.Lock()
@@ -415,77 +395,14 @@ func TestApp_Shutdown_ClosesBoth(t *testing.T) {
 	}
 }
 
-func TestApp_StreamMode(t *testing.T) {
-	rec := &mockRecorder{audio: []float32{0.1, 0.2, 0.3}}
-	trans := &mockTranscriber{text: "hello stream"}
-	typer := &mockTyper{}
-	paste := &mockPaster{}
-	logger := slog.Default()
-	snd := NewSound(false, logger)
-
-	app := NewApp(rec, trans, paste, typer, snd, "stream", logger)
-	app.streamInterval = 50 * time.Millisecond
-
-	events := make(chan HotkeyEvent, 10)
-	done := make(chan struct{})
-	go func() {
-		app.Run(events)
-		close(done)
-	}()
-
-	events <- TriggerPressed
-	time.Sleep(200 * time.Millisecond) // let streamer tick
-	events <- TriggerReleased
-	time.Sleep(200 * time.Millisecond) // wait for async finalize
-
-	close(events)
-	<-done
-
-	got := typer.getText()
-	if got == "" {
-		t.Error("expected streamer to have typed text")
-	}
-}
-
-func TestApp_StreamMode_ReleaseWithoutPress(t *testing.T) {
+func TestApp_ReleaseWithoutPress(t *testing.T) {
 	rec := &mockRecorder{audio: []float32{0.1, 0.2}}
 	trans := &mockTranscriber{text: "hello"}
 	paste := &mockPaster{}
 	logger := slog.Default()
 	snd := NewSound(false, logger)
 
-	app := NewApp(rec, trans, paste, nil, snd, "stream", logger)
-
-	events := make(chan HotkeyEvent, 10)
-	done := make(chan struct{})
-	go func() {
-		app.Run(events)
-		close(done)
-	}()
-
-	// Release without press — should not crash or call recorder.Stop
-	events <- TriggerReleased
-	time.Sleep(50 * time.Millisecond)
-
-	close(events)
-	<-done
-
-	rec.mu.Lock()
-	stopped := rec.stopCalled
-	rec.mu.Unlock()
-	if stopped {
-		t.Error("recorder.Stop should not be called on release without press")
-	}
-}
-
-func TestApp_ClipboardMode_ReleaseWithoutPress(t *testing.T) {
-	rec := &mockRecorder{audio: []float32{0.1, 0.2}}
-	trans := &mockTranscriber{text: "hello"}
-	paste := &mockPaster{}
-	logger := slog.Default()
-	snd := NewSound(false, logger)
-
-	app := NewApp(rec, trans, paste, nil, snd, "clipboard", logger)
+	app := NewApp(rec, trans, paste, snd, logger)
 
 	events := make(chan HotkeyEvent, 10)
 	done := make(chan struct{})
@@ -522,7 +439,7 @@ func TestApp_TranscriberTimeout_DoesNotHang(t *testing.T) {
 	paste := &mockPaster{}
 	logger := slog.Default()
 	snd := NewSound(false, logger)
-	app := NewApp(rec, hangingTranscriber, paste, nil, snd, "clipboard", logger)
+	app := NewApp(rec, hangingTranscriber, paste, snd, logger)
 
 	events := make(chan HotkeyEvent, 10)
 	go app.Run(events)
@@ -552,43 +469,6 @@ func TestApp_TranscriberTimeout_DoesNotHang(t *testing.T) {
 	}
 }
 
-func TestApp_StreamRelease_WaitsForBulkhead(t *testing.T) {
-	var callCount int32
-	transcriber := &mockTranscriber{
-		transcribeFn: func(ctx context.Context, audio []float32) (string, error) {
-			n := atomic.AddInt32(&callCount, 1)
-			if n == 1 {
-				time.Sleep(1 * time.Second) // slow tick
-				return "partial", nil
-			}
-			return "final result", nil
-		},
-	}
-
-	recorder := &mockRecorder{audio: make([]float32, 16000)}
-	sound := NewSound(false, slog.Default())
-	typer := &mockTyper{}
-	app := NewApp(recorder, transcriber, nil, typer, sound, "stream", slog.Default())
-	app.streamInterval = 50 * time.Millisecond // ensure at least one tick fires
-
-	events := make(chan HotkeyEvent, 10)
-	go app.Run(events)
-
-	events <- TriggerPressed
-	time.Sleep(200 * time.Millisecond) // let streamer tick fire (blocks in Transcribe for 1s)
-	events <- TriggerReleased
-	time.Sleep(3 * time.Second) // wait for slow tick + final transcription
-
-	close(events)
-	app.Shutdown()
-
-	// Final transcription should have happened (callCount >= 2)
-	got := atomic.LoadInt32(&callCount)
-	if got < 2 {
-		t.Errorf("expected at least 2 transcribe calls (tick + final), got %d", got)
-	}
-}
-
 func TestApp_IsIdle_FalseWhileBusy(t *testing.T) {
 	blockCh := make(chan struct{})
 	transcriber := &mockTranscriber{
@@ -600,7 +480,7 @@ func TestApp_IsIdle_FalseWhileBusy(t *testing.T) {
 
 	recorder := &mockRecorder{audio: make([]float32, 16000)}
 	sound := NewSound(false, slog.Default())
-	app := NewApp(recorder, transcriber, &mockPaster{}, nil, sound, "clipboard", slog.Default())
+	app := NewApp(recorder, transcriber, &mockPaster{}, sound, slog.Default())
 
 	if !app.IsIdle() {
 		t.Fatal("expected idle initially")
@@ -638,7 +518,7 @@ func TestApp_SetRecorder_WhileIdle(t *testing.T) {
 	logger := slog.Default()
 	snd := NewSound(false, logger)
 
-	app := NewApp(rec1, trans, paste, nil, snd, "clipboard", logger)
+	app := NewApp(rec1, trans, paste, snd, logger)
 
 	events := make(chan HotkeyEvent, 10)
 	done := make(chan struct{})
@@ -677,8 +557,8 @@ func TestApp_SetRecorder_WhileIdle(t *testing.T) {
 	paste.mu.Lock()
 	got := paste.pastedText
 	paste.mu.Unlock()
-	if got != "from rec2 " {
-		t.Errorf("expected 'from rec2 ', got %q", got)
+	if got != "from rec2" {
+		t.Errorf("expected 'from rec2', got %q", got)
 	}
 }
 
@@ -707,7 +587,7 @@ func TestApp_RecorderStartFails_ContinuesListening(t *testing.T) {
 	paste := &mockPaster{}
 	logger := slog.Default()
 	snd := NewSound(false, logger)
-	app := NewApp(rec, trans, paste, nil, snd, "clipboard", logger)
+	app := NewApp(rec, trans, paste, snd, logger)
 
 	events := make(chan HotkeyEvent, 10)
 	go app.Run(events)
@@ -730,8 +610,8 @@ func TestApp_RecorderStartFails_ContinuesListening(t *testing.T) {
 	paste.mu.Lock()
 	got := paste.pastedText
 	paste.mu.Unlock()
-	if got != "hello " {
-		t.Errorf("expected 'hello ' after retry, got %q", got)
+	if got != "hello" {
+		t.Errorf("expected 'hello' after retry, got %q", got)
 	}
 }
 
@@ -756,7 +636,7 @@ func TestApp_RecorderStartFailure_AutoRefreshAndRetry(t *testing.T) {
 	paste := &mockPaster{}
 	logger := slog.Default()
 	snd := NewSound(false, logger)
-	app := NewApp(rec, trans, paste, nil, snd, "clipboard", logger)
+	app := NewApp(rec, trans, paste, snd, logger)
 
 	events := make(chan HotkeyEvent, 10)
 	go app.Run(events)
@@ -783,7 +663,7 @@ func TestApp_RecorderStartFailure_AutoRefreshAndRetry(t *testing.T) {
 	paste.mu.Lock()
 	got := paste.pastedText
 	paste.mu.Unlock()
-	if got != "recovered " {
+	if got != "recovered" {
 		t.Fatalf("expected recovered transcription after retry, got %q", got)
 	}
 }
@@ -814,7 +694,7 @@ func TestApp_RecorderStartFailure_RefreshFails_RemainsUsable(t *testing.T) {
 	paste := &mockPaster{}
 	logger := slog.Default()
 	snd := NewSound(false, logger)
-	app := NewApp(rec, trans, paste, nil, snd, "clipboard", logger)
+	app := NewApp(rec, trans, paste, snd, logger)
 
 	events := make(chan HotkeyEvent, 10)
 	go app.Run(events)
@@ -842,7 +722,7 @@ func TestApp_RecorderStartFailure_RefreshFails_RemainsUsable(t *testing.T) {
 	paste.mu.Lock()
 	got := paste.pastedText
 	paste.mu.Unlock()
-	if got != "later success " {
+	if got != "later success" {
 		t.Fatalf("expected later press to still succeed, got %q", got)
 	}
 }
@@ -862,7 +742,7 @@ func TestApp_RecorderStartFailure_RefreshFails_EmitsDependencyStuck(t *testing.T
 	}
 	logger := slog.Default()
 	snd := NewSound(false, logger)
-	app := NewApp(rec, &mockTranscriber{text: "unused"}, &mockPaster{}, nil, snd, "clipboard", logger)
+	app := NewApp(rec, &mockTranscriber{text: "unused"}, &mockPaster{}, snd, logger)
 
 	var states []AppState
 	var statesMu sync.Mutex
@@ -906,7 +786,7 @@ func TestApp_RecorderStartFailure_DoesNotEmitRecordingState(t *testing.T) {
 	}
 	logger := slog.Default()
 	snd := NewSound(false, logger)
-	app := NewApp(rec, &mockTranscriber{text: "unused"}, &mockPaster{}, nil, snd, "clipboard", logger)
+	app := NewApp(rec, &mockTranscriber{text: "unused"}, &mockPaster{}, snd, logger)
 
 	var states []AppState
 	var statesMu sync.Mutex

@@ -34,6 +34,8 @@ var (
 	prefsCancel context.CancelFunc
 )
 
+var postNotification = PostNotification
+
 // IsFirstRun returns true if no config file exists yet.
 func IsFirstRun() bool {
 	path, err := DefaultConfigPath()
@@ -105,6 +107,10 @@ func RunSetupWizard(ctx context.Context, logger *slog.Logger) (string, error) {
 
 	// Step 4: Populate language list
 	populateLanguageList("en")
+
+	// Step 5-6: Populate decode and punctuation lists
+	populateDecodeModeList("beam")
+	populatePunctuationModeList("conservative")
 
 	// Step 5.5: Populate model list (default to small for onboarding)
 	prefsActiveModel = "small"
@@ -359,20 +365,93 @@ func populateLanguageList(selectedCode string) {
 	}
 }
 
+func populateDecodeModeList(selectedCode string) {
+	codes := make([]*C.char, len(DecodeModeOptions))
+	names := make([]*C.char, len(DecodeModeOptions))
+	defaultIdx := 0
+	for i, opt := range DecodeModeOptions {
+		codes[i] = C.CString(opt.Code)
+		names[i] = C.CString(opt.Name)
+		if opt.Code == selectedCode {
+			defaultIdx = i
+		}
+	}
+	C.populateSettingsDecodeModes(&codes[0], &names[0], C.int(len(DecodeModeOptions)), C.int(defaultIdx))
+	for _, c := range codes {
+		C.free(unsafe.Pointer(c))
+	}
+	for _, n := range names {
+		C.free(unsafe.Pointer(n))
+	}
+}
+
+func populatePunctuationModeList(selectedCode string) {
+	codes := make([]*C.char, len(PunctuationModeOptions))
+	names := make([]*C.char, len(PunctuationModeOptions))
+	defaultIdx := 0
+	for i, opt := range PunctuationModeOptions {
+		codes[i] = C.CString(opt.Code)
+		names[i] = C.CString(opt.Name)
+		if opt.Code == selectedCode {
+			defaultIdx = i
+		}
+	}
+	C.populateSettingsPunctuationModes(&codes[0], &names[0], C.int(len(PunctuationModeOptions)), C.int(defaultIdx))
+	for _, c := range codes {
+		C.free(unsafe.Pointer(c))
+	}
+	for _, n := range names {
+		C.free(unsafe.Pointer(n))
+	}
+}
+
+func requireSettingSelection(fieldName string, value string) (string, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "", fmt.Errorf("settings.requireSettingSelection: empty %s selection", fieldName)
+	}
+	switch fieldName {
+	case "decode_mode":
+		if !validDecodeModes[value] {
+			return "", fmt.Errorf("settings.requireSettingSelection: invalid %s selection %q", fieldName, value)
+		}
+	case "punctuation_mode":
+		if !validPunctuationModes[value] {
+			return "", fmt.Errorf("settings.requireSettingSelection: invalid %s selection %q", fieldName, value)
+		}
+	}
+	return value, nil
+}
+
+func reportSettingsSaveError(detail string) {
+	postNotification("JoiceTyper Preferences", "Failed to save settings: "+detail)
+}
+
 func writeSetupConfig(deviceName string, language string, modelSize string, triggerKeys []string, l *slog.Logger) error {
 	cfgPath, err := DefaultConfigPath()
 	if err != nil {
 		return fmt.Errorf("settings.writeSetupConfig: %w", err)
 	}
 
+	selectedDecodeMode, err := requireSettingSelection("decode_mode", C.GoString(C.getSelectedDecodeMode()))
+	if err != nil {
+		return fmt.Errorf("settings.writeSetupConfig: %w", err)
+	}
+	selectedPunctuationMode, err := requireSettingSelection("punctuation_mode", C.GoString(C.getSelectedPunctuationMode()))
+	if err != nil {
+		return fmt.Errorf("settings.writeSetupConfig: %w", err)
+	}
+
 	cfg := Config{
-		TriggerKey:    triggerKeys,
-		ModelSize:     modelSize,
-		Language:      language,
-		SampleRate:    16000,
-		SoundFeedback: true,
-		InputDevice:   deviceName,
-		Vocabulary:    C.GoString(C.getVocabularyText()),
+		TriggerKey:      triggerKeys,
+		ModelSize:       modelSize,
+		Language:        language,
+		SampleRate:      16000,
+		SoundFeedback:   true,
+		InputDevice:     deviceName,
+		DecodeMode:      selectedDecodeMode,
+		PunctuationMode: selectedPunctuationMode,
+		Vocabulary:      C.GoString(C.getVocabularyText()),
 	}
 
 	if err := cfg.Validate(); err != nil {
@@ -475,6 +554,8 @@ func OpenPreferences() {
 
 	settingsLogger.Info("populating UI fields", "operation", "OpenPreferences")
 	populateLanguageList(cfg.Language)
+	populateDecodeModeList(cfg.DecodeMode)
+	populatePunctuationModeList(cfg.PunctuationMode)
 	prefsActiveModel = cfg.ModelSize
 	populateModelList(cfg.ModelSize)
 	populateMicList(cfg.InputDevice, settingsLogger)
@@ -550,6 +631,18 @@ func openPreferencesWait(cfg Config, cfgPath string) {
 	settingsLogger.Info("reading selections", "operation", "openPreferencesWait")
 	selectedDevice := C.GoString(C.getSelectedDevice())
 	selectedLang := C.GoString(C.getSelectedLanguage())
+	selectedDecodeMode, err := requireSettingSelection("decode_mode", C.GoString(C.getSelectedDecodeMode()))
+	if err != nil {
+		settingsLogger.Error("invalid decode mode selection", "operation", "openPreferencesWait", "error", err)
+		reportSettingsSaveError(err.Error())
+		return
+	}
+	selectedPunctuationMode, err := requireSettingSelection("punctuation_mode", C.GoString(C.getSelectedPunctuationMode()))
+	if err != nil {
+		settingsLogger.Error("invalid punctuation mode selection", "operation", "openPreferencesWait", "error", err)
+		reportSettingsSaveError(err.Error())
+		return
+	}
 	selectedModel := C.GoString(C.getSelectedModel())
 	hotkeyFlags := uint64(C.getSettingsHotkeyFlags())
 	hotkeyKeycode := int(C.getSettingsHotkeyKeycode())
@@ -563,6 +656,8 @@ func openPreferencesWait(cfg Config, cfgPath string) {
 
 	cfg.InputDevice = selectedDevice
 	cfg.Language = selectedLang
+	cfg.DecodeMode = selectedDecodeMode
+	cfg.PunctuationMode = selectedPunctuationMode
 	cfg.TriggerKey = triggerKeys
 	cfg.Vocabulary = C.GoString(C.getVocabularyText())
 	if selectedModel != "" {
@@ -571,20 +666,24 @@ func openPreferencesWait(cfg Config, cfgPath string) {
 
 	if err := cfg.Validate(); err != nil {
 		settingsLogger.Error("invalid settings from UI, not saving", "operation", "OpenPreferences", "error", err)
+		reportSettingsSaveError(err.Error())
 		return
 	}
 
 	settingsLogger.Info("saving config", "operation", "openPreferencesWait",
 		"device", cfg.InputDevice, "language", cfg.Language,
-		"model", cfg.ModelSize, "vocabulary_length", len(cfg.Vocabulary))
+		"model", cfg.ModelSize, "decode_mode", cfg.DecodeMode,
+		"punctuation_mode", cfg.PunctuationMode, "vocabulary_length", len(cfg.Vocabulary))
 
 	data, marshalErr := yaml.Marshal(&cfg)
 	if marshalErr != nil {
 		settingsLogger.Error("failed to marshal config", "operation", "openPreferencesWait", "error", marshalErr)
+		reportSettingsSaveError(marshalErr.Error())
 		return
 	}
 	if writeErr := atomicWriteFile(cfgPath, data, 0644); writeErr != nil {
 		settingsLogger.Error("failed to write config", "operation", "openPreferencesWait", "error", writeErr)
+		reportSettingsSaveError(writeErr.Error())
 		return
 	}
 
@@ -609,4 +708,3 @@ func formatHotkeyDisplay(keys []string) string {
 	}
 	return strings.Join(parts, " + ")
 }
-

@@ -131,8 +131,16 @@ func ListInputDevices() error {
 				d.Name, d.MaxInputChannels, d.DefaultSampleRate)
 		}
 	}
-	fmt.Println("\nSet input_device in ~/.config/voicetype/config.yaml to use a specific device.")
+	fmt.Printf("\nSet input_device in %s to use a specific device.\n", listDevicesConfigHint())
 	return nil
+}
+
+func listDevicesConfigHint() string {
+	cfgPath, err := DefaultConfigPath()
+	if err != nil {
+		return "~/Library/Application Support/JoiceTyper/config.yaml"
+	}
+	return cfgPath
 }
 
 func findInputDevice(name string) (*portaudio.DeviceInfo, error) {

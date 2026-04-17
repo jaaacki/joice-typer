@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 )
 
 func TestLoadConfig_CreatesDefault(t *testing.T) {
@@ -23,8 +25,8 @@ func TestLoadConfig_CreatesDefault(t *testing.T) {
 	if cfg.ModelSize != "small" {
 		t.Errorf("expected model_size small, got %s", cfg.ModelSize)
 	}
-	if cfg.Language != "" {
-		t.Errorf("expected empty language, got %s", cfg.Language)
+	if cfg.Language != "en" {
+		t.Errorf("expected default language en, got %s", cfg.Language)
 	}
 	if cfg.SampleRate != 16000 {
 		t.Errorf("expected sample_rate 16000, got %d", cfg.SampleRate)
@@ -71,6 +73,12 @@ sound_feedback: false
 	}
 	if cfg.SoundFeedback {
 		t.Error("expected sound_feedback false")
+	}
+	if cfg.DecodeMode != "beam" {
+		t.Errorf("expected default decode_mode beam, got %q", cfg.DecodeMode)
+	}
+	if cfg.PunctuationMode != "conservative" {
+		t.Errorf("expected default punctuation_mode conservative, got %q", cfg.PunctuationMode)
 	}
 }
 
@@ -146,32 +154,66 @@ func TestValidate_InvalidSampleRate(t *testing.T) {
 	}
 }
 
-func TestValidate_InvalidTypeMode(t *testing.T) {
+func TestValidate_InvalidDecodeMode(t *testing.T) {
 	cfg := Config{
-		TriggerKey: []string{"fn", "shift"},
-		ModelSize:  "small",
-		SampleRate: 16000,
-		TypeMode:   "banana",
+		TriggerKey:      []string{"fn", "shift"},
+		ModelSize:       "small",
+		SampleRate:      16000,
+		DecodeMode:      "banana",
+		PunctuationMode: "conservative",
 	}
 	err := cfg.Validate()
 	if err == nil {
-		t.Fatal("expected error for invalid type_mode")
+		t.Fatal("expected error for invalid decode_mode")
 	}
-	if !strings.Contains(err.Error(), "type_mode") {
-		t.Errorf("error should mention type_mode, got: %v", err)
+	if !strings.Contains(err.Error(), "decode_mode") {
+		t.Errorf("error should mention decode_mode, got: %v", err)
 	}
 }
 
-func TestValidate_ValidTypeModes(t *testing.T) {
-	for _, mode := range []string{"clipboard", "stream", ""} {
+func TestValidate_ValidDecodeModes(t *testing.T) {
+	for _, mode := range []string{"greedy", "beam", ""} {
 		cfg := Config{
-			TriggerKey: []string{"fn", "shift"},
-			ModelSize:  "small",
-			SampleRate: 16000,
-			TypeMode:   mode,
+			TriggerKey:      []string{"fn", "shift"},
+			ModelSize:       "small",
+			SampleRate:      16000,
+			DecodeMode:      mode,
+			PunctuationMode: "conservative",
 		}
 		if err := cfg.Validate(); err != nil {
-			t.Errorf("expected type_mode %q to be valid, got error: %v", mode, err)
+			t.Errorf("expected decode_mode %q to be valid, got error: %v", mode, err)
+		}
+	}
+}
+
+func TestValidate_InvalidPunctuationMode(t *testing.T) {
+	cfg := Config{
+		TriggerKey:      []string{"fn", "shift"},
+		ModelSize:       "small",
+		SampleRate:      16000,
+		DecodeMode:      "beam",
+		PunctuationMode: "banana",
+	}
+	err := cfg.Validate()
+	if err == nil {
+		t.Fatal("expected error for invalid punctuation_mode")
+	}
+	if !strings.Contains(err.Error(), "punctuation_mode") {
+		t.Errorf("error should mention punctuation_mode, got: %v", err)
+	}
+}
+
+func TestValidate_ValidPunctuationModes(t *testing.T) {
+	for _, mode := range []string{"off", "conservative", "opinionated", ""} {
+		cfg := Config{
+			TriggerKey:      []string{"fn", "shift"},
+			ModelSize:       "small",
+			SampleRate:      16000,
+			DecodeMode:      "beam",
+			PunctuationMode: mode,
+		}
+		if err := cfg.Validate(); err != nil {
+			t.Errorf("expected punctuation_mode %q to be valid, got error: %v", mode, err)
 		}
 	}
 }
@@ -185,11 +227,11 @@ func TestValidate_InvalidLanguage(t *testing.T) {
 		{"en", false},
 		{"zh", false},
 		{"yue", false},
-		{"EN", true},          // uppercase
-		{"en-US", true},       // has hyphen
-		{"12", true},          // numbers
-		{"abcde", true},       // too long
-		{"javascript", true},  // way too long
+		{"EN", true},         // uppercase
+		{"en-US", true},      // has hyphen
+		{"12", true},         // numbers
+		{"abcde", true},      // too long
+		{"javascript", true}, // way too long
 	}
 	for _, tt := range tests {
 		cfg := Config{
@@ -266,7 +308,7 @@ func TestAtomicWriteFile_PartialWriteCleanup(t *testing.T) {
 	}
 }
 
-func TestLoadConfig_DefaultTypeMode(t *testing.T) {
+func TestLoadConfig_DefaultDecodeAndPunctuationModes(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.yaml")
 
@@ -275,7 +317,86 @@ func TestLoadConfig_DefaultTypeMode(t *testing.T) {
 		t.Fatalf("LoadConfig: %v", err)
 	}
 
-	if cfg.TypeMode != "clipboard" {
-		t.Errorf("expected default type_mode 'clipboard', got %q", cfg.TypeMode)
+	if cfg.DecodeMode != "beam" {
+		t.Errorf("expected default decode_mode 'beam', got %q", cfg.DecodeMode)
+	}
+	if cfg.PunctuationMode != "conservative" {
+		t.Errorf("expected default punctuation_mode 'conservative', got %q", cfg.PunctuationMode)
+	}
+	if cfg.Language != "en" {
+		t.Errorf("expected default language 'en', got %q", cfg.Language)
+	}
+}
+
+func TestLoadConfig_AcceptsLegacyTypeMode(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	data := []byte("trigger_key: [fn]\nmodel_size: small\nsample_rate: 16000\ntype_mode: clipboard\nlanguage: en\n")
+	if err := os.WriteFile(path, data, 0644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	cfg, err := LoadConfig(path)
+	if err != nil {
+		t.Fatalf("expected legacy type_mode to be accepted, got error: %v", err)
+	}
+	if cfg.Language != "en" {
+		t.Fatalf("expected language to load, got %q", cfg.Language)
+	}
+	if cfg.DecodeMode != "beam" {
+		t.Fatalf("expected default decode_mode beam, got %q", cfg.DecodeMode)
+	}
+	if cfg.PunctuationMode != "conservative" {
+		t.Fatalf("expected default punctuation_mode conservative, got %q", cfg.PunctuationMode)
+	}
+}
+
+func TestLoadConfig_DefaultsExistingEmptyLanguageToEnglish(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	data := []byte("trigger_key: [fn]\nmodel_size: small\nsample_rate: 16000\nlanguage: \"\"\n")
+	if err := os.WriteFile(path, data, 0644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	cfg, err := LoadConfig(path)
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	if cfg.Language != "en" {
+		t.Fatalf("expected existing empty language to default to en, got %q", cfg.Language)
+	}
+}
+
+func TestConfigRoundTrip_DropsLegacyTypeModeAndPreservesNewFields(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	data := []byte("trigger_key: [fn, shift]\nmodel_size: small\nsample_rate: 16000\ntype_mode: clipboard\nlanguage: \"\"\ndecode_mode: greedy\npunctuation_mode: off\n")
+	if err := os.WriteFile(path, data, 0644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	cfg, err := LoadConfig(path)
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+
+	marshaled, err := yaml.Marshal(&cfg)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	output := string(marshaled)
+
+	if strings.Contains(output, "type_mode") {
+		t.Fatalf("expected legacy type_mode to be dropped on round-trip, got %q", output)
+	}
+	for _, snippet := range []string{
+		"language: en",
+		"decode_mode: greedy",
+		"punctuation_mode: \"off\"",
+	} {
+		if !strings.Contains(output, snippet) {
+			t.Fatalf("expected round-trip output to contain %q, got %q", snippet, output)
+		}
 	}
 }

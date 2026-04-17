@@ -59,15 +59,6 @@ type Paster interface {
 	Paste(text string) error
 }
 
-// Typer streams text at the cursor via simulated keystrokes.
-type Typer interface {
-	Type(text string) error
-	Backspace(count int) error
-	// ReplaceAll backspaces oldLen runes then types newText.
-	// Non-atomic: if interrupted between backspace and type, text may be lost.
-	ReplaceAll(oldLen int, newText string) error
-}
-
 // --- Typed Errors ---
 
 // ErrDependencyTimeout indicates a blocking dependency exceeded its deadline.

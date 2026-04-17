@@ -33,6 +33,7 @@ const (
 	maxTranscribeSegments = 500              // cap whisper segments to prevent runaway
 	maxTranscribeBytes    = 50000            // cap output text to ~50KB
 	transcribeTimeout     = 90 * time.Second // hard deadline for whisper_full
+	whisperBeamSize       = 5
 
 	downloadMaxRetries    = 3
 	downloadRetryBaseWait = 2 * time.Second
@@ -60,12 +61,26 @@ type whisperTranscriber struct {
 	ctx        *C.struct_whisper_context
 	lang       string
 	vocab      string
+	decodeMode string
+	punctMode  string
 	sampleRate int
 	logger     *slog.Logger
 	inflight   chan struct{} // semaphore: capacity 1
 }
 
-func NewTranscriber(ctx context.Context, modelPath string, modelSize string, language string, sampleRate int, logger *slog.Logger) (Transcriber, error) {
+type decodeConfig struct {
+	strategy string
+	beamSize int
+}
+
+func decodeConfigForMode(mode string) decodeConfig {
+	if mode == "greedy" {
+		return decodeConfig{strategy: "greedy"}
+	}
+	return decodeConfig{strategy: "beam", beamSize: whisperBeamSize}
+}
+
+func NewTranscriber(ctx context.Context, modelPath string, modelSize string, language string, sampleRate int, decodeMode string, punctuationMode string, logger *slog.Logger) (Transcriber, error) {
 	l := logger.With("component", "transcriber")
 
 	if err := ensureModel(ctx, modelPath, modelSize, l); err != nil {
@@ -102,6 +117,7 @@ func NewTranscriber(ctx context.Context, modelPath string, modelSize string, lan
 	l.Info("model loaded", "operation", "NewTranscriber")
 	return &whisperTranscriber{
 		ctx: wctx, lang: language, sampleRate: sampleRate, logger: l,
+		decodeMode: decodeMode, punctMode: punctuationMode,
 		inflight: make(chan struct{}, 1), vocab: "",
 	}, nil
 }
@@ -181,12 +197,19 @@ func (t *whisperTranscriber) transcribeBlocking(audio []float32) (string, error)
 
 	t.logger.Info("transcribing", "operation", "Transcribe", "samples", len(audio))
 
+	decodeCfg := decodeConfigForMode(t.decodeMode)
 	params := C.whisper_full_default_params(C.WHISPER_SAMPLING_GREEDY)
+	if decodeCfg.strategy == "beam" {
+		params = C.whisper_full_default_params(C.WHISPER_SAMPLING_BEAM_SEARCH)
+	}
 	params.print_progress = C._Bool(false)
 	params.print_timestamps = C._Bool(false)
 	params.print_realtime = C._Bool(false)
 	params.print_special = C._Bool(false)
 	params.single_segment = C._Bool(false)
+	if decodeCfg.strategy == "beam" {
+		params.beam_search.beam_size = C.int(decodeCfg.beamSize)
+	}
 
 	if t.lang != "" {
 		cLang := C.CString(t.lang)
@@ -225,6 +248,7 @@ func (t *whisperTranscriber) transcribeBlocking(audio []float32) (string, error)
 	}
 
 	text := sanitizeTranscript(strings.TrimSpace(sb.String()))
+	text = applyPunctuationMode(t.punctMode, text)
 	t.logger.Info("transcribed", "operation", "Transcribe",
 		"segments", n, "text_length", len(text))
 	return text, nil
@@ -244,6 +268,99 @@ func sanitizeTranscript(s string) string {
 		}
 	}
 	return b.String()
+}
+
+func applyPunctuationMode(mode string, text string) string {
+	switch mode {
+	case "", "conservative":
+		return conservativePunctuation(text)
+	case "opinionated":
+		return opinionatedPunctuation(text)
+	default:
+		return text
+	}
+}
+
+func conservativePunctuation(text string) string {
+	if strings.TrimSpace(text) == "" {
+		return ""
+	}
+	text = capitalizeSentenceStarts(text)
+	text = capitalizeStandaloneI(text)
+	return punctuateLines(text)
+}
+
+func opinionatedPunctuation(text string) string {
+	text = conservativePunctuation(text)
+	for _, marker := range []string{" but ", " so ", " because ", " then "} {
+		replacement := "," + marker
+		if strings.Contains(text, replacement) {
+			continue
+		}
+		text = strings.Replace(text, marker, replacement, 1)
+	}
+	text = capitalizeSentenceStarts(text)
+	text = capitalizeStandaloneI(text)
+	return text
+}
+
+func capitalizeSentenceStarts(text string) string {
+	runes := []rune(text)
+	capNext := true
+	for i, r := range runes {
+		if unicode.IsLetter(r) && capNext {
+			runes[i] = unicode.ToUpper(r)
+			capNext = false
+			continue
+		}
+		if r == '.' || r == '!' || r == '?' || r == '\n' {
+			capNext = true
+		}
+	}
+	return string(runes)
+}
+
+func capitalizeStandaloneI(text string) string {
+	runes := []rune(text)
+	for i, r := range runes {
+		if r != 'i' {
+			continue
+		}
+		prevIsWord := i > 0 && isWordRune(runes[i-1])
+		nextIsWord := i+1 < len(runes) && isWordRune(runes[i+1])
+		if !prevIsWord && !nextIsWord {
+			runes[i] = 'I'
+		}
+	}
+	return string(runes)
+}
+
+func hasTerminalPunctuation(text string) bool {
+	if text == "" {
+		return false
+	}
+	last, _ := utf8.DecodeLastRuneInString(text)
+	return last == '.' || last == '!' || last == '?'
+}
+
+func punctuateLines(text string) string {
+	lines := strings.Split(text, "\n")
+	for i, line := range lines {
+		lines[i] = punctuateLine(line)
+	}
+	return strings.Join(lines, "\n")
+}
+
+func punctuateLine(line string) string {
+	trimmed := strings.TrimRightFunc(line, unicode.IsSpace)
+	if trimmed == "" || hasTerminalPunctuation(trimmed) {
+		return line
+	}
+	return trimmed + "." + line[len(trimmed):]
+}
+
+func isWordRune(r rune) bool {
+	return unicode.IsLetter(r) || unicode.IsDigit(r)
 }
 
 // IsInflight returns true if a transcription is currently running (bulkhead occupied).

@@ -14,14 +14,16 @@ import (
 var defaultConfigYAML []byte
 
 type Config struct {
-	TriggerKey    []string `yaml:"trigger_key"`
-	ModelSize     string   `yaml:"model_size"`
-	Language      string   `yaml:"language"`
-	SampleRate    int      `yaml:"sample_rate"`
-	SoundFeedback bool     `yaml:"sound_feedback"`
-	InputDevice   string   `yaml:"input_device"`
-	TypeMode      string   `yaml:"type_mode"`
-	Vocabulary    string   `yaml:"vocabulary"`
+	TriggerKey      []string `yaml:"trigger_key"`
+	ModelSize       string   `yaml:"model_size"`
+	Language        string   `yaml:"language"`
+	SampleRate      int      `yaml:"sample_rate"`
+	SoundFeedback   bool     `yaml:"sound_feedback"`
+	InputDevice     string   `yaml:"input_device"`
+	LegacyTypeMode  string   `yaml:"type_mode,omitempty"`
+	DecodeMode      string   `yaml:"decode_mode"`
+	PunctuationMode string   `yaml:"punctuation_mode"`
+	Vocabulary      string   `yaml:"vocabulary"`
 }
 
 var validModelSizes = map[string]bool{
@@ -43,6 +45,17 @@ var ModelOptions = []ModelInfo{
 
 var validModifiers = map[string]bool{
 	"fn": true, "shift": true, "ctrl": true, "option": true, "cmd": true,
+}
+
+var validDecodeModes = map[string]bool{
+	"greedy": true,
+	"beam":   true,
+}
+
+var validPunctuationModes = map[string]bool{
+	"off":          true,
+	"conservative": true,
+	"opinionated":  true,
 }
 
 func isValidKey(k string) bool {
@@ -79,6 +92,11 @@ var validLanguages = map[string]bool{
 }
 
 type WhisperLanguage struct {
+	Code string
+	Name string
+}
+
+type SelectOption struct {
 	Code string
 	Name string
 }
@@ -120,6 +138,17 @@ var WhisperLanguages = []WhisperLanguage{
 	{"yue", "Cantonese"},
 }
 
+var DecodeModeOptions = []SelectOption{
+	{Code: "beam", Name: "Beam — better sentence quality"},
+	{Code: "greedy", Name: "Greedy — lower latency"},
+}
+
+var PunctuationModeOptions = []SelectOption{
+	{Code: "off", Name: "Off — raw transcript"},
+	{Code: "conservative", Name: "Conservative — light cleanup"},
+	{Code: "opinionated", Name: "Opinionated — stronger readability edits"},
+}
+
 func LoadConfig(path string) (Config, error) {
 	_, statErr := os.Stat(path)
 	if statErr != nil && !os.IsNotExist(statErr) {
@@ -147,9 +176,21 @@ func LoadConfig(path string) (Config, error) {
 		return Config{}, fmt.Errorf("config.LoadConfig: parse %s: %w", path, err)
 	}
 
-	if cfg.TypeMode == "" {
-		cfg.TypeMode = "clipboard"
+	if cfg.DecodeMode == "" {
+		cfg.DecodeMode = "beam"
 	}
+
+	if cfg.PunctuationMode == "" {
+		cfg.PunctuationMode = "conservative"
+	}
+
+	if cfg.Language == "" {
+		cfg.Language = "en"
+	}
+
+	// Accept legacy clipboard/stream configs during upgrade, but do not
+	// carry the deprecated field forward when the config is later re-saved.
+	cfg.LegacyTypeMode = ""
 
 	if err := cfg.Validate(); err != nil {
 		return Config{}, err
@@ -173,9 +214,11 @@ func (c Config) Validate() error {
 	if c.SampleRate <= 0 || c.SampleRate > 96000 {
 		return fmt.Errorf("config.Validate: sample_rate must be between 1 and 96000, got %d", c.SampleRate)
 	}
-	validTypeModes := map[string]bool{"clipboard": true, "stream": true}
-	if c.TypeMode != "" && !validTypeModes[c.TypeMode] {
-		return fmt.Errorf("config.Validate: invalid type_mode %q (must be clipboard or stream)", c.TypeMode)
+	if c.DecodeMode != "" && !validDecodeModes[c.DecodeMode] {
+		return fmt.Errorf("config.Validate: invalid decode_mode %q (must be greedy or beam)", c.DecodeMode)
+	}
+	if c.PunctuationMode != "" && !validPunctuationModes[c.PunctuationMode] {
+		return fmt.Errorf("config.Validate: invalid punctuation_mode %q (must be off, conservative, or opinionated)", c.PunctuationMode)
 	}
 	if c.Language != "" && !validLanguages[c.Language] {
 		return fmt.Errorf("config.Validate: unsupported language %q", c.Language)

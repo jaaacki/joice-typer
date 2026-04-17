@@ -55,11 +55,12 @@ trigger_key:
   - fn
   - shift
 model_size: small        # tiny, base, small, or medium
-language: ""             # empty = auto-detect, or "en", "zh", etc.
+language: "en"           # recommended default; set another explicit code if needed
 sample_rate: 16000
 sound_feedback: true
 input_device: ""         # empty = system default
-type_mode: "clipboard"   # "clipboard" (paste) or "stream" (experimental)
+decode_mode: "beam"      # "beam" or "greedy"
+punctuation_mode: "conservative" # "off", "conservative", or "opinionated"
 ```
 
 ### Trigger keys
@@ -80,9 +81,9 @@ Downloaded models are verified against pinned SHA-256 hashes (from HuggingFace G
 
 - **v1** - Core push-to-talk, configurable trigger key
 - **v1.5** - .app bundle, menu bar icon, setup wizard
-- **v2** - Streaming type mode (experimental, default off)
+- **v2** - Faster local transcription pipeline
 - **v2.5** - Settings UI for mic/hotkey selection *(current)*
-- **v3** - Custom dictionary
+- **v3** - Custom dictionary and punctuation controls
 - **v4** - Menu bar UI
 
 ## License
