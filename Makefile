@@ -8,6 +8,10 @@ MODEL_URL := https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-smal
 VERSION_FILE := VERSION
 VERSION := $(shell tr -d '[:space:]' < $(VERSION_FILE))
 GO_LDFLAGS := -X 'voicetype/internal/version.Version=$(VERSION)'
+HOST_GOOS := $(shell go env GOOS)
+HOST_GOARCH := $(shell go env GOARCH)
+BUILD_DIR := build/$(HOST_GOOS)-$(HOST_GOARCH)
+BIN_PATH := $(BUILD_DIR)/voicetype
 
 all: whisper build
 
@@ -24,7 +28,8 @@ whisper:
 	cd $(WHISPER_DIR) && cmake --build build --config Release -j$$(sysctl -n hw.ncpu)
 
 build: whisper
-	CGO_ENABLED=1 go build -ldflags "$(GO_LDFLAGS)" -o voicetype ./cmd/joicetyper
+	mkdir -p $(BUILD_DIR)
+	CGO_ENABLED=1 go build -ldflags "$(GO_LDFLAGS)" -o $(BIN_PATH) ./cmd/joicetyper
 
 download-model: $(MODEL_FILE)
 
@@ -37,7 +42,7 @@ APP_BUNDLE := $(APP_NAME).app
 PLIST_TEMPLATE := Info.plist.tmpl
 
 clean:
-	rm -f voicetype
+	rm -rf build
 	rm -rf $(WHISPER_BUILD)
 	rm -rf $(APP_BUNDLE)
 
@@ -49,7 +54,7 @@ app: build
 	mkdir -p $(APP_BUNDLE)/Contents/MacOS
 	mkdir -p $(APP_BUNDLE)/Contents/Resources
 	mkdir -p $(APP_BUNDLE)/Contents/Frameworks
-	cp voicetype $(APP_BUNDLE)/Contents/MacOS/$(APP_NAME)
+	cp $(BIN_PATH) $(APP_BUNDLE)/Contents/MacOS/$(APP_NAME)
 	sed "s/{{VERSION}}/$(VERSION)/g" $(PLIST_TEMPLATE) > $(APP_BUNDLE)/Contents/Info.plist
 	@if [ -f icon.icns ]; then cp icon.icns $(APP_BUNDLE)/Contents/Resources/; fi
 	@# Bundle PortAudio dylib and fix load path

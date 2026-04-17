@@ -34,7 +34,7 @@ make build          # build the Go binary
 ### Terminal (development)
 
 ```bash
-./voicetype
+./build/<os>-<arch>/voicetype
 ```
 
 ### App bundle
@@ -43,6 +43,14 @@ make build          # build the Go binary
 make app
 open JoiceTyper.app
 ```
+
+Windows bootstrap build:
+
+```bash
+make build-windows-amd64
+```
+
+This currently produces a bootstrap executable at `build/windows-amd64/joicetyper.exe`. The full Windows desktop runtime is not implemented yet.
 
 ## Versioning
 
@@ -89,7 +97,7 @@ Any combination of: `fn`, `shift`, `ctrl`, `option`, `cmd`
 ### Listing audio devices
 
 ```bash
-./voicetype --list-devices
+./build/<os>-<arch>/voicetype --list-devices
 ```
 
 ## Model Integrity
