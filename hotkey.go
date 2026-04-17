@@ -22,7 +22,7 @@ import (
 	keydefs "voicetype/internal/keys"
 )
 
-func (e HotkeyEvent) String() string {
+func hotkeyEventString(e HotkeyEvent) string {
 	switch e {
 	case TriggerPressed:
 		return "TriggerPressed"
@@ -76,7 +76,7 @@ func hotkeyCallback(eventType C.int) {
 		return
 	}
 	if hotkeyLogger != nil {
-		hotkeyLogger.Info("hotkey event", "operation", "hotkeyCallback", "event", event.String())
+		hotkeyLogger.Info("hotkey event", "operation", "hotkeyCallback", "event", hotkeyEventString(event))
 	}
 	if event == TriggerReleased {
 		// Release is critical — must not be dropped. But blocking the OS
@@ -100,7 +100,7 @@ func hotkeyCallback(eventType C.int) {
 			// Channel full — drop press (idempotent, will retry on next press)
 			if hotkeyLogger != nil {
 				hotkeyLogger.Warn("press event dropped, channel full",
-					"operation", "hotkeyCallback", "event", event.String())
+					"operation", "hotkeyCallback", "event", hotkeyEventString(event))
 			}
 		}
 	}

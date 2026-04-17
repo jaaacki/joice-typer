@@ -1,4 +1,4 @@
-package main
+package app
 
 // AppState represents the current operational state of JoiceTyper.
 type AppState int

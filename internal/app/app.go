@@ -1,4 +1,4 @@
-package main
+package app
 
 import (
 	"context"
@@ -9,6 +9,7 @@ import (
 	"sync/atomic"
 	"time"
 	"unicode"
+	"unicode/utf8"
 )
 
 const clipboardTranscribeTimeout = 90 * time.Second
@@ -260,6 +261,14 @@ func formatPasteText(text string) string {
 		return text + " "
 	}
 	return text
+}
+
+func hasTerminalPunctuation(text string) bool {
+	if text == "" {
+		return false
+	}
+	last, _ := utf8.DecodeLastRuneInString(text)
+	return last == '.' || last == '!' || last == '?'
 }
 
 // IsIdle returns true if no recording, transcription, or native CGO work is in flight.
