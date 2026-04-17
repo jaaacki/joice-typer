@@ -1,4 +1,4 @@
-package main
+package audio
 
 import (
 	"context"
@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	apppkg "voicetype/internal/app"
 	config "voicetype/internal/config"
 
 	"github.com/gordonklaus/portaudio"
@@ -30,7 +31,7 @@ type portaudioRecorder struct {
 	unhealthy    bool
 }
 
-func NewRecorder(sampleRate int, deviceName string, logger *slog.Logger) Recorder {
+func NewRecorder(sampleRate int, deviceName string, logger *slog.Logger) apppkg.Recorder {
 	return &portaudioRecorder{
 		sampleRate: float64(sampleRate),
 		deviceName: deviceName,
@@ -148,14 +149,14 @@ func listDevicesConfigHint() string {
 func findInputDevice(name string) (*portaudio.DeviceInfo, error) {
 	devices, err := portaudio.Devices()
 	if err != nil {
-		return nil, &ErrDependencyUnavailable{Component: "recorder", Operation: "findInputDevice", Wrapped: err}
+		return nil, &apppkg.ErrDependencyUnavailable{Component: "recorder", Operation: "findInputDevice", Wrapped: err}
 	}
 	for _, d := range devices {
 		if d.MaxInputChannels > 0 && d.Name == name {
 			return d, nil
 		}
 	}
-	return nil, &ErrDependencyUnavailable{Component: "recorder", Operation: "findInputDevice", Wrapped: fmt.Errorf("input device %q not found", name)}
+	return nil, &apppkg.ErrDependencyUnavailable{Component: "recorder", Operation: "findInputDevice", Wrapped: fmt.Errorf("input device %q not found", name)}
 }
 
 // openStream creates and returns a PortAudio stream for the configured device.
@@ -247,7 +248,7 @@ func (r *portaudioRecorder) Start(ctx context.Context) error {
 		refreshErr := r.RefreshDevices()
 		r.mu.Lock()
 		if refreshErr != nil {
-			return &ErrDependencyUnavailable{
+			return &apppkg.ErrDependencyUnavailable{
 				Component: "recorder",
 				Operation: "Start",
 				Wrapped:   fmt.Errorf("refresh unhealthy backend: %w", refreshErr),
@@ -283,7 +284,7 @@ func (r *portaudioRecorder) Start(ctx context.Context) error {
 		if err != nil {
 			r.recording = false
 			r.unhealthy = true
-			return &ErrDependencyUnavailable{Component: "recorder", Operation: "Start", Wrapped: fmt.Errorf("open stream: %w", err)}
+			return &apppkg.ErrDependencyUnavailable{Component: "recorder", Operation: "Start", Wrapped: fmt.Errorf("open stream: %w", err)}
 		}
 		r.logger.Debug("cold stream opened", "operation", "Start",
 			"open_ms", time.Since(coldStart).Milliseconds())
@@ -297,7 +298,7 @@ func (r *portaudioRecorder) Start(ctx context.Context) error {
 			r.logger.Error("failed to close stream after start error",
 				"operation", "Start", "error", closeErr)
 		}
-		return &ErrDependencyUnavailable{Component: "recorder", Operation: "Start", Wrapped: fmt.Errorf("start stream: %w", err)}
+		return &apppkg.ErrDependencyUnavailable{Component: "recorder", Operation: "Start", Wrapped: fmt.Errorf("start stream: %w", err)}
 	}
 	r.logger.Debug("stream started", "operation", "Start",
 		"stream_start_ms", time.Since(streamStartTime).Milliseconds())
@@ -449,13 +450,13 @@ func (r *portaudioRecorder) Stop() ([]float32, error) {
 		r.logger.Warn("no audio captured", "operation", "Stop")
 		if unhealthy {
 			if refreshErr := r.RefreshDevices(); refreshErr != nil {
-				return nil, &ErrDependencyUnavailable{
+				return nil, &apppkg.ErrDependencyUnavailable{
 					Component: "recorder",
 					Operation: "Stop",
 					Wrapped:   fmt.Errorf("recover unhealthy backend: %w", refreshErr),
 				}
 			}
-			return nil, &ErrDependencyUnavailable{
+			return nil, &apppkg.ErrDependencyUnavailable{
 				Component: "recorder",
 				Operation: "Stop",
 				Wrapped:   fmt.Errorf("recording backend became unhealthy"),

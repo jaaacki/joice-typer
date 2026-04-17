@@ -1,8 +1,8 @@
-package main
+package transcription
 
 /*
-#cgo CFLAGS: -I${SRCDIR}/third_party/whisper.cpp/include -I${SRCDIR}/third_party/whisper.cpp/ggml/include
-#cgo LDFLAGS: -L${SRCDIR}/third_party/whisper.cpp/build/src -L${SRCDIR}/third_party/whisper.cpp/build/ggml/src -L${SRCDIR}/third_party/whisper.cpp/build/ggml/src/ggml-metal -L${SRCDIR}/third_party/whisper.cpp/build/ggml/src/ggml-blas -lwhisper -lggml -lggml-base -lggml-cpu -lggml-metal -lggml-blas -lstdc++ -framework Accelerate -framework Metal -framework Foundation -framework CoreML
+#cgo CFLAGS: -I${SRCDIR}/../../third_party/whisper.cpp/include -I${SRCDIR}/../../third_party/whisper.cpp/ggml/include
+#cgo LDFLAGS: -L${SRCDIR}/../../third_party/whisper.cpp/build/src -L${SRCDIR}/../../third_party/whisper.cpp/build/ggml/src -L${SRCDIR}/../../third_party/whisper.cpp/build/ggml/src/ggml-metal -L${SRCDIR}/../../third_party/whisper.cpp/build/ggml/src/ggml-blas -lwhisper -lggml -lggml-base -lggml-cpu -lggml-metal -lggml-blas -lstdc++ -framework Accelerate -framework Metal -framework Foundation -framework CoreML
 #include <whisper.h>
 #include <stdlib.h>
 */
@@ -26,6 +26,8 @@ import (
 	"unicode"
 	"unicode/utf8"
 	"unsafe"
+
+	apppkg "voicetype/internal/app"
 )
 
 const (
@@ -80,7 +82,7 @@ func decodeConfigForMode(mode string) decodeConfig {
 	return decodeConfig{strategy: "beam", beamSize: whisperBeamSize}
 }
 
-func NewTranscriber(ctx context.Context, modelPath string, modelSize string, language string, sampleRate int, decodeMode string, punctuationMode string, logger *slog.Logger) (Transcriber, error) {
+func NewTranscriber(ctx context.Context, modelPath string, modelSize string, language string, sampleRate int, decodeMode string, punctuationMode string, logger *slog.Logger) (apppkg.Transcriber, error) {
 	l := logger.With("component", "transcriber")
 
 	if err := ensureModel(ctx, modelPath, modelSize, l); err != nil {
@@ -101,7 +103,7 @@ func NewTranscriber(ctx context.Context, modelPath string, modelSize string, lan
 			l.Warn("quarantined corrupt model", "operation", "NewTranscriber",
 				"bad_path", filepath.Base(badPath))
 		}
-		return nil, &ErrBadPayload{Component: "transcriber", Operation: "NewTranscriber", Detail: "model corrupt or incompatible"}
+		return nil, &apppkg.ErrBadPayload{Component: "transcriber", Operation: "NewTranscriber", Detail: "model corrupt or incompatible"}
 	}
 
 	// Validate language against whisper's own language list
@@ -139,7 +141,7 @@ func (t *whisperTranscriber) Transcribe(ctx context.Context, audio []float32) (s
 	}
 	maxSamples := rate * maxTranscribeSeconds
 	if len(audio) > maxSamples {
-		return "", &ErrBadPayload{
+		return "", &apppkg.ErrBadPayload{
 			Component: "transcriber",
 			Operation: "Transcribe",
 			Detail:    fmt.Sprintf("audio too long: %d samples (%ds at %dHz), max %ds", len(audio), len(audio)/rate, rate, maxTranscribeSeconds),
@@ -160,7 +162,7 @@ func (t *whisperTranscriber) Transcribe(ctx context.Context, audio []float32) (s
 	case t.inflight <- struct{}{}:
 		// acquired
 	default:
-		return "", &ErrDependencyTimeout{
+		return "", &apppkg.ErrDependencyTimeout{
 			Component: "transcriber",
 			Operation: "Transcribe",
 			Wrapped:   fmt.Errorf("previous transcription still in flight"),
@@ -177,7 +179,7 @@ func (t *whisperTranscriber) Transcribe(ctx context.Context, audio []float32) (s
 	select {
 	case <-ctx.Done():
 		// Don't release semaphore here — goroutine still running
-		return "", &ErrDependencyTimeout{
+		return "", &apppkg.ErrDependencyTimeout{
 			Component: "transcriber",
 			Operation: "Transcribe",
 			Wrapped:   ctx.Err(),
@@ -399,7 +401,7 @@ func (t *whisperTranscriber) Close() error {
 		if time.Now().After(deadline) {
 			t.logger.Error("close timed out waiting for transcription lock — whisper context leaked",
 				"component", "transcriber", "operation", "Close")
-			return &ErrDependencyTimeout{
+			return &apppkg.ErrDependencyTimeout{
 				Component: "transcriber",
 				Operation: "Close",
 			}
@@ -410,6 +412,10 @@ func (t *whisperTranscriber) Close() error {
 
 // DownloadProgressFunc is called during model download with progress info.
 type DownloadProgressFunc func(progress float64, bytesDownloaded, bytesTotal int64)
+
+func DownloadModelWithProgress(ctx context.Context, modelPath string, modelSize string, onProgress DownloadProgressFunc, logger *slog.Logger) error {
+	return downloadModelWithProgress(ctx, modelPath, modelSize, onProgress, logger)
+}
 
 // validateCachedModel checks if a cached model file is valid.
 // The pinned SHA-256 in modelManifest is the trusted root.
@@ -556,7 +562,7 @@ func downloadModelWithProgress(ctx context.Context, modelPath string, modelSize 
 	// cause a correct GET to be rejected as "truncated".
 	spec, ok := modelManifest[modelSize]
 	if !ok {
-		return &ErrBadPayload{
+		return &apppkg.ErrBadPayload{
 			Component: "transcriber",
 			Operation: "downloadModel",
 			Detail:    fmt.Sprintf("unknown model size %q — no manifest entry", modelSize),
@@ -584,7 +590,7 @@ func downloadModelWithProgress(ctx context.Context, modelPath string, modelSize 
 	}
 
 	if expectedSize > maxDownloadBytes {
-		return &ErrBadPayload{
+		return &apppkg.ErrBadPayload{
 			Component: "transcriber",
 			Operation: "downloadModel",
 			Detail:    fmt.Sprintf("remote file too large: %d bytes, max %d", expectedSize, maxDownloadBytes),
@@ -602,7 +608,7 @@ func downloadModelWithProgress(ctx context.Context, modelPath string, modelSize 
 			jitter := time.Duration(rand.Int63n(int64(wait / 2)))
 			select {
 			case <-dlCtx.Done():
-				return &ErrDependencyTimeout{Component: "transcriber", Operation: "downloadModel", Wrapped: dlCtx.Err()}
+				return &apppkg.ErrDependencyTimeout{Component: "transcriber", Operation: "downloadModel", Wrapped: dlCtx.Err()}
 			case <-time.After(wait + jitter):
 			}
 			logger.Info("retrying download",
@@ -620,7 +626,7 @@ func downloadModelWithProgress(ctx context.Context, modelPath string, modelSize 
 	}
 	if lastErr != nil {
 		os.Remove(tmpPath)
-		return &ErrDependencyUnavailable{Component: "transcriber", Operation: "downloadModel", Wrapped: fmt.Errorf("all %d attempts failed: %w", downloadMaxRetries+1, lastErr)}
+		return &apppkg.ErrDependencyUnavailable{Component: "transcriber", Operation: "downloadModel", Wrapped: fmt.Errorf("all %d attempts failed: %w", downloadMaxRetries+1, lastErr)}
 	}
 
 	// Hash the completed download for integrity verification
@@ -644,13 +650,13 @@ func downloadModelWithProgress(ctx context.Context, modelPath string, modelSize 
 			os.Remove(tmpPath)
 			logger.Error("size mismatch", "operation", "downloadModel",
 				"expected", spec.exactLen, "actual", written)
-			return &ErrBadPayload{Component: "transcriber", Operation: "downloadModel", Detail: "size mismatch"}
+			return &apppkg.ErrBadPayload{Component: "transcriber", Operation: "downloadModel", Detail: "size mismatch"}
 		}
 		if hash != spec.sha256 {
 			os.Remove(tmpPath)
 			logger.Error("hash mismatch", "operation", "downloadModel",
 				"expected", spec.sha256, "actual", hash)
-			return &ErrBadPayload{Component: "transcriber", Operation: "downloadModel", Detail: "hash mismatch"}
+			return &apppkg.ErrBadPayload{Component: "transcriber", Operation: "downloadModel", Detail: "hash mismatch"}
 		}
 	}
 
@@ -707,7 +713,7 @@ func doDownload(ctx context.Context, client *http.Client, url string, tmpPath st
 
 	// Accept 200 (full) or 206 (partial)
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusPartialContent {
-		return &ErrDependencyUnavailable{Component: "transcriber", Operation: "doDownload", Wrapped: fmt.Errorf("HTTP %d", resp.StatusCode)}
+		return &apppkg.ErrDependencyUnavailable{Component: "transcriber", Operation: "doDownload", Wrapped: fmt.Errorf("HTTP %d", resp.StatusCode)}
 	}
 
 	// If server doesn't support range and returns full body, start from scratch
@@ -737,7 +743,7 @@ func doDownload(ctx context.Context, client *http.Client, url string, tmpPath st
 			}
 			defer resp.Body.Close()
 			if resp.StatusCode != http.StatusOK {
-				return &ErrDependencyUnavailable{
+				return &apppkg.ErrDependencyUnavailable{
 					Component: "transcriber",
 					Operation: "doDownload",
 					Wrapped:   fmt.Errorf("restart GET returned HTTP %d", resp.StatusCode),
@@ -790,13 +796,13 @@ func doDownload(ctx context.Context, client *http.Client, url string, tmpPath st
 
 	// Detect overflow — upstream sent more bytes than manifest allows
 	if totalWritten > expectedSize {
-		return &ErrBadPayload{Component: "transcriber", Operation: "doDownload",
+		return &apppkg.ErrBadPayload{Component: "transcriber", Operation: "doDownload",
 			Detail: "upstream sent more bytes than manifest expects"}
 	}
 
 	// Validate total size matches expected (detects truncation)
 	if expectedSize > 0 && totalWritten != expectedSize {
-		return &ErrBadPayload{Component: "transcriber", Operation: "doDownload", Detail: "download truncated"}
+		return &apppkg.ErrBadPayload{Component: "transcriber", Operation: "doDownload", Detail: "download truncated"}
 	}
 
 	return nil
