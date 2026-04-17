@@ -6,6 +6,7 @@ APP_SUPPORT_DIR := $(HOME)/Library/Application Support/JoiceTyper
 MODEL_DIR := $(APP_SUPPORT_DIR)/models
 MODEL_FILE := $(MODEL_DIR)/ggml-small.bin
 MODEL_URL := https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin
+CURL ?= curl
 VERSION_FILE := VERSION
 VERSION := $(shell tr -d '[:space:]' < $(VERSION_FILE))
 GO_LDFLAGS := -X 'voicetype/internal/version.Version=$(VERSION)'
@@ -32,11 +33,13 @@ build: whisper
 	mkdir -p $(BUILD_DIR)
 	CGO_ENABLED=1 go build -ldflags "$(GO_LDFLAGS)" -o $(BIN_PATH) ./cmd/joicetyper
 
-download-model: $(MODEL_FILE)
-
-$(MODEL_FILE):
+download-model:
 	mkdir -p "$(MODEL_DIR)"
-	curl -L --progress-bar -o "$(MODEL_FILE)" "$(MODEL_URL)"
+	@if [ -f "$(MODEL_FILE)" ]; then \
+		echo "Model already present at $(MODEL_FILE)"; \
+	else \
+		$(CURL) -L --progress-bar -o "$(MODEL_FILE)" "$(MODEL_URL)"; \
+	fi
 
 APP_NAME := JoiceTyper
 APP_BUNDLE := $(APP_NAME).app

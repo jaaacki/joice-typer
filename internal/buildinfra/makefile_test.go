@@ -36,6 +36,27 @@ func TestMakeDownloadModelUsesRuntimeModelDir(t *testing.T) {
 	}
 }
 
+func TestMakeDownloadModelSkipsExistingFile(t *testing.T) {
+	root := repoRoot(t)
+	home := t.TempDir()
+	modelPath := filepath.Join(home, "Library", "Application Support", "JoiceTyper", "models", "ggml-small.bin")
+
+	if err := os.MkdirAll(filepath.Dir(modelPath), 0755); err != nil {
+		t.Fatalf("mkdir model dir: %v", err)
+	}
+	if err := os.WriteFile(modelPath, []byte("existing-model"), 0644); err != nil {
+		t.Fatalf("write model file: %v", err)
+	}
+
+	cmd := exec.Command("make", "download-model", "CURL=false")
+	cmd.Dir = root
+	cmd.Env = append(os.Environ(), "HOME="+home)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("expected existing model to skip download, got error: %v\n%s", err, out)
+	}
+}
+
 func TestMakeAppUsesConfiguredPortaudioPrefix(t *testing.T) {
 	root := repoRoot(t)
 	const portaudioPrefix = "/usr/local/opt/portaudio"

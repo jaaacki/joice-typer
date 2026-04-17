@@ -14,7 +14,7 @@ Works in any app where you can type: editors, browsers, terminals, chat apps.
 
 ## Requirements
 
-- macOS (Apple Silicon / arm64)
+- macOS (Apple Silicon recommended)
 - Homebrew
 - ~500MB disk for the whisper `small` model (downloaded on first run)
 
