@@ -14,24 +14,24 @@ type unsupportedTranscriber struct{}
 
 type DownloadProgressFunc func(progress float64, bytesDownloaded, bytesTotal int64)
 
-func unsupportedTranscriptionError() error {
-	return apppkg.UnsupportedDependencyError("transcriber", "unsupported", "transcription", runtime.GOOS, runtime.GOARCH)
+func unsupportedTranscriptionError(operation string) error {
+	return apppkg.UnsupportedDependencyError("transcriber", operation, "transcription", runtime.GOOS, runtime.GOARCH)
 }
 
 func NewTranscriber(ctx context.Context, modelPath string, modelSize string, language string, sampleRate int, decodeMode string, punctuationMode string, logger *slog.Logger) (apppkg.Transcriber, error) {
-	return nil, unsupportedTranscriptionError()
+	return nil, unsupportedTranscriptionError("NewTranscriber")
 }
 
 func DownloadModelWithProgress(ctx context.Context, modelPath string, modelSize string, onProgress DownloadProgressFunc, logger *slog.Logger) error {
-	return unsupportedTranscriptionError()
+	return unsupportedTranscriptionError("DownloadModelWithProgress")
 }
 
 func (t *unsupportedTranscriber) Transcribe(ctx context.Context, audio []float32) (string, error) {
-	return "", unsupportedTranscriptionError()
+	return "", unsupportedTranscriptionError("Transcribe")
 }
 
 func (t *unsupportedTranscriber) SetVocabulary(vocab string) {}
 
 func (t *unsupportedTranscriber) Close() error {
-	return apppkg.UnsupportedDependencyError("transcriber", "Close", "transcription", runtime.GOOS, runtime.GOARCH)
+	return unsupportedTranscriptionError("Close")
 }

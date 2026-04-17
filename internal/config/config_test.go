@@ -5,7 +5,21 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
+
+type stubFileInfo struct {
+	name string
+	size int64
+	dir  bool
+}
+
+func (s stubFileInfo) Name() string       { return s.name }
+func (s stubFileInfo) Size() int64        { return s.size }
+func (s stubFileInfo) Mode() os.FileMode  { return 0644 }
+func (s stubFileInfo) ModTime() time.Time { return time.Time{} }
+func (s stubFileInfo) IsDir() bool        { return s.dir }
+func (s stubFileInfo) Sys() any           { return nil }
 
 func TestLoadConfig_CreatesDefault(t *testing.T) {
 	dir := t.TempDir()
@@ -372,5 +386,68 @@ punctuation_mode: conservative
 	}
 	if !strings.Contains(string(saved), "punctuation_mode: conservative") {
 		t.Fatalf("expected punctuation_mode to survive round trip, got:\n%s", saved)
+	}
+}
+
+func TestDefaultConfigDir_MigratesDarwinLegacyDotConfigDir(t *testing.T) {
+	originalUserConfigDir := userConfigDir
+	originalUserHomeDir := userHomeDir
+	originalStatPath := statPath
+	originalMkdirAll := mkdirAll
+	originalRenamePath := renamePath
+	originalGOOS := runtimeGOOS
+	defer func() {
+		userConfigDir = originalUserConfigDir
+		userHomeDir = originalUserHomeDir
+		statPath = originalStatPath
+		mkdirAll = originalMkdirAll
+		renamePath = originalRenamePath
+		runtimeGOOS = originalGOOS
+	}()
+
+	homeDir := filepath.Join(string(filepath.Separator), "Users", "alice")
+	configRoot := filepath.Join(homeDir, "Library", "Application Support")
+	newDir := filepath.Join(configRoot, "JoiceTyper")
+	oldDir := filepath.Join(homeDir, ".config", "voicetype")
+
+	userConfigDir = func() (string, error) { return configRoot, nil }
+	userHomeDir = func() (string, error) { return homeDir, nil }
+	runtimeGOOS = "darwin"
+
+	statPath = func(path string) (os.FileInfo, error) {
+		switch path {
+		case oldDir:
+			return stubFileInfo{name: "voicetype", dir: true}, nil
+		case newDir:
+			return nil, os.ErrNotExist
+		default:
+			return nil, os.ErrNotExist
+		}
+	}
+
+	var mkdirTarget string
+	mkdirAll = func(path string, perm os.FileMode) error {
+		mkdirTarget = path
+		return nil
+	}
+
+	var renameFrom, renameTo string
+	renamePath = func(oldpath, newpath string) error {
+		renameFrom, renameTo = oldpath, newpath
+		return nil
+	}
+
+	dir, err := DefaultConfigDir()
+	if err != nil {
+		t.Fatalf("DefaultConfigDir: %v", err)
+	}
+	if dir != newDir {
+		t.Fatalf("expected config dir %q, got %q", newDir, dir)
+	}
+	if renameFrom != oldDir || renameTo != newDir {
+		t.Fatalf("expected migration rename %q -> %q, got %q -> %q", oldDir, newDir, renameFrom, renameTo)
+	}
+	if mkdirTarget != filepath.Dir(newDir) {
+		t.Fatalf("expected migrate mkdir target %q, got %q", filepath.Dir(newDir), mkdirTarget)
 	}
 }

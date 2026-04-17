@@ -2,16 +2,23 @@
 
 WHISPER_DIR := third_party/whisper.cpp
 WHISPER_BUILD := $(WHISPER_DIR)/build
-APP_SUPPORT_DIR := $(HOME)/Library/Application Support/JoiceTyper
-MODEL_DIR := $(APP_SUPPORT_DIR)/models
-MODEL_FILE := $(MODEL_DIR)/ggml-small.bin
-MODEL_URL := https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin
 CURL ?= curl
 VERSION_FILE := VERSION
 VERSION := $(shell tr -d '[:space:]' < $(VERSION_FILE))
 GO_LDFLAGS := -X 'voicetype/internal/version.Version=$(VERSION)'
-HOST_GOOS := $(shell go env GOOS)
-HOST_GOARCH := $(shell go env GOARCH)
+HOST_GOOS ?= $(shell go env GOOS)
+HOST_GOARCH ?= $(shell go env GOARCH)
+ifeq ($(HOST_GOOS),darwin)
+CONFIG_ROOT := $(HOME)/Library/Application Support
+else ifeq ($(HOST_GOOS),windows)
+CONFIG_ROOT := $(APPDATA)
+else
+CONFIG_ROOT := $(if $(XDG_CONFIG_HOME),$(XDG_CONFIG_HOME),$(HOME)/.config)
+endif
+APP_SUPPORT_DIR := $(CONFIG_ROOT)/JoiceTyper
+MODEL_DIR := $(APP_SUPPORT_DIR)/models
+MODEL_FILE := $(MODEL_DIR)/ggml-small.bin
+MODEL_URL := https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin
 BUILD_DIR := build/$(HOST_GOOS)-$(HOST_GOARCH)
 BIN_PATH := $(BUILD_DIR)/voicetype
 

@@ -14,8 +14,8 @@ type unsupportedRecorder struct {
 	logger *slog.Logger
 }
 
-func unsupportedAudioError() error {
-	return apppkg.UnsupportedDependencyError("recorder", "unsupported", "audio recording", runtime.GOOS, runtime.GOARCH)
+func unsupportedAudioError(operation string) error {
+	return apppkg.UnsupportedDependencyError("recorder", operation, "audio recording", runtime.GOOS, runtime.GOARCH)
 }
 
 func NewRecorder(sampleRate int, deviceName string, logger *slog.Logger) apppkg.Recorder {
@@ -23,25 +23,25 @@ func NewRecorder(sampleRate int, deviceName string, logger *slog.Logger) apppkg.
 }
 
 func InitAudio() error {
-	return unsupportedAudioError()
+	return unsupportedAudioError("InitAudio")
 }
 
 func TerminateAudio() error {
-	return apppkg.UnsupportedDependencyError("recorder", "TerminateAudio", "audio recording", runtime.GOOS, runtime.GOARCH)
+	return unsupportedAudioError("TerminateAudio")
 }
 
 func ListInputDevices() error {
-	return unsupportedAudioError()
+	return unsupportedAudioError("ListInputDevices")
 }
 
 func (r *unsupportedRecorder) Warm() {}
 
 func (r *unsupportedRecorder) Start(ctx context.Context) error {
-	return unsupportedAudioError()
+	return unsupportedAudioError("Start")
 }
 
 func (r *unsupportedRecorder) Stop() ([]float32, error) {
-	return nil, unsupportedAudioError()
+	return nil, unsupportedAudioError("Stop")
 }
 
 func (r *unsupportedRecorder) Snapshot() []float32 {
@@ -49,11 +49,11 @@ func (r *unsupportedRecorder) Snapshot() []float32 {
 }
 
 func (r *unsupportedRecorder) RefreshDevices() error {
-	return unsupportedAudioError()
+	return unsupportedAudioError("RefreshDevices")
 }
 
 func (r *unsupportedRecorder) MarkStale(reason string) {}
 
 func (r *unsupportedRecorder) Close() error {
-	return apppkg.UnsupportedDependencyError("recorder", "Close", "audio recording", runtime.GOOS, runtime.GOARCH)
+	return unsupportedAudioError("Close")
 }

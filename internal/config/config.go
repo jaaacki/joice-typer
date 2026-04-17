@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 
 	"gopkg.in/yaml.v3"
 	"voicetype/internal/keys"
@@ -13,6 +14,15 @@ import (
 
 //go:embed config_default.yaml
 var defaultConfigYAML []byte
+
+var (
+	userConfigDir = os.UserConfigDir
+	userHomeDir   = os.UserHomeDir
+	statPath      = os.Stat
+	mkdirAll      = os.MkdirAll
+	renamePath    = os.Rename
+	runtimeGOOS   = runtime.GOOS
+)
 
 type Config struct {
 	TriggerKey      []string `yaml:"trigger_key"`
@@ -257,20 +267,24 @@ func (c Config) Validate() error {
 }
 
 func DefaultConfigDir() (string, error) {
-	configRoot, err := os.UserConfigDir()
+	configRoot, err := userConfigDir()
+	if err != nil {
+		return "", fmt.Errorf("config.DefaultConfigDir: %w", err)
+	}
+	homeDir, err := userHomeDir()
 	if err != nil {
 		return "", fmt.Errorf("config.DefaultConfigDir: %w", err)
 	}
 	newDir := appConfigDir(configRoot)
-	oldDir := legacyConfigDir(configRoot)
+	oldDir := legacyConfigDir(configRoot, homeDir, runtimeGOOS)
 
 	// Migrate from old config path if it exists and new path doesn't.
-	if _, err := os.Stat(oldDir); err == nil {
-		if _, err := os.Stat(newDir); os.IsNotExist(err) {
-			if mkErr := os.MkdirAll(filepath.Dir(newDir), 0755); mkErr != nil {
+	if _, err := statPath(oldDir); err == nil {
+		if _, err := statPath(newDir); os.IsNotExist(err) {
+			if mkErr := mkdirAll(filepath.Dir(newDir), 0755); mkErr != nil {
 				return "", fmt.Errorf("config.DefaultConfigDir: migrate mkdir: %w", mkErr)
 			}
-			if renameErr := os.Rename(oldDir, newDir); renameErr != nil {
+			if renameErr := renamePath(oldDir, newDir); renameErr != nil {
 				return "", fmt.Errorf("config.DefaultConfigDir: migrate rename: %w", renameErr)
 			}
 		}

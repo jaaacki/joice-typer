@@ -5,6 +5,7 @@ package transcription
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -163,5 +164,43 @@ func TestQuarantineModel_RemovalFailuresDoNotPanic(t *testing.T) {
 	}
 	if removedPath != "/tmp/model.bin.sha256" {
 		t.Fatalf("expected hash sidecar removal attempt, got %q", removedPath)
+	}
+}
+
+func TestValidateCachedModel_SizeMismatchLogsQuarantineFailure(t *testing.T) {
+	dir := t.TempDir()
+	modelPath := filepath.Join(dir, "ggml-test.bin")
+	if err := os.WriteFile(modelPath, []byte("short"), 0644); err != nil {
+		t.Fatalf("write model: %v", err)
+	}
+
+	originalManifest := modelManifest
+	originalRename := renameFile
+	defer func() {
+		modelManifest = originalManifest
+		renameFile = originalRename
+	}()
+	modelManifest = map[string]modelSpec{
+		"test": {
+			sha256:   strings.Repeat("a", 64),
+			exactLen: 99,
+		},
+	}
+
+	renameFile = func(oldpath, newpath string) error {
+		return errors.New("rename denied")
+	}
+
+	var logs strings.Builder
+	logger := slog.New(slog.NewTextHandler(&logs, nil))
+
+	if validateCachedModel(modelPath, "test", logger) {
+		t.Fatal("expected size mismatch to fail validation")
+	}
+	if !strings.Contains(logs.String(), "failed to quarantine bad model") {
+		t.Fatalf("expected quarantine failure to be logged, got logs:\n%s", logs.String())
+	}
+	if !strings.Contains(logs.String(), "rename denied") {
+		t.Fatalf("expected rename failure detail in logs, got logs:\n%s", logs.String())
 	}
 }

@@ -437,7 +437,7 @@ func validateCachedModel(modelPath string, modelSize string, logger *slog.Logger
 	}
 	if info.Size() != spec.exactLen {
 		l.Warn("model size mismatch", "expected", spec.exactLen, "actual", info.Size())
-		os.Rename(modelPath, modelPath+".bad")
+		quarantineModel(modelPath, modelPath+".sha256", l, "validateCachedModel")
 		return false
 	}
 

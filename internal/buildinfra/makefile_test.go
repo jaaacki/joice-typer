@@ -36,6 +36,25 @@ func TestMakeDownloadModelUsesRuntimeModelDir(t *testing.T) {
 	}
 }
 
+func TestMakeDownloadModelUsesXDGModelDirOnLinux(t *testing.T) {
+	root := repoRoot(t)
+	home := t.TempDir()
+	xdgConfigHome := filepath.Join(home, ".config-alt")
+
+	cmd := exec.Command("make", "-n", "download-model", "HOST_GOOS=linux")
+	cmd.Dir = root
+	cmd.Env = append(os.Environ(), "HOME="+home, "XDG_CONFIG_HOME="+xdgConfigHome)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("make -n download-model HOST_GOOS=linux: %v\n%s", err, out)
+	}
+
+	want := filepath.Join(xdgConfigHome, "JoiceTyper", "models", "ggml-small.bin")
+	if !strings.Contains(string(out), want) {
+		t.Fatalf("expected make output to use linux runtime model path %q\noutput:\n%s", want, out)
+	}
+}
+
 func TestMakeDownloadModelSkipsExistingFile(t *testing.T) {
 	root := repoRoot(t)
 	home := t.TempDir()
