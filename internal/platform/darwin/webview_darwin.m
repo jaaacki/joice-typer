@@ -5,6 +5,18 @@
 
 static NSWindow *sWebSettingsWindow = nil;
 static WKWebView *sWebSettingsView = nil;
+static id sWebSettingsWindowDelegate = nil;
+
+@interface JoiceTyperWebSettingsWindowDelegate : NSObject <NSWindowDelegate>
+@end
+
+@implementation JoiceTyperWebSettingsWindowDelegate
+
+- (void)windowWillClose:(NSNotification *)notification {
+    webSettingsWindowClosed();
+}
+
+@end
 
 @interface JoiceTyperWebSettingsHandler : NSObject <WKScriptMessageHandler>
 @end
@@ -37,12 +49,19 @@ static WKWebView *sWebSettingsView = nil;
 
     char *response = handleWebSettingsMessage(request);
     free(request);
+    NSString *responseScript = nil;
     if (response != NULL) {
+        responseScript = [NSString stringWithUTF8String:response];
         free(response);
-        return;
     }
 
-    [sWebSettingsWindow close];
+    if (responseScript != nil) {
+        [sWebSettingsView evaluateJavaScript:responseScript completionHandler:nil];
+    }
+
+    if (response == NULL) {
+        [sWebSettingsWindow close];
+    }
 }
 
 @end
@@ -69,6 +88,8 @@ void showWebSettingsWindow(const char *indexPath) {
                                                                backing:NSBackingStoreBuffered
                                                                  defer:NO];
             [sWebSettingsWindow setTitle:@"JoiceTyper Preferences"];
+            sWebSettingsWindowDelegate = [[JoiceTyperWebSettingsWindowDelegate alloc] init];
+            [sWebSettingsWindow setDelegate:sWebSettingsWindowDelegate];
 
             WKWebViewConfiguration *configuration = [[WKWebViewConfiguration alloc] init];
             WKUserContentController *controller = [[WKUserContentController alloc] init];

@@ -124,13 +124,8 @@ func TestMakeBuildRunsFrontendBuild(t *testing.T) {
 	}
 
 	text := string(out)
-	for _, snippet := range []string{
-		"cd ui && npm ci",
-		"cd ui && npm run build",
-	} {
-		if !strings.Contains(text, snippet) {
-			t.Fatalf("expected build output to include %q\noutput:\n%s", snippet, text)
-		}
+	if !strings.Contains(text, "cd ui && npm run build") {
+		t.Fatalf("expected build output to include frontend build step\noutput:\n%s", text)
 	}
 }
 
@@ -154,6 +149,12 @@ func TestMakeBuildSkipsFrontendInstallWhenStampPresent(t *testing.T) {
 	root := repoRoot(t)
 	stampPath := filepath.Join(root, "ui", "node_modules", ".package-lock.stamp")
 	lockPath := filepath.Join(root, "ui", "package-lock.json")
+	requiredPaths := []string{
+		filepath.Join(root, "ui", "node_modules", ".bin", "vite"),
+		filepath.Join(root, "ui", "node_modules", "react", "package.json"),
+		filepath.Join(root, "ui", "node_modules", "react-dom", "package.json"),
+		filepath.Join(root, "ui", "node_modules", "typescript", "package.json"),
+	}
 
 	lockInfo, err := os.Stat(lockPath)
 	if err != nil {
@@ -161,6 +162,15 @@ func TestMakeBuildSkipsFrontendInstallWhenStampPresent(t *testing.T) {
 	}
 	if err := os.MkdirAll(filepath.Dir(stampPath), 0755); err != nil {
 		t.Fatalf("mkdir stamp dir: %v", err)
+	}
+	for _, path := range requiredPaths {
+		if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+			t.Fatalf("mkdir %s: %v", path, err)
+		}
+		if err := os.WriteFile(path, []byte("ok"), 0644); err != nil {
+			t.Fatalf("write %s: %v", path, err)
+		}
+		defer os.Remove(path)
 	}
 	if err := os.WriteFile(stampPath, []byte("ok"), 0644); err != nil {
 		t.Fatalf("write stamp: %v", err)
@@ -180,5 +190,45 @@ func TestMakeBuildSkipsFrontendInstallWhenStampPresent(t *testing.T) {
 
 	if strings.Contains(string(out), "cd ui && npm ci") {
 		t.Fatalf("expected build to skip npm ci when install stamp is current\noutput:\n%s", out)
+	}
+}
+
+func TestMakeBuildReinstallsFrontendWhenViteBinaryMissing(t *testing.T) {
+	root := repoRoot(t)
+	stampPath := filepath.Join(root, "ui", "node_modules", ".package-lock.stamp")
+	lockPath := filepath.Join(root, "ui", "package-lock.json")
+	viteBinPath := filepath.Join(root, "ui", "node_modules", ".bin", "vite")
+
+	lockInfo, err := os.Stat(lockPath)
+	if err != nil {
+		t.Fatalf("stat package-lock.json: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(stampPath), 0755); err != nil {
+		t.Fatalf("mkdir stamp dir: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(viteBinPath), 0755); err != nil {
+		t.Fatalf("mkdir vite bin dir: %v", err)
+	}
+	if err := os.Remove(viteBinPath); err != nil && !os.IsNotExist(err) {
+		t.Fatalf("remove vite binary: %v", err)
+	}
+	if err := os.WriteFile(stampPath, []byte("ok"), 0644); err != nil {
+		t.Fatalf("write stamp: %v", err)
+	}
+	newer := lockInfo.ModTime().Add(time.Hour)
+	if err := os.Chtimes(stampPath, newer, newer); err != nil {
+		t.Fatalf("chtimes stamp: %v", err)
+	}
+	defer os.Remove(stampPath)
+
+	cmd := exec.Command("make", "-n", "build")
+	cmd.Dir = root
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("make -n build: %v\n%s", err, out)
+	}
+
+	if !strings.Contains(string(out), "npm ci") {
+		t.Fatalf("expected build to reinstall frontend deps when vite binary is missing\noutput:\n%s", out)
 	}
 }

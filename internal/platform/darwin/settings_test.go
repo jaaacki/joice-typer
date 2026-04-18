@@ -121,3 +121,23 @@ func TestSettingsSource_UsesWebViewHostHook(t *testing.T) {
 		t.Fatal("expected settings flow to reference web settings host")
 	}
 }
+
+func TestSettingsSource_WebFlowDoesNotClearPreferencesOpenImmediately(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join(".", "settings.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := string(data)
+	webFlowIndex := strings.Index(source, "if shouldUseWebSettings() {")
+	if webFlowIndex == -1 {
+		t.Fatal("expected web settings flow in settings.go")
+	}
+	returnIndex := strings.Index(source[webFlowIndex:], "return")
+	if returnIndex == -1 {
+		t.Fatal("expected web settings flow to return")
+	}
+	webSlice := source[webFlowIndex : webFlowIndex+returnIndex]
+	if strings.Contains(webSlice, "preferencesOpenStore(0)") {
+		t.Fatal("expected web settings flow to keep preferences open until the web window closes")
+	}
+}

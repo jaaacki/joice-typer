@@ -105,3 +105,12 @@ func TestInjectBootstrapScript_AddsPayload(t *testing.T) {
 		t.Fatal("expected bootstrap payload JSON to be present")
 	}
 }
+
+func TestWebSettingsWindowClosed_ClearsPreferencesOpenFlag(t *testing.T) {
+	preferencesOpenStore(1)
+	webSettingsWindowClosed()
+	if !preferencesOpenCompareAndSwap(0, 1) {
+		t.Fatal("expected webSettingsWindowClosed to clear preferences open flag")
+	}
+	preferencesOpenStore(0)
+}

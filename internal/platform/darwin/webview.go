@@ -148,8 +148,9 @@ func injectBootstrapScript(indexHTML []byte, bootstrap bridgepkg.BootstrapPayloa
 }
 
 type webSettingsMessage struct {
-	Type   string                    `json:"type"`
-	Config bridgepkg.ConfigSnapshot  `json:"config"`
+	RequestID string                   `json:"requestId"`
+	Type      string                   `json:"type"`
+	Config    bridgepkg.ConfigSnapshot `json:"config"`
 }
 
 func applyWebSettingsConfig(snapshot bridgepkg.ConfigSnapshot) error {
@@ -173,6 +174,36 @@ func applyWebSettingsConfig(snapshot bridgepkg.ConfigSnapshot) error {
 	}
 	webSettingsSignalRestart()
 	return nil
+}
+
+//export webSettingsWindowClosed
+func webSettingsWindowClosed() {
+	preferencesOpenStore(0)
+}
+
+func webSettingsResponseScript(requestID string, err error) string {
+	ok := err == nil
+	errorText := ""
+	if err != nil {
+		errorText = err.Error()
+	}
+
+	response := struct {
+		RequestID string `json:"requestId"`
+		OK        bool   `json:"ok"`
+		Error     string `json:"error,omitempty"`
+	}{
+		RequestID: requestID,
+		OK:        ok,
+		Error:     errorText,
+	}
+
+	payload, marshalErr := json.Marshal(response)
+	if marshalErr != nil {
+		fallback := fmt.Sprintf(`{"requestId":%q,"ok":false,"error":%q}`, requestID, marshalErr.Error())
+		return "window.dispatchEvent(new CustomEvent('joicetyper-native-save', { detail: " + fallback + " }));"
+	}
+	return "window.dispatchEvent(new CustomEvent('joicetyper-native-save', { detail: " + string(payload) + " }));"
 }
 
 //export handleWebSettingsMessage

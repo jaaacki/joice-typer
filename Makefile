@@ -23,6 +23,10 @@ BUILD_DIR := build/$(HOST_GOOS)-$(HOST_GOARCH)
 BIN_PATH := $(BUILD_DIR)/voicetype
 UI_DIR := ui
 FRONTEND_INSTALL_STAMP := $(UI_DIR)/node_modules/.package-lock.stamp
+FRONTEND_VITE_BIN := $(UI_DIR)/node_modules/.bin/vite
+FRONTEND_REACT_PKG := $(UI_DIR)/node_modules/react/package.json
+FRONTEND_REACT_DOM_PKG := $(UI_DIR)/node_modules/react-dom/package.json
+FRONTEND_TYPESCRIPT_PKG := $(UI_DIR)/node_modules/typescript/package.json
 
 all: whisper build
 
@@ -38,8 +42,10 @@ whisper:
 		-DCMAKE_BUILD_TYPE=Release
 	cd $(WHISPER_DIR) && cmake --build build --config Release -j$$(sysctl -n hw.ncpu)
 
-$(FRONTEND_INSTALL_STAMP): $(UI_DIR)/package-lock.json $(UI_DIR)/package.json
+$(FRONTEND_VITE_BIN) $(FRONTEND_REACT_PKG) $(FRONTEND_REACT_DOM_PKG) $(FRONTEND_TYPESCRIPT_PKG): $(UI_DIR)/package-lock.json $(UI_DIR)/package.json
 	cd $(UI_DIR) && npm ci
+
+$(FRONTEND_INSTALL_STAMP): $(UI_DIR)/package-lock.json $(UI_DIR)/package.json $(FRONTEND_VITE_BIN) $(FRONTEND_REACT_PKG) $(FRONTEND_REACT_DOM_PKG) $(FRONTEND_TYPESCRIPT_PKG)
 	@mkdir -p "$(dir $@)"
 	@touch $@
 

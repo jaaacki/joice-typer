@@ -36,7 +36,7 @@ export function SettingsScreen({ config, appState }: SettingsScreenProps) {
   function handleSave() {
     try {
       saveConfig(draft);
-      setStatus("Saved. JoiceTyper is reloading the runtime.");
+      setStatus("Save request sent. Waiting for native confirmation.");
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "Failed to save settings");
     }

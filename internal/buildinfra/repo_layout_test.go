@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -55,13 +56,25 @@ func TestRepoLayout_FrontendToolchainFilesExist(t *testing.T) {
 
 func TestFrontendBuild_ProducesDistIndex(t *testing.T) {
 	root := repoRoot(t)
-	cmd := exec.Command("npm", "run", "build")
-	cmd.Dir = filepath.Join(root, "ui")
+	cmd := exec.Command("make", "frontend-build")
+	cmd.Dir = root
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		t.Fatalf("npm run build: %v\n%s", err, out)
+		t.Fatalf("make frontend-build: %v\n%s", err, out)
 	}
 	if _, err := os.Stat(filepath.Join(root, "ui", "dist", "index.html")); err != nil {
 		t.Fatalf("expected ui/dist/index.html: %v", err)
+	}
+}
+
+func TestSettingsScreenSource_DoesNotClaimSaveBeforeAck(t *testing.T) {
+	root := repoRoot(t)
+	data, err := os.ReadFile(filepath.Join(root, "ui", "src", "settings", "SettingsScreen.tsx"))
+	if err != nil {
+		t.Fatalf("read SettingsScreen.tsx: %v", err)
+	}
+	source := string(data)
+	if strings.Contains(source, "Saved. JoiceTyper is reloading the runtime.") {
+		t.Fatal("expected settings screen to avoid claiming save success before native acknowledgement")
 	}
 }

@@ -524,7 +524,6 @@ func OpenPreferences() {
 			currentSettingsLogger().Warn("failed to show web settings window, falling back to native preferences",
 				"operation", "OpenPreferences", "error", err)
 		} else {
-			preferencesOpenStore(0)
 			return
 		}
 	}
