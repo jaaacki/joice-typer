@@ -263,6 +263,18 @@ extern void modelDropdownChanged(void);
     [[NSWorkspace sharedWorkspace] openURL:[NSURL URLWithString:@"x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent"]];
 }
 
+void openAccessibilitySettingsFromGo(void) {
+    dispatch_async(dispatch_get_main_queue(), ^{
+        [[NSWorkspace sharedWorkspace] openURL:[NSURL URLWithString:@"x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"]];
+    });
+}
+
+void openInputMonitoringSettingsFromGo(void) {
+    dispatch_async(dispatch_get_main_queue(), ^{
+        [[NSWorkspace sharedWorkspace] openURL:[NSURL URLWithString:@"x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent"]];
+    });
+}
+
 - (void)modelBtn1Clicked:(id)sender {
     modelBtn1Clicked();
 }

@@ -1,4 +1,4 @@
-.PHONY: all setup build clean download-model whisper test app dmg release-check build-windows-amd64 frontend-build
+.PHONY: all setup build clean download-model whisper test app dmg release-check build-windows-amd64 frontend-build bridge-contract bridge-contract-check
 
 WHISPER_DIR := third_party/whisper.cpp
 WHISPER_BUILD := $(WHISPER_DIR)/build
@@ -30,6 +30,12 @@ FRONTEND_TYPESCRIPT_PKG := $(UI_DIR)/node_modules/typescript/package.json
 
 all: whisper build
 
+bridge-contract:
+	go run ./scripts/generate_bridge_contract
+
+bridge-contract-check:
+	go run ./scripts/generate_bridge_contract -check
+
 setup:
 	brew install portaudio cmake
 
@@ -49,10 +55,10 @@ $(FRONTEND_INSTALL_STAMP): $(UI_DIR)/package-lock.json $(UI_DIR)/package.json $(
 	@mkdir -p "$(dir $@)"
 	@touch $@
 
-frontend-build: $(FRONTEND_INSTALL_STAMP)
+frontend-build: bridge-contract $(FRONTEND_INSTALL_STAMP)
 	cd $(UI_DIR) && npm run build
 
-build: whisper frontend-build
+build: bridge-contract whisper frontend-build
 	mkdir -p $(BUILD_DIR)
 	CGO_ENABLED=1 go build -ldflags "$(GO_LDFLAGS)" -o $(BIN_PATH) ./cmd/joicetyper
 
@@ -77,7 +83,7 @@ clean:
 	rm -rf $(APP_BUNDLE)
 	rm -rf $(UI_DIR)/node_modules
 
-test:
+test: bridge-contract
 	go test -v -count=1 ./...
 
 app: build
@@ -120,6 +126,6 @@ release-check:
 	@test "v$(VERSION)" = "$(RELEASE_TAG)" || (echo "fatal: release tag $(RELEASE_TAG) does not match VERSION $(VERSION)" && exit 1)
 	@echo "Release tag $(RELEASE_TAG) matches VERSION $(VERSION)"
 
-build-windows-amd64: frontend-build
+build-windows-amd64: bridge-contract frontend-build
 	mkdir -p build/windows-amd64
 	GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -ldflags "$(GO_LDFLAGS)" -o build/windows-amd64/joicetyper.exe ./cmd/joicetyper

@@ -37,3 +37,30 @@ type BootstrapPayload struct {
 	Config   ConfigSnapshot   `json:"config"`
 	AppState AppStateSnapshot `json:"appState"`
 }
+
+type OptionSnapshot struct {
+	Code string `json:"code"`
+	Name string `json:"name"`
+}
+
+type SettingsOptionsSnapshot struct {
+	Models           []OptionSnapshot `json:"models"`
+	Languages        []OptionSnapshot `json:"languages"`
+	DecodeModes      []OptionSnapshot `json:"decodeModes"`
+	PunctuationModes []OptionSnapshot `json:"punctuationModes"`
+}
+
+type DevicesRefreshResult struct {
+	Devices []DeviceSnapshot `json:"devices"`
+}
+
+type ModelCommandResult struct {
+	Size string `json:"size"`
+}
+
+type HotkeyCaptureSnapshot struct {
+	TriggerKey []string `json:"triggerKey"`
+	Display    string   `json:"display"`
+	Recording  bool     `json:"recording"`
+	CanConfirm bool     `json:"canConfirm"`
+}

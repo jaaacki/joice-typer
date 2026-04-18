@@ -1,0 +1,57 @@
+{
+  "protocolVersion": 1,
+  "bridgeEventName": "joicetyper-bridge-message",
+  "kinds": [
+    { "goName": "KindRequest", "tsName": "request", "value": "request" },
+    { "goName": "KindResponse", "tsName": "response", "value": "response" },
+    { "goName": "KindEvent", "tsName": "event", "value": "event" }
+  ],
+  "methods": [
+    { "goName": "BootstrapMethod", "tsName": "bootstrapGet", "value": "bootstrap.get" },
+    { "goName": "ConfigGetMethod", "tsName": "configGet", "value": "config.get" },
+    { "goName": "SaveConfigMethod", "tsName": "configSave", "value": "config.save" },
+    { "goName": "PermissionsGetMethod", "tsName": "permissionsGet", "value": "permissions.get" },
+    { "goName": "PermissionsOpenSettingsMethod", "tsName": "permissionsOpenSettings", "value": "permissions.open_settings" },
+    { "goName": "DevicesListMethod", "tsName": "devicesList", "value": "devices.list" },
+    { "goName": "DevicesRefreshMethod", "tsName": "devicesRefresh", "value": "devices.refresh" },
+    { "goName": "ModelGetMethod", "tsName": "modelGet", "value": "model.get" },
+    { "goName": "ModelDownloadMethod", "tsName": "modelDownload", "value": "model.download" },
+    { "goName": "ModelDeleteMethod", "tsName": "modelDelete", "value": "model.delete" },
+    { "goName": "ModelUseMethod", "tsName": "modelUse", "value": "model.use" },
+    { "goName": "HotkeyCaptureStartMethod", "tsName": "hotkeyCaptureStart", "value": "hotkey.capture_start" },
+    { "goName": "HotkeyCaptureCancelMethod", "tsName": "hotkeyCaptureCancel", "value": "hotkey.capture_cancel" },
+    { "goName": "HotkeyCaptureConfirmMethod", "tsName": "hotkeyCaptureConfirm", "value": "hotkey.capture_confirm" },
+    { "goName": "RuntimeGetMethod", "tsName": "runtimeGet", "value": "runtime.get" },
+    { "goName": "OptionsGetMethod", "tsName": "optionsGet", "value": "options.get" }
+  ],
+  "events": [
+    { "goName": "RuntimeStateChangedEvent", "tsName": "runtimeStateChanged", "value": "runtime.state_changed" },
+    { "goName": "PermissionsChangedEvent", "tsName": "permissionsChanged", "value": "permissions.changed" },
+    { "goName": "DevicesChangedEvent", "tsName": "devicesChanged", "value": "devices.changed" },
+    { "goName": "ModelChangedEvent", "tsName": "modelChanged", "value": "model.changed" },
+    { "goName": "ModelDownloadProgressEvent", "tsName": "modelDownloadProgress", "value": "model.download_progress" },
+    { "goName": "ConfigSavedEvent", "tsName": "configSaved", "value": "config.saved" },
+    { "goName": "HotkeyCaptureChangedEvent", "tsName": "hotkeyCaptureChanged", "value": "hotkey.capture_changed" }
+  ],
+  "errors": [
+    { "goName": "ErrorCodeBadRequest", "tsName": "invalidRequest", "value": "bridge.invalid_request" },
+    { "goName": "ErrorCodeBadMethod", "tsName": "unsupportedMethod", "value": "bridge.unsupported_method" },
+    { "goName": "ErrorCodeInternal", "tsName": "internalError", "value": "bridge.internal_error" },
+    { "goName": "ErrorCodeConfigInvalid", "tsName": "configInvalid", "value": "config.invalid" },
+    { "goName": "ErrorCodeConfigLoadFailure", "tsName": "configLoadFailed", "value": "config.load_failed" },
+    { "goName": "ErrorCodeSaveFailure", "tsName": "configSaveFailed", "value": "config.save_failed" },
+    { "goName": "ErrorCodePermissionsUnavailable", "tsName": "permissionsUnavailable", "value": "permissions.unavailable" },
+    { "goName": "ErrorCodePermissionInvalidTarget", "tsName": "permissionsInvalidTarget", "value": "permissions.invalid_target" },
+    { "goName": "ErrorCodePermissionOpenFailed", "tsName": "permissionsOpenFailed", "value": "permissions.open_settings_failed" },
+    { "goName": "ErrorCodeDevicesEnumerationFailed", "tsName": "devicesEnumerationFailed", "value": "devices.enumeration_failed" },
+    { "goName": "ErrorCodeDevicesRefreshFailed", "tsName": "devicesRefreshFailed", "value": "devices.refresh_failed" },
+    { "goName": "ErrorCodeModelUnavailable", "tsName": "modelUnavailable", "value": "model.unavailable" },
+    { "goName": "ErrorCodeModelDownloadFailed", "tsName": "modelDownloadFailed", "value": "model.download_failed" },
+    { "goName": "ErrorCodeModelDeleteFailed", "tsName": "modelDeleteFailed", "value": "model.delete_failed" },
+    { "goName": "ErrorCodeModelUseFailed", "tsName": "modelUseFailed", "value": "model.use_failed" },
+    { "goName": "ErrorCodeHotkeyCaptureStartFailed", "tsName": "hotkeyCaptureStartFailed", "value": "hotkey.capture_start_failed" },
+    { "goName": "ErrorCodeHotkeyCaptureCancelFailed", "tsName": "hotkeyCaptureCancelFailed", "value": "hotkey.capture_cancel_failed" },
+    { "goName": "ErrorCodeHotkeyCaptureConfirmFailed", "tsName": "hotkeyCaptureConfirmFailed", "value": "hotkey.capture_confirm_failed" },
+    { "goName": "ErrorCodeRuntimeUnavailable", "tsName": "runtimeUnavailable", "value": "runtime.unavailable" }
+  ]
+}

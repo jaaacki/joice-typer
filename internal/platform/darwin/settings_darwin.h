@@ -4,6 +4,8 @@
 #include <stdint.h>
 
 void showSettingsWindow(int onboarding);
+void openAccessibilitySettingsFromGo(void);
+void openInputMonitoringSettingsFromGo(void);
 void updateSetupAccessibility(int granted);
 void updateSetupInputMonitoring(int granted);
 void populateSetupDevices(const char **deviceNames, int count, int defaultIndex);

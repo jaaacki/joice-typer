@@ -19,6 +19,7 @@ import (
 	"time"
 	"unsafe"
 
+	bridgepkg "voicetype/internal/core/bridge"
 	config "voicetype/internal/core/config"
 	transcriptionpkg "voicetype/internal/core/transcription"
 
@@ -28,6 +29,209 @@ import (
 var postNotification = PostNotification
 var defaultModelPath = config.DefaultModelPath
 var removeFile = os.Remove
+var listAudioDevices = portaudio.Devices
+var downloadModelWithProgress = transcriptionpkg.DownloadModelWithProgress
+var webSettingsOpenPermissionSettings = openWebSettingsPermissionSettings
+
+func loadWebSettingsPermissionsSnapshot() bridgepkg.PermissionsSnapshot {
+	return bridgepkg.PermissionsSnapshot{
+		Accessibility:   C.checkAccessibility() == 1,
+		InputMonitoring: C.checkInputMonitoring() == 1,
+	}
+}
+
+func listWebSettingsInputDevices() ([]bridgepkg.DeviceSnapshot, error) {
+	devices, err := listAudioDevices()
+	if err != nil {
+		return nil, bridgepkg.WrapContractError(
+			bridgepkg.ErrorCodeDevicesEnumerationFailed,
+			"Failed to list input devices",
+			true,
+			nil,
+			err,
+		)
+	}
+	snapshots := make([]bridgepkg.DeviceSnapshot, 0, len(devices))
+	defaultInput, defaultErr := portaudio.DefaultInputDevice()
+	for _, device := range devices {
+		if device.MaxInputChannels <= 0 {
+			continue
+		}
+		isDefault := defaultErr == nil && defaultInput != nil && defaultInput.Name == device.Name
+		snapshots = append(snapshots, bridgepkg.DeviceSnapshot{
+			Name:      device.Name,
+			IsDefault: isDefault,
+		})
+	}
+	return snapshots, nil
+}
+
+func loadWebSettingsModelSnapshot(modelSize string) (bridgepkg.ModelSnapshot, error) {
+	modelPath, err := defaultModelPath(modelSize)
+	if err != nil {
+		return bridgepkg.ModelSnapshot{}, bridgepkg.WrapContractError(
+			bridgepkg.ErrorCodeModelUnavailable,
+			"Failed to resolve model state",
+			false,
+			map[string]any{"modelSize": modelSize},
+			err,
+		)
+	}
+	_, statErr := os.Stat(modelPath)
+	return bridgepkg.ModelSnapshot{
+		Size:  modelSize,
+		Path:  modelPath,
+		Ready: statErr == nil,
+	}, nil
+}
+
+func openWebSettingsPermissionSettings(target string) error {
+	switch target {
+	case "accessibility":
+		C.openAccessibilitySettingsFromGo()
+		return nil
+	case "input_monitoring":
+		C.openInputMonitoringSettingsFromGo()
+		return nil
+	default:
+		return bridgepkg.NewContractError(
+			bridgepkg.ErrorCodePermissionInvalidTarget,
+			"Unsupported permission settings target",
+			false,
+			map[string]any{"target": target},
+		)
+	}
+}
+
+func refreshWebSettingsDevices() ([]bridgepkg.DeviceSnapshot, error) {
+	if recorder := currentSettingsRecorder(); recorder != nil {
+		if err := recorder.RefreshDevices(); err != nil {
+			return nil, bridgepkg.WrapContractError(
+				bridgepkg.ErrorCodeDevicesRefreshFailed,
+				"Failed to refresh input devices",
+				true,
+				nil,
+				err,
+			)
+		}
+	}
+	devices, err := listWebSettingsInputDevices()
+	if err != nil {
+		return nil, err
+	}
+	publishDevicesChanged(devices)
+	return devices, nil
+}
+
+func downloadWebSettingsModel(modelSize string) error {
+	modelPath, err := defaultModelPath(modelSize)
+	if err != nil {
+		return bridgepkg.WrapContractError(
+			bridgepkg.ErrorCodeModelDownloadFailed,
+			"Failed to resolve model download path",
+			false,
+			map[string]any{"size": modelSize},
+			err,
+		)
+	}
+
+	ctx := currentPreferencesContext()
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := downloadModelWithProgress(ctx, modelPath, modelSize, func(progress float64, downloaded, total int64) {
+		publishModelDownloadProgress(modelSize, progress, downloaded, total)
+	}, currentSettingsLogger()); err != nil {
+		return bridgepkg.WrapContractError(
+			bridgepkg.ErrorCodeModelDownloadFailed,
+			"Failed to download model",
+			true,
+			map[string]any{"size": modelSize},
+			err,
+		)
+	}
+
+	snapshot, err := loadWebSettingsModelSnapshot(modelSize)
+	if err != nil {
+		return err
+	}
+	publishModelChanged(snapshot)
+	return nil
+}
+
+func deleteWebSettingsModel(modelSize string) error {
+	if prefsActiveModel == modelSize {
+		return bridgepkg.NewContractError(
+			bridgepkg.ErrorCodeModelDeleteFailed,
+			"Cannot delete the active model",
+			false,
+			map[string]any{"size": modelSize},
+		)
+	}
+	modelPath, err := defaultModelPath(modelSize)
+	if err != nil {
+		return bridgepkg.WrapContractError(
+			bridgepkg.ErrorCodeModelDeleteFailed,
+			"Failed to resolve model path",
+			false,
+			map[string]any{"size": modelSize},
+			err,
+		)
+	}
+	if removeErr := removeFile(modelPath); removeErr != nil {
+		return bridgepkg.WrapContractError(
+			bridgepkg.ErrorCodeModelDeleteFailed,
+			"Failed to delete model",
+			false,
+			map[string]any{"size": modelSize},
+			removeErr,
+		)
+	}
+	if removeErr := removeFile(modelPath + ".sha256"); removeErr != nil && !os.IsNotExist(removeErr) {
+		return bridgepkg.WrapContractError(
+			bridgepkg.ErrorCodeModelDeleteFailed,
+			"Failed to delete model hash cache",
+			false,
+			map[string]any{"size": modelSize},
+			removeErr,
+		)
+	}
+	publishModelChanged(bridgepkg.ModelSnapshot{
+		Size:  modelSize,
+		Path:  modelPath,
+		Ready: false,
+	})
+	return nil
+}
+
+func useWebSettingsModel(modelSize string) error {
+	modelPath, err := defaultModelPath(modelSize)
+	if err != nil {
+		return bridgepkg.WrapContractError(
+			bridgepkg.ErrorCodeModelUseFailed,
+			"Failed to resolve model path",
+			false,
+			map[string]any{"size": modelSize},
+			err,
+		)
+	}
+	if _, statErr := os.Stat(modelPath); statErr != nil {
+		return bridgepkg.WrapContractError(
+			bridgepkg.ErrorCodeModelUseFailed,
+			"Model is not available to use",
+			false,
+			map[string]any{"size": modelSize},
+			statErr,
+		)
+	}
+	prefsActiveModel = modelSize
+	snapshot, err := loadWebSettingsModelSnapshot(modelSize)
+	if err != nil {
+		return err
+	}
+	publishModelChanged(snapshot)
+	return nil
+}
 
 func resolveModelPathForSettings(modelSize string, operation string) (string, bool) {
 	modelPath, err := defaultModelPath(modelSize)
@@ -229,6 +433,9 @@ func modelBtn1Clicked() {
 		}
 		currentSettingsLogger().Info("model deleted", "operation", "modelBtn1Clicked", "model", selected)
 		populateModelList("")
+		if snapshot, err := loadWebSettingsModelSnapshot(selected); err == nil {
+			publishModelChanged(snapshot)
+		}
 		return
 	}
 
@@ -248,6 +455,7 @@ func modelBtn1Clicked() {
 			}
 			dlErr := transcriptionpkg.DownloadModelWithProgress(ctx, modelPath, selected, func(progress float64, downloaded, total int64) {
 				C.updateDownloadProgress(C.double(progress), C.longlong(downloaded), C.longlong(total))
+				publishModelDownloadProgress(selected, progress, downloaded, total)
 			}, currentSettingsLogger())
 			if dlErr != nil {
 				currentSettingsLogger().Error("model download failed", "operation", "modelBtn1Clicked", "error", dlErr)
@@ -257,6 +465,9 @@ func modelBtn1Clicked() {
 			currentSettingsLogger().Info("model downloaded", "operation", "modelBtn1Clicked", "model", selected)
 			C.updateSetupDownloadComplete()
 			populateModelList("")
+			if snapshot, err := loadWebSettingsModelSnapshot(selected); err == nil {
+				publishModelChanged(snapshot)
+			}
 		}()
 	} else if prefsActiveModel == selected {
 		// Active — "In Use" button, shouldn't be clickable but ignore
@@ -269,6 +480,9 @@ func modelBtn1Clicked() {
 		C.setActiveModelSize(cSize)
 		C.free(unsafe.Pointer(cSize))
 		populateModelList(prefsActiveModel)
+		if snapshot, err := loadWebSettingsModelSnapshot(selected); err == nil {
+			publishModelChanged(snapshot)
+		}
 	}
 }
 
@@ -517,12 +731,25 @@ func OpenPreferences() {
 		return
 	}
 
+	// Refresh audio devices to pick up newly connected mics (e.g. Bluetooth).
+	if recorder := currentSettingsRecorder(); recorder != nil {
+		if refreshErr := recorder.RefreshDevices(); refreshErr != nil {
+			currentSettingsLogger().Warn("failed to refresh audio devices", "operation", "OpenPreferences", "error", refreshErr)
+		} else if devices, devicesErr := listWebSettingsInputDevices(); devicesErr == nil {
+			publishDevicesChanged(devices)
+		}
+	}
+
 	if shouldUseWebSettings() {
+		prefsActiveModel = cfg.ModelSize
 		bridgeService := buildSettingsBridgeService(cfg)
 		currentSettingsLogger().Info("showing web settings window", "operation", "OpenPreferences")
 		if err := ShowWebSettingsWindowWithBridge(context.Background(), bridgeService); err != nil {
-			currentSettingsLogger().Warn("failed to show web settings window, falling back to native preferences",
+			currentSettingsLogger().Error("failed to show web settings window",
 				"operation", "OpenPreferences", "error", err)
+			postNotification("JoiceTyper Preferences", "Failed to open web preferences. Set JOICETYPER_USE_NATIVE_PREFERENCES=1 only if you need the debug fallback.")
+			preferencesOpenStore(0)
+			return
 		} else {
 			return
 		}
@@ -537,13 +764,6 @@ func OpenPreferences() {
 
 	currentSettingsLogger().Info("setting permission state", "operation", "OpenPreferences")
 	C.setPrefsPermissionState()
-
-	// Refresh audio devices to pick up newly connected mics (e.g. Bluetooth).
-	if recorder := currentSettingsRecorder(); recorder != nil {
-		if refreshErr := recorder.RefreshDevices(); refreshErr != nil {
-			currentSettingsLogger().Warn("failed to refresh audio devices", "operation", "OpenPreferences", "error", refreshErr)
-		}
-	}
 
 	currentSettingsLogger().Info("populating UI fields", "operation", "OpenPreferences")
 	populateLanguageList(cfg.Language)
@@ -575,6 +795,7 @@ func openPreferencesWait(cfg config.Config, cfgPath string) {
 	// Poll permissions in background so UI updates if user grants them
 	prefsDone := make(chan struct{})
 	go func() {
+		lastSnapshot := bridgepkg.PermissionsSnapshot{}
 		for {
 			select {
 			case <-prefsDone:
@@ -585,6 +806,14 @@ func openPreferencesWait(cfg config.Config, cfgPath string) {
 			inp := C.checkInputMonitoring() == 1
 			C.updateSetupAccessibility(boolToCInt(acc))
 			C.updateSetupInputMonitoring(boolToCInt(inp))
+			snapshot := bridgepkg.PermissionsSnapshot{
+				Accessibility:   acc,
+				InputMonitoring: inp,
+			}
+			if snapshot != lastSnapshot {
+				publishPermissionsChanged(snapshot)
+				lastSnapshot = snapshot
+			}
 			if acc && inp {
 				return
 			}

@@ -77,6 +77,9 @@ func MakePowerEventHandler(app *App, recorder func() Recorder, logger *slog.Logg
 				UpdateStatusBar(StateDependencyStuck)
 				return
 			}
+			if devices, devicesErr := listWebSettingsInputDevices(); devicesErr == nil {
+				publishDevicesChanged(devices)
+			}
 			UpdateStatusBar(StateReady)
 			l.Info("recorder refreshed after wake", "operation", "powerEvent")
 		}

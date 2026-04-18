@@ -30,6 +30,7 @@ func InitStatusBarAsync() {
 func UpdateStatusBar(state AppState) {
 	storeCurrentAppState(state)
 	C.updateStatusBar(C.int(state))
+	publishRuntimeStateChanged(state)
 }
 
 // SetStatusBarHotkeyText sets the hotkey display string shown in the ready state.

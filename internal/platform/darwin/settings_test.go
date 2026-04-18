@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	bridgepkg "voicetype/internal/core/bridge"
 )
 
 func TestRequireSettingSelection_RejectsEmptyDecodeMode(t *testing.T) {
@@ -132,12 +134,90 @@ func TestSettingsSource_WebFlowDoesNotClearPreferencesOpenImmediately(t *testing
 	if webFlowIndex == -1 {
 		t.Fatal("expected web settings flow in settings.go")
 	}
-	returnIndex := strings.Index(source[webFlowIndex:], "return")
-	if returnIndex == -1 {
-		t.Fatal("expected web settings flow to return")
+	webSlice := source[webFlowIndex:]
+	if !strings.Contains(webSlice, "ShowWebSettingsWindowWithBridge") {
+		t.Fatal("expected web settings flow to open the web settings window")
 	}
-	webSlice := source[webFlowIndex : webFlowIndex+returnIndex]
-	if strings.Contains(webSlice, "preferencesOpenStore(0)") {
-		t.Fatal("expected web settings flow to keep preferences open until the web window closes")
+	if !strings.Contains(webSlice, "preferencesOpenStore(0)") {
+		t.Fatal("expected explicit cleanup on web settings open failure")
+	}
+	if !strings.Contains(webSlice, "postNotification(\"JoiceTyper Preferences\"") {
+		t.Fatal("expected web settings failure path to notify the user")
+	}
+}
+
+func TestSettingsSource_WebFlowNoLongerSilentlyFallsBackToNativePreferences(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join(".", "settings.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := string(data)
+	if strings.Contains(source, "falling back to native preferences") {
+		t.Fatal("expected web settings flow to stop silently falling back to native preferences")
+	}
+	if !strings.Contains(source, "JOICETYPER_USE_NATIVE_PREFERENCES=1") {
+		t.Fatal("expected web settings failure path to document the hidden native fallback env")
+	}
+}
+
+func TestSettingsSource_WebFlowSeedsActiveModelBeforeOpen(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join(".", "settings.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := string(data)
+	webFlowIndex := strings.Index(source, "if shouldUseWebSettings() {")
+	if webFlowIndex == -1 {
+		t.Fatal("expected web settings flow in settings.go")
+	}
+	webSlice := source[webFlowIndex:]
+	seedIndex := strings.Index(webSlice, "prefsActiveModel = cfg.ModelSize")
+	openIndex := strings.Index(webSlice, "ShowWebSettingsWindowWithBridge")
+	if seedIndex == -1 {
+		t.Fatal("expected web settings flow to seed prefsActiveModel from config")
+	}
+	if openIndex == -1 {
+		t.Fatal("expected web settings flow to open the web settings window")
+	}
+	if seedIndex > openIndex {
+		t.Fatal("expected prefsActiveModel seeding before opening web settings")
+	}
+}
+
+func TestDeleteWebSettingsModel_RejectsActiveModel(t *testing.T) {
+	originalPath := defaultModelPath
+	originalRemove := removeFile
+	originalActiveModel := prefsActiveModel
+	defer func() {
+		defaultModelPath = originalPath
+		removeFile = originalRemove
+		prefsActiveModel = originalActiveModel
+	}()
+
+	modelPath := filepath.Join(t.TempDir(), "ggml-small.bin")
+	defaultModelPath = func(modelSize string) (string, error) {
+		return modelPath, nil
+	}
+
+	var removeCalls int
+	removeFile = func(string) error {
+		removeCalls++
+		return nil
+	}
+
+	prefsActiveModel = "small"
+	err := deleteWebSettingsModel("small")
+	if err == nil {
+		t.Fatal("expected deleting the active model to fail")
+	}
+	contractErr, ok := bridgepkg.AsContractError(err)
+	if !ok {
+		t.Fatalf("expected contract error, got %T", err)
+	}
+	if contractErr.Code != bridgepkg.ErrorCodeModelDeleteFailed {
+		t.Fatalf("contractErr.Code = %q, want %q", contractErr.Code, bridgepkg.ErrorCodeModelDeleteFailed)
+	}
+	if removeCalls != 0 {
+		t.Fatalf("removeCalls = %d, want 0", removeCalls)
 	}
 }
