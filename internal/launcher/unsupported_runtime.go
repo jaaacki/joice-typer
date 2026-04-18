@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"io"
 
-	version "voicetype/internal/version"
+	version "voicetype/internal/core/version"
 )
 
 func runUnsupported(args []string, stdout io.Writer, stderr io.Writer, goos string, goarch string) int {

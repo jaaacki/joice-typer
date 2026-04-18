@@ -36,3 +36,38 @@ func TestLauncherDoesNotImportDarwinPackageDirectly(t *testing.T) {
 		t.Fatalf("launcher.go still imports internal/platform/darwin directly")
 	}
 }
+
+func TestArchitecture_UsesCorePackages(t *testing.T) {
+	path := filepath.Join(launcherDir(t), "launcher.go")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read launcher.go: %v", err)
+	}
+	text := string(data)
+
+	for _, needle := range []string{
+		"voicetype/internal/app",
+		"voicetype/internal/config",
+		"voicetype/internal/logging",
+		"voicetype/internal/version",
+		"voicetype/internal/transcription",
+		"voicetype/internal/audio",
+	} {
+		if strings.Contains(text, needle) {
+			t.Fatalf("found old import %q", needle)
+		}
+	}
+
+	for _, needle := range []string{
+		"voicetype/internal/core/runtime",
+		"voicetype/internal/core/config",
+		"voicetype/internal/core/logging",
+		"voicetype/internal/core/version",
+		"voicetype/internal/core/transcription",
+		"voicetype/internal/core/audio",
+	} {
+		if !strings.Contains(text, needle) {
+			t.Fatalf("missing new import %q", needle)
+		}
+	}
+}

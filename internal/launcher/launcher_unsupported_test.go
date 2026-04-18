@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	version "voicetype/internal/version"
+	version "voicetype/internal/core/version"
 )
 
 func TestRunUnsupportedVersionFlag(t *testing.T) {

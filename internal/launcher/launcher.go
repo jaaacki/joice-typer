@@ -17,13 +17,13 @@ import (
 	"syscall"
 	"time"
 
-	apppkg "voicetype/internal/app"
-	audiopkg "voicetype/internal/audio"
-	config "voicetype/internal/config"
-	loggingpkg "voicetype/internal/logging"
+	apppkg "voicetype/internal/core/runtime"
+	audiopkg "voicetype/internal/core/audio"
+	config "voicetype/internal/core/config"
+	loggingpkg "voicetype/internal/core/logging"
 	platformpkg "voicetype/internal/platform"
-	transcriptionpkg "voicetype/internal/transcription"
-	version "voicetype/internal/version"
+	transcriptionpkg "voicetype/internal/core/transcription"
+	version "voicetype/internal/core/version"
 )
 
 func Main() {

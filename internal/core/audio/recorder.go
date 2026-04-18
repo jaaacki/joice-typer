@@ -9,8 +9,8 @@ import (
 	"sync"
 	"time"
 
-	apppkg "voicetype/internal/app"
-	config "voicetype/internal/config"
+	apppkg "voicetype/internal/core/runtime"
+	config "voicetype/internal/core/config"
 
 	"github.com/gordonklaus/portaudio"
 )

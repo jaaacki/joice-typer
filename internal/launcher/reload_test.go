@@ -10,8 +10,8 @@ import (
 	"reflect"
 	"testing"
 
-	apppkg "voicetype/internal/app"
-	configpkg "voicetype/internal/config"
+	apppkg "voicetype/internal/core/runtime"
+	configpkg "voicetype/internal/core/config"
 )
 
 type fakeReloadHotkey struct{ id string }

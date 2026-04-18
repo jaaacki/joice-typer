@@ -2,7 +2,7 @@
 
 package darwin
 
-import apppkg "voicetype/internal/app"
+import apppkg "voicetype/internal/core/runtime"
 
 type App = apppkg.App
 type AppState = apppkg.AppState

@@ -20,7 +20,7 @@ import (
 	"sync"
 	"time"
 
-	config "voicetype/internal/config"
+	config "voicetype/internal/core/config"
 	keydefs "voicetype/internal/keys"
 )
 

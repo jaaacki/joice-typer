@@ -19,8 +19,8 @@ import (
 	"time"
 	"unsafe"
 
-	config "voicetype/internal/config"
-	transcriptionpkg "voicetype/internal/transcription"
+	config "voicetype/internal/core/config"
+	transcriptionpkg "voicetype/internal/core/transcription"
 
 	"github.com/gordonklaus/portaudio"
 )

@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	apppkg "voicetype/internal/app"
-	configpkg "voicetype/internal/config"
+	apppkg "voicetype/internal/core/runtime"
+	configpkg "voicetype/internal/core/config"
 )
 
 type runtimeConfigState struct {

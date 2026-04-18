@@ -6,7 +6,7 @@ import (
 	"context"
 	"log/slog"
 
-	apppkg "voicetype/internal/app"
+	apppkg "voicetype/internal/core/runtime"
 	darwinpkg "voicetype/internal/platform/darwin"
 )
 

@@ -7,7 +7,7 @@ import (
 	"log/slog"
 	"runtime"
 
-	apppkg "voicetype/internal/app"
+	apppkg "voicetype/internal/core/runtime"
 )
 
 type unsupportedRecorder struct {
