@@ -111,3 +111,40 @@ func TestMakeAppUsesAssetPaths(t *testing.T) {
 		t.Fatalf("expected app build to use assets/icons/icon.icns\noutput:\n%s", text)
 	}
 }
+
+func TestMakeBuildRunsFrontendBuild(t *testing.T) {
+	root := repoRoot(t)
+
+	cmd := exec.Command("make", "-n", "build")
+	cmd.Dir = root
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("make -n build: %v\n%s", err, out)
+	}
+
+	text := string(out)
+	for _, snippet := range []string{
+		"cd ui && npm ci",
+		"cd ui && npm run build",
+	} {
+		if !strings.Contains(text, snippet) {
+			t.Fatalf("expected build output to include %q\noutput:\n%s", snippet, text)
+		}
+	}
+}
+
+func TestMakeWindowsBuildRunsFrontendBuild(t *testing.T) {
+	root := repoRoot(t)
+
+	cmd := exec.Command("make", "-n", "build-windows-amd64")
+	cmd.Dir = root
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("make -n build-windows-amd64: %v\n%s", err, out)
+	}
+
+	text := string(out)
+	if !strings.Contains(text, "cd ui && npm run build") {
+		t.Fatalf("expected windows build to include frontend build\noutput:\n%s", text)
+	}
+}

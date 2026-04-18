@@ -1,4 +1,4 @@
-.PHONY: all setup build clean download-model whisper test app dmg release-check build-windows-amd64
+.PHONY: all setup build clean download-model whisper test app dmg release-check build-windows-amd64 frontend-install frontend-build
 
 WHISPER_DIR := third_party/whisper.cpp
 WHISPER_BUILD := $(WHISPER_DIR)/build
@@ -21,6 +21,7 @@ MODEL_FILE := $(MODEL_DIR)/ggml-small.bin
 MODEL_URL := https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin
 BUILD_DIR := build/$(HOST_GOOS)-$(HOST_GOARCH)
 BIN_PATH := $(BUILD_DIR)/voicetype
+UI_DIR := ui
 
 all: whisper build
 
@@ -36,7 +37,13 @@ whisper:
 		-DCMAKE_BUILD_TYPE=Release
 	cd $(WHISPER_DIR) && cmake --build build --config Release -j$$(sysctl -n hw.ncpu)
 
-build: whisper
+frontend-install:
+	cd $(UI_DIR) && npm ci
+
+frontend-build: frontend-install
+	cd $(UI_DIR) && npm run build
+
+build: whisper frontend-build
 	mkdir -p $(BUILD_DIR)
 	CGO_ENABLED=1 go build -ldflags "$(GO_LDFLAGS)" -o $(BIN_PATH) ./cmd/joicetyper
 
@@ -103,6 +110,6 @@ release-check:
 	@test "v$(VERSION)" = "$(RELEASE_TAG)" || (echo "fatal: release tag $(RELEASE_TAG) does not match VERSION $(VERSION)" && exit 1)
 	@echo "Release tag $(RELEASE_TAG) matches VERSION $(VERSION)"
 
-build-windows-amd64:
+build-windows-amd64: frontend-build
 	mkdir -p build/windows-amd64
 	GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -ldflags "$(GO_LDFLAGS)" -o build/windows-amd64/joicetyper.exe ./cmd/joicetyper

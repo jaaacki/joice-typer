@@ -16,6 +16,7 @@ Works in any app where you can type: editors, browsers, terminals, chat apps.
 
 - macOS (Apple Silicon recommended)
 - Homebrew
+- Node.js + npm
 - ~500MB disk for the whisper `small` model (downloaded on first run)
 
 ## Install
@@ -26,7 +27,7 @@ cd joice-typer
 
 make setup          # install portaudio, cmake via Homebrew
 make whisper        # build whisper.cpp with Metal GPU support
-make build          # build the Go binary
+make build          # build the embedded frontend, then the Go binary
 ```
 
 ## Run
@@ -51,6 +52,12 @@ make build-windows-amd64
 ```
 
 This currently produces a bootstrap executable at `build/windows-amd64/joicetyper.exe`. The full Windows desktop runtime is not implemented yet.
+
+Frontend-only rebuild:
+
+```bash
+make frontend-build
+```
 
 Repository structure note:
 
