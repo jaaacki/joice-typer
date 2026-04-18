@@ -13,9 +13,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io/fs"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"unsafe"
@@ -62,6 +62,12 @@ var (
 
 	webSettingsServiceMu sync.Mutex
 	webSettingsService   *bridgepkg.Service
+)
+
+var (
+	embeddedWebUIScriptPattern = regexp.MustCompile(`<script[^>]*src="\./assets/([^"]+\.js)"[^>]*></script>`)
+	embeddedWebUIStylePattern  = regexp.MustCompile(`<link[^>]*rel="stylesheet"[^>]*href="\./assets/([^"]+\.css)"[^>]*>`)
+	embeddedWebUIHeadPattern   = regexp.MustCompile(`(?i)<head[^>]*>`)
 )
 
 func shouldUseWebSettings() bool {
@@ -254,43 +260,70 @@ func materializeEmbeddedWebUI(ctx context.Context, service *bridgepkg.Service) (
 		return "", err
 	}
 
-	if err := fs.WalkDir(uiembed.EmbeddedAssets, "dist", func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		relPath, err := filepath.Rel("dist", path)
-		if err != nil {
-			return err
-		}
-		if relPath == "." {
-			return nil
-		}
+	indexHTML, err := uiembed.EmbeddedAssets.ReadFile("dist/index.html")
+	if err != nil {
+		return "", fmt.Errorf("read embedded index.html: %w", err)
+	}
+	indexHTML, err = inlineEmbeddedAssetReferences(indexHTML, uiembed.EmbeddedAssets.ReadFile)
+	if err != nil {
+		return "", fmt.Errorf("inline embedded UI assets: %w", err)
+	}
+	indexHTML, err = injectBootstrapScript(indexHTML, bootstrap)
+	if err != nil {
+		return "", fmt.Errorf("inject bootstrap payload: %w", err)
+	}
 
-		targetPath := filepath.Join(root, relPath)
-		if d.IsDir() {
-			return os.MkdirAll(targetPath, 0755)
-		}
-
-		data, err := uiembed.EmbeddedAssets.ReadFile(path)
-		if err != nil {
-			return err
-		}
-		if relPath == "index.html" {
-			data, err = injectBootstrapScript(data, bootstrap)
-			if err != nil {
-				return err
-			}
-		}
-		if err := os.MkdirAll(filepath.Dir(targetPath), 0755); err != nil {
-			return err
-		}
-		return os.WriteFile(targetPath, data, 0644)
-	}); err != nil {
-		return "", fmt.Errorf("materialize embedded UI: %w", err)
+	targetPath := filepath.Join(root, "index.html")
+	if err := os.WriteFile(targetPath, indexHTML, 0644); err != nil {
+		return "", fmt.Errorf("write embedded index.html: %w", err)
 	}
 
 	trackWebSettingsAssetsRoot(root)
 	return filepath.Join(root, "index.html"), nil
+}
+
+func inlineEmbeddedAssetReferences(indexHTML []byte, readFile func(string) ([]byte, error)) ([]byte, error) {
+	html := string(indexHTML)
+
+	inlinePattern := func(pattern *regexp.Regexp, replacer func(string) string) (string, error) {
+		matches := pattern.FindAllStringSubmatchIndex(html, -1)
+		if len(matches) == 0 {
+			return html, nil
+		}
+
+		var out strings.Builder
+		last := 0
+		for _, match := range matches {
+			if len(match) < 4 {
+				return "", fmt.Errorf("unexpected asset match shape")
+			}
+			out.WriteString(html[last:match[0]])
+			assetName := html[match[2]:match[3]]
+			data, err := readFile(filepath.ToSlash(filepath.Join("dist", "assets", assetName)))
+			if err != nil {
+				return "", fmt.Errorf("read embedded asset %q: %w", assetName, err)
+			}
+			out.WriteString(replacer(string(data)))
+			last = match[1]
+		}
+		out.WriteString(html[last:])
+		return out.String(), nil
+	}
+
+	var err error
+	html, err = inlinePattern(embeddedWebUIStylePattern, func(css string) string {
+		return "<style>" + css + "</style>"
+	})
+	if err != nil {
+		return nil, err
+	}
+	html, err = inlinePattern(embeddedWebUIScriptPattern, func(js string) string {
+		return `<script type="module">` + strings.ReplaceAll(js, "</script>", "<\\/script>") + `</script>`
+	})
+	if err != nil {
+		return nil, err
+	}
+	return []byte(html), nil
 }
 
 func buildBootstrapPayload(ctx context.Context, service *bridgepkg.Service) (bridgepkg.BootstrapPayload, error) {
@@ -312,6 +345,9 @@ func injectBootstrapScript(indexHTML []byte, bootstrap bridgepkg.BootstrapPayloa
 
 	script := `<script>window.__JOICETYPER_BOOTSTRAP__ = ` + string(payload) + `;</script>`
 	html := string(indexHTML)
+	if loc := embeddedWebUIHeadPattern.FindStringIndex(html); loc != nil {
+		return []byte(html[:loc[1]] + script + "\n" + html[loc[1]:]), nil
+	}
 	if strings.Contains(html, "</head>") {
 		return []byte(strings.Replace(html, "</head>", script+"\n</head>", 1)), nil
 	}
@@ -510,13 +546,19 @@ func processWebSettingsMessage(messageJSON string) webSettingsProcessResult {
 }
 
 //export handleWebSettingsMessage
-func handleWebSettingsMessage(messageJSON *C.char) *C.char {
+func handleWebSettingsMessage(messageJSON *C.char, closeWindow *C.int) *C.char {
+	if closeWindow != nil {
+		*closeWindow = 0
+	}
 	if messageJSON == nil {
 		response := bridgepkg.NewErrorResponse("", bridgepkg.ErrorCodeBadRequest, "missing web settings message", false, nil)
 		return C.CString(webSettingsResponseScript(response, false))
 	}
 
 	result := processWebSettingsMessage(C.GoString(messageJSON))
+	if closeWindow != nil && result.closeWindow {
+		*closeWindow = 1
+	}
 	return C.CString(webSettingsResponseScript(result.response, result.closeWindow))
 }
 
@@ -531,6 +573,19 @@ func webSettingsNativeTransportWarning(operation *C.char, message *C.char) {
 		msg = C.GoString(message)
 	}
 	currentSettingsLogger().Warn("web settings native transport warning", "operation", op, "message", msg)
+}
+
+//export webSettingsNativeTransportInfo
+func webSettingsNativeTransportInfo(operation *C.char, message *C.char) {
+	op := "<unknown>"
+	msg := "<unknown>"
+	if operation != nil {
+		op = C.GoString(operation)
+	}
+	if message != nil {
+		msg = C.GoString(message)
+	}
+	currentSettingsLogger().Info("web settings native transport info", "operation", op, "message", msg)
 }
 
 func trackWebSettingsAssetsRoot(root string) {

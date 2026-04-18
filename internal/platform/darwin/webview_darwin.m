@@ -6,14 +6,22 @@
 static NSWindow *sWebSettingsWindow = nil;
 static WKWebView *sWebSettingsView = nil;
 static id sWebSettingsWindowDelegate = nil;
+static id sWebSettingsNavigationDelegate = nil;
 static id sWebHotkeyFlagsMonitor = nil;
 static id sWebHotkeyLocalMonitor = nil;
 static uint64_t sWebRecordedFlags = 0;
 static int sWebRecordedKeycode = -1;
 
 extern void webSettingsHotkeyCaptureChanged(unsigned long long flags, int keycode, int recording);
+extern void webSettingsNativeTransportInfo(char *operation, char *message);
 extern void webSettingsNativeTransportWarning(char *operation, char *message);
 static void stopWebHotkeyCaptureRecorder(void);
+
+static void reportWebSettingsNativeTransportInfo(NSString *operation, NSString *message) {
+    char *op = (char *)(operation != nil ? [operation UTF8String] : "unknown");
+    char *msg = (char *)(message != nil ? [message UTF8String] : "unknown");
+    webSettingsNativeTransportInfo(op, msg);
+}
 
 static void reportWebSettingsNativeTransportWarning(NSString *operation, NSString *message) {
     char *op = (char *)(operation != nil ? [operation UTF8String] : "unknown");
@@ -27,8 +35,72 @@ static void reportWebSettingsNativeTransportWarning(NSString *operation, NSStrin
 @implementation JoiceTyperWebSettingsWindowDelegate
 
 - (void)windowWillClose:(NSNotification *)notification {
+    (void)notification;
     stopWebHotkeyCaptureRecorder();
+    if (sWebSettingsView != nil) {
+        [sWebSettingsView setNavigationDelegate:nil];
+        sWebSettingsView = nil;
+    }
+    sWebSettingsNavigationDelegate = nil;
+    sWebSettingsWindowDelegate = nil;
+    sWebSettingsWindow = nil;
     webSettingsWindowClosed();
+}
+
+@end
+
+@interface JoiceTyperWebSettingsNavigationDelegate : NSObject <WKNavigationDelegate>
+@end
+
+@implementation JoiceTyperWebSettingsNavigationDelegate
+
+- (void)webView:(WKWebView *)webView didFinishNavigation:(WKNavigation *)navigation {
+    (void)webView;
+    (void)navigation;
+    reportWebSettingsNativeTransportInfo(@"web settings navigation finished",
+                                         @"WKWebView finished loading embedded preferences");
+    NSString *domProbe =
+        @"JSON.stringify({"
+        "readyState: document.readyState,"
+        "hasBootstrap: !!window.__JOICETYPER_BOOTSTRAP__,"
+        "scripts: Array.from(document.scripts).map(function(s){ return { src: s.src || '', type: s.type || '' }; }),"
+        "stylesheets: Array.from(document.querySelectorAll('link[rel=\"stylesheet\"]')).map(function(l){ return l.href || ''; }),"
+        "rootHTML: document.getElementById('root') ? document.getElementById('root').innerHTML : null,"
+        "bodyText: document.body ? document.body.innerText : null"
+        "})";
+    [webView evaluateJavaScript:domProbe completionHandler:^(id result, NSError *error) {
+        if (error != nil) {
+            reportWebSettingsNativeTransportWarning(@"failed to probe web settings DOM",
+                                                    error.localizedDescription ?: @"unknown DOM probe error");
+            return;
+        }
+        NSString *snapshot = nil;
+        if ([result isKindOfClass:[NSString class]]) {
+            snapshot = (NSString *)result;
+        } else if (result != nil) {
+            snapshot = [result description];
+        }
+        reportWebSettingsNativeTransportInfo(@"web settings DOM snapshot",
+                                             snapshot ?: @"<empty DOM snapshot>");
+    }];
+}
+
+- (void)webView:(WKWebView *)webView
+didFailNavigation:(WKNavigation *)navigation
+       withError:(NSError *)error {
+    (void)webView;
+    (void)navigation;
+    reportWebSettingsNativeTransportWarning(@"failed web settings navigation",
+                                            error.localizedDescription ?: @"unknown navigation error");
+}
+
+- (void)webView:(WKWebView *)webView
+didFailProvisionalNavigation:(WKNavigation *)navigation
+                withError:(NSError *)error {
+    (void)webView;
+    (void)navigation;
+    reportWebSettingsNativeTransportWarning(@"failed provisional web settings navigation",
+                                            error.localizedDescription ?: @"unknown provisional navigation error");
 }
 
 @end
@@ -39,6 +111,36 @@ static void reportWebSettingsNativeTransportWarning(NSString *operation, NSStrin
 @implementation JoiceTyperWebSettingsHandler
 
 - (void)userContentController:(WKUserContentController *)userContentController didReceiveScriptMessage:(WKScriptMessage *)message {
+    if ([message.name isEqualToString:@"joicetyperConsole"]) {
+        NSString *level = @"log";
+        NSString *text = @"";
+        if ([message.body isKindOfClass:[NSDictionary class]]) {
+            NSDictionary *payload = (NSDictionary *)message.body;
+            id maybeLevel = payload[@"level"];
+            id maybeText = payload[@"message"];
+            if ([maybeLevel isKindOfClass:[NSString class]] && [((NSString *)maybeLevel) length] > 0) {
+                level = (NSString *)maybeLevel;
+            }
+            if ([maybeText isKindOfClass:[NSString class]]) {
+                text = (NSString *)maybeText;
+            } else if (maybeText != nil) {
+                text = [maybeText description];
+            }
+        } else if ([message.body isKindOfClass:[NSString class]]) {
+            text = (NSString *)message.body;
+        } else if (message.body != nil) {
+            text = [message.body description];
+        }
+
+        NSString *operation = [NSString stringWithFormat:@"web settings console %@", level];
+        if ([level isEqualToString:@"error"] || [level isEqualToString:@"unhandledrejection"]) {
+            reportWebSettingsNativeTransportWarning(operation, text);
+        } else {
+            reportWebSettingsNativeTransportInfo(operation, text);
+        }
+        return;
+    }
+
     if (![message.name isEqualToString:@"joicetyper"]) {
         return;
     }
@@ -70,7 +172,8 @@ static void reportWebSettingsNativeTransportWarning(NSString *operation, NSStrin
         return;
     }
 
-    char *response = handleWebSettingsMessage(request);
+    int closeWindow = 0;
+    char *response = handleWebSettingsMessage(request, &closeWindow);
     free(request);
     NSString *responseScript = nil;
     if (response != NULL) {
@@ -84,9 +187,9 @@ static void reportWebSettingsNativeTransportWarning(NSString *operation, NSStrin
             if (error != nil) {
                 reportWebSettingsNativeTransportWarning(@"failed to evaluate web settings response script",
                                                         error.localizedDescription ?: @"unknown JavaScript evaluation error");
-                return;
             }
-            if ([result isKindOfClass:[NSNumber class]] && [(NSNumber *)result boolValue]) {
+            (void)result;
+            if (closeWindow == 1) {
                 [sWebSettingsWindow close];
             }
         }];
@@ -96,13 +199,22 @@ static void reportWebSettingsNativeTransportWarning(NSString *operation, NSStrin
 @end
 
 void showWebSettingsWindow(const char *indexPath) {
+    NSString *path = nil;
+    if (indexPath != NULL) {
+        path = [NSString stringWithUTF8String:indexPath];
+    }
     dispatch_async(dispatch_get_main_queue(), ^{
+        reportWebSettingsNativeTransportInfo(@"show web settings window requested",
+                                             @"received request to present web preferences");
         if (indexPath == NULL) {
+            reportWebSettingsNativeTransportWarning(@"show web settings window requested",
+                                                   @"index path is NULL");
             return;
         }
 
-        NSString *path = [NSString stringWithUTF8String:indexPath];
         if (path == nil || path.length == 0) {
+            reportWebSettingsNativeTransportWarning(@"show web settings window requested",
+                                                   @"index path string is empty");
             return;
         }
 
@@ -119,24 +231,64 @@ void showWebSettingsWindow(const char *indexPath) {
             [sWebSettingsWindow setTitle:@"JoiceTyper Preferences"];
             sWebSettingsWindowDelegate = [[JoiceTyperWebSettingsWindowDelegate alloc] init];
             [sWebSettingsWindow setDelegate:sWebSettingsWindowDelegate];
+            reportWebSettingsNativeTransportInfo(@"created web settings window",
+                                                 @"NSWindow created for web preferences");
 
             WKWebViewConfiguration *configuration = [[WKWebViewConfiguration alloc] init];
             WKUserContentController *controller = [[WKUserContentController alloc] init];
             [controller addScriptMessageHandler:[[JoiceTyperWebSettingsHandler alloc] init] name:@"joicetyper"];
+            [controller addScriptMessageHandler:[[JoiceTyperWebSettingsHandler alloc] init] name:@"joicetyperConsole"];
+            NSString *consoleBridgeSource =
+                @"(function(){"
+                "const native = window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.joicetyperConsole;"
+                "if (!native || typeof native.postMessage !== 'function') { return; }"
+                "const send = (level, message) => {"
+                "  try { native.postMessage({ level, message: String(message) }); } catch (_) {}"
+                "};"
+                "window.addEventListener('error', function(event) {"
+                "  const target = event && event.target;"
+                "  if (target && target !== window) {"
+                "    const tag = target.tagName || 'unknown';"
+                "    const source = target.src || target.href || '';"
+                "    send('resourceerror', tag + ' ' + source);"
+                "    return;"
+                "  }"
+                "  send('error', event && event.message ? event.message : 'unknown window error');"
+                "}, true);"
+                "window.addEventListener('unhandledrejection', function(event) {"
+                "  const reason = event && event.reason !== undefined ? event.reason : 'unknown rejection';"
+                "  send('unhandledrejection', reason);"
+                "});"
+                "const originalError = console.error ? console.error.bind(console) : null;"
+                "console.error = function() {"
+                "  try { send('error', Array.prototype.join.call(arguments, ' ')); } catch (_) {}"
+                "  if (originalError) { originalError.apply(console, arguments); }"
+                "};"
+                "})();";
+            WKUserScript *consoleBridgeScript = [[WKUserScript alloc] initWithSource:consoleBridgeSource
+                                                                       injectionTime:WKUserScriptInjectionTimeAtDocumentStart
+                                                                    forMainFrameOnly:YES];
+            [controller addUserScript:consoleBridgeScript];
             configuration.userContentController = controller;
 
             sWebSettingsView = [[WKWebView alloc] initWithFrame:[[sWebSettingsWindow contentView] bounds]
                                                   configuration:configuration];
+            sWebSettingsNavigationDelegate = [[JoiceTyperWebSettingsNavigationDelegate alloc] init];
+            [sWebSettingsView setNavigationDelegate:sWebSettingsNavigationDelegate];
             [sWebSettingsView setAutoresizingMask:NSViewWidthSizable | NSViewHeightSizable];
             [[sWebSettingsWindow contentView] addSubview:sWebSettingsView];
         }
 
         NSURL *indexURL = [NSURL fileURLWithPath:path];
         NSURL *readAccessURL = [indexURL URLByDeletingLastPathComponent];
+        reportWebSettingsNativeTransportInfo(@"loading web settings index",
+                                             indexURL.absoluteString ?: @"missing index URL");
         [sWebSettingsView loadFileURL:indexURL allowingReadAccessToURL:readAccessURL];
         [sWebSettingsWindow center];
         [sWebSettingsWindow makeKeyAndOrderFront:nil];
         [NSApp activateIgnoringOtherApps:YES];
+        reportWebSettingsNativeTransportInfo(@"web settings window visible",
+                                             @"requested key/front activation for web preferences window");
     });
 }
 

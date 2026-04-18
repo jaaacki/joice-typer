@@ -181,6 +181,114 @@ func TestDarwinWebviewTransportSource_LogsNativeFailures(t *testing.T) {
 	}
 }
 
+func TestDarwinWebviewTransportSource_LogsWindowLifecycle(t *testing.T) {
+	root := repoRoot(t)
+	data, err := os.ReadFile(filepath.Join(root, "internal", "platform", "darwin", "webview_darwin.m"))
+	if err != nil {
+		t.Fatalf("read webview_darwin.m: %v", err)
+	}
+	source := string(data)
+	for _, required := range []string{
+		`WKNavigationDelegate`,
+		`joicetyperConsole`,
+		`WKUserScriptInjectionTimeAtDocumentStart`,
+		`window.addEventListener('error'`,
+		`window.addEventListener('unhandledrejection'`,
+		`console.error =`,
+		`didFinishNavigation`,
+		`didFailNavigation`,
+		`didFailProvisionalNavigation`,
+		`show web settings window requested`,
+		`created web settings window`,
+		`loading web settings index`,
+		`web settings navigation finished`,
+		`web settings DOM snapshot`,
+		`failed provisional web settings navigation`,
+		`failed web settings navigation`,
+		`web settings window visible`,
+	} {
+		if !strings.Contains(source, required) {
+			t.Fatalf("expected webview_darwin.m to contain %q", required)
+		}
+	}
+}
+
+func TestDarwinWebviewTransportSource_CopiesIndexPathBeforeAsyncWindowShow(t *testing.T) {
+	root := repoRoot(t)
+	data, err := os.ReadFile(filepath.Join(root, "internal", "platform", "darwin", "webview_darwin.m"))
+	if err != nil {
+		t.Fatalf("read webview_darwin.m: %v", err)
+	}
+	source := string(data)
+	dispatchIndex := strings.Index(source, "dispatch_async(dispatch_get_main_queue(), ^{")
+	if dispatchIndex == -1 {
+		t.Fatal("expected dispatch_async web settings window block")
+	}
+	beforeDispatch := source[:dispatchIndex]
+	insideDispatch := source[dispatchIndex:]
+	if !strings.Contains(beforeDispatch, `NSString *path = nil;`) ||
+		!strings.Contains(beforeDispatch, `path = [NSString stringWithUTF8String:indexPath];`) {
+		t.Fatal("expected indexPath to be copied into NSString before dispatch_async for window show")
+	}
+	if strings.Contains(insideDispatch, `NSString *path = [NSString stringWithUTF8String:indexPath];`) {
+		t.Fatal("expected async window block not to decode indexPath directly after Go frees the C string")
+	}
+}
+
+func TestDarwinWebviewTransportSource_ClearsSingletonsOnWindowClose(t *testing.T) {
+	root := repoRoot(t)
+	data, err := os.ReadFile(filepath.Join(root, "internal", "platform", "darwin", "webview_darwin.m"))
+	if err != nil {
+		t.Fatalf("read webview_darwin.m: %v", err)
+	}
+	source := string(data)
+	closeIndex := strings.Index(source, "- (void)windowWillClose:")
+	if closeIndex == -1 {
+		t.Fatal("expected windowWillClose handler in webview_darwin.m")
+	}
+	closeSlice := source[closeIndex:]
+	for _, required := range []string{
+		`sWebSettingsView = nil;`,
+		`sWebSettingsNavigationDelegate = nil;`,
+		`sWebSettingsWindowDelegate = nil;`,
+		`sWebSettingsWindow = nil;`,
+	} {
+		if !strings.Contains(closeSlice, required) {
+			t.Fatalf("expected window close path to contain %q", required)
+		}
+	}
+}
+
+func TestDarwinWebviewTransportSource_UsesExplicitCloseFlagFromBridge(t *testing.T) {
+	root := repoRoot(t)
+	header, err := os.ReadFile(filepath.Join(root, "internal", "platform", "darwin", "webview_darwin.h"))
+	if err != nil {
+		t.Fatalf("read webview_darwin.h: %v", err)
+	}
+	if !strings.Contains(string(header), "char *handleWebSettingsMessage(char *messageJSON, int *closeWindow);") {
+		t.Fatal("expected handleWebSettingsMessage to expose an explicit closeWindow out-param")
+	}
+
+	data, err := os.ReadFile(filepath.Join(root, "internal", "platform", "darwin", "webview_darwin.m"))
+	if err != nil {
+		t.Fatalf("read webview_darwin.m: %v", err)
+	}
+	source := string(data)
+	for _, required := range []string{
+		"int closeWindow = 0;",
+		"char *response = handleWebSettingsMessage(request, &closeWindow);",
+		"if (closeWindow == 1) {",
+		"[sWebSettingsWindow close];",
+	} {
+		if !strings.Contains(source, required) {
+			t.Fatalf("expected webview_darwin.m to contain %q", required)
+		}
+	}
+	if strings.Contains(source, `[(NSNumber *)result boolValue]`) {
+		t.Fatal("expected save-window close to stop depending on JavaScript return values")
+	}
+}
+
 func TestSettingsScreenSource_DoesNotOverclaimPermissionOpenSuccess(t *testing.T) {
 	root := repoRoot(t)
 	data, err := os.ReadFile(filepath.Join(root, "ui", "src", "settings", "SettingsScreen.tsx"))

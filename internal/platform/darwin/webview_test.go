@@ -341,6 +341,64 @@ func TestInjectBootstrapScript_AddsPayload(t *testing.T) {
 	}
 }
 
+func TestInjectBootstrapScript_PlacesBootstrapBeforeAppScript(t *testing.T) {
+	indexHTML := []byte(`<html><head><script src="./assets/app.js"></script></head><body></body></html>`)
+
+	out, err := injectBootstrapScript(indexHTML, bridgepkg.BootstrapPayload{
+		Config: bridgepkg.ConfigSnapshot{ModelSize: "small"},
+	})
+	if err != nil {
+		t.Fatalf("injectBootstrapScript returned error: %v", err)
+	}
+
+	html := string(out)
+	bootstrapIndex := strings.Index(html, "__JOICETYPER_BOOTSTRAP__")
+	appScriptIndex := strings.Index(html, `<script src="./assets/app.js"></script>`)
+	if bootstrapIndex == -1 || appScriptIndex == -1 {
+		t.Fatalf("expected output to contain both bootstrap and app script, got %s", html)
+	}
+	if bootstrapIndex > appScriptIndex {
+		t.Fatalf("expected bootstrap script before app script, got %s", html)
+	}
+}
+
+func TestInlineEmbeddedAssetReferences_InlinesScriptAndStylesheet(t *testing.T) {
+	indexHTML := []byte(`<!doctype html><html><head><script type="module" src="./assets/app.js"></script><link rel="stylesheet" href="./assets/app.css"></head><body><div id="root"></div></body></html>`)
+	readFile := func(path string) ([]byte, error) {
+		switch path {
+		case "dist/assets/app.js":
+			return []byte(`console.log("embedded web ui")`), nil
+		case "dist/assets/app.css":
+			return []byte(`body { color: red; }`), nil
+		default:
+			return nil, os.ErrNotExist
+		}
+	}
+
+	out, err := inlineEmbeddedAssetReferences(indexHTML, readFile)
+	if err != nil {
+		t.Fatalf("inlineEmbeddedAssetReferences returned error: %v", err)
+	}
+	html := string(out)
+	for _, forbidden := range []string{
+		`src="./assets/app.js"`,
+		`href="./assets/app.css"`,
+		`<link rel="stylesheet"`,
+	} {
+		if strings.Contains(html, forbidden) {
+			t.Fatalf("expected inlined HTML to remove %q, got %s", forbidden, html)
+		}
+	}
+	for _, required := range []string{
+		`<style>body { color: red; }</style>`,
+		`<script type="module">console.log("embedded web ui")</script>`,
+	} {
+		if !strings.Contains(html, required) {
+			t.Fatalf("expected inlined HTML to contain %q, got %s", required, html)
+		}
+	}
+}
+
 func TestWebSettingsWindowClosed_ClearsPreferencesOpenFlag(t *testing.T) {
 	preferencesOpenStore(1)
 	dir := t.TempDir()
