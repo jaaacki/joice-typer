@@ -23,6 +23,7 @@ function Field({ label, children }: FieldProps) {
 export function SettingsScreen({ config, appState }: SettingsScreenProps) {
   const [draft, setDraft] = useState<ConfigSnapshot>(config);
   const [status, setStatus] = useState<string>("Ready to save");
+  const [saving, setSaving] = useState(false);
 
   const saveAvailable = canPostNativeMessage();
 
@@ -33,12 +34,16 @@ export function SettingsScreen({ config, appState }: SettingsScreenProps) {
     }));
   }
 
-  function handleSave() {
+  async function handleSave() {
+    setSaving(true);
     try {
-      saveConfig(draft);
       setStatus("Save request sent. Waiting for native confirmation.");
+      await saveConfig(draft);
+      setStatus("Saved. JoiceTyper is reloading the runtime.");
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "Failed to save settings");
+    } finally {
+      setSaving(false);
     }
   }
 
@@ -148,7 +153,7 @@ export function SettingsScreen({ config, appState }: SettingsScreenProps) {
 
         <footer className="settings-footer">
           <p className="settings-footer__status">{status}</p>
-          <button className="settings-save" onClick={handleSave} disabled={!saveAvailable}>
+          <button className="settings-save" onClick={() => void handleSave()} disabled={!saveAvailable || saving}>
             Save and Reload
           </button>
         </footer>

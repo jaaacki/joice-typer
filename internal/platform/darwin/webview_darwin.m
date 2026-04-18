@@ -56,11 +56,15 @@ static id sWebSettingsWindowDelegate = nil;
     }
 
     if (responseScript != nil) {
-        [sWebSettingsView evaluateJavaScript:responseScript completionHandler:nil];
-    }
-
-    if (response == NULL) {
-        [sWebSettingsWindow close];
+        [sWebSettingsView evaluateJavaScript:responseScript
+                           completionHandler:^(id result, NSError *error) {
+            if (error != nil) {
+                return;
+            }
+            if ([result isKindOfClass:[NSNumber class]] && [(NSNumber *)result boolValue]) {
+                [sWebSettingsWindow close];
+            }
+        }];
     }
 }
 

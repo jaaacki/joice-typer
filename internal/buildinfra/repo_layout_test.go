@@ -67,14 +67,38 @@ func TestFrontendBuild_ProducesDistIndex(t *testing.T) {
 	}
 }
 
-func TestSettingsScreenSource_DoesNotClaimSaveBeforeAck(t *testing.T) {
+func TestSettingsScreenSource_UsesAckAwareSaveStates(t *testing.T) {
 	root := repoRoot(t)
 	data, err := os.ReadFile(filepath.Join(root, "ui", "src", "settings", "SettingsScreen.tsx"))
 	if err != nil {
 		t.Fatalf("read SettingsScreen.tsx: %v", err)
 	}
 	source := string(data)
-	if strings.Contains(source, "Saved. JoiceTyper is reloading the runtime.") {
-		t.Fatal("expected settings screen to avoid claiming save success before native acknowledgement")
+	for _, snippet := range []string{
+		"Waiting for native confirmation.",
+		"await saveConfig(draft)",
+		"Saved. JoiceTyper is reloading the runtime.",
+	} {
+		if !strings.Contains(source, snippet) {
+			t.Fatalf("expected SettingsScreen.tsx to contain %q", snippet)
+		}
+	}
+}
+
+func TestBridgeSource_UsesRequestScopedNativeSaveAck(t *testing.T) {
+	root := repoRoot(t)
+	data, err := os.ReadFile(filepath.Join(root, "ui", "src", "bridge.ts"))
+	if err != nil {
+		t.Fatalf("read bridge.ts: %v", err)
+	}
+	source := string(data)
+	for _, snippet := range []string{
+		`requestId`,
+		`joicetyper-native-save`,
+		`window.addEventListener("joicetyper-native-save"`,
+	} {
+		if !strings.Contains(source, snippet) {
+			t.Fatalf("expected bridge.ts to contain %q", snippet)
+		}
 	}
 }

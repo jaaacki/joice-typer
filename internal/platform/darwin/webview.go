@@ -17,6 +17,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"unsafe"
 
 	bridgepkg "voicetype/internal/core/bridge"
@@ -32,6 +33,10 @@ var (
 	webSettingsSaveConfig        = configpkg.SaveConfig
 	webSettingsSignalRestart     = signalHotkeyRestart
 	webSettingsPostError         = reportSettingsSaveError
+	webSettingsCleanupDir        = os.RemoveAll
+
+	webSettingsAssetsMu   sync.Mutex
+	webSettingsAssetsRoot string
 )
 
 func shouldUseWebSettings() bool {
@@ -119,6 +124,7 @@ func materializeEmbeddedWebUI(ctx context.Context, service *bridgepkg.Service) (
 		return "", fmt.Errorf("materialize embedded UI: %w", err)
 	}
 
+	trackWebSettingsAssetsRoot(root)
 	return filepath.Join(root, "index.html"), nil
 }
 
@@ -153,6 +159,12 @@ type webSettingsMessage struct {
 	Config    bridgepkg.ConfigSnapshot `json:"config"`
 }
 
+type webSettingsResponse struct {
+	RequestID string `json:"requestId"`
+	OK        bool   `json:"ok"`
+	Error     string `json:"error,omitempty"`
+}
+
 func applyWebSettingsConfig(snapshot bridgepkg.ConfigSnapshot) error {
 	cfgPath, err := webSettingsDefaultConfigPath()
 	if err != nil {
@@ -179,55 +191,79 @@ func applyWebSettingsConfig(snapshot bridgepkg.ConfigSnapshot) error {
 //export webSettingsWindowClosed
 func webSettingsWindowClosed() {
 	preferencesOpenStore(0)
+	cleanupTrackedWebSettingsAssets()
 }
 
-func webSettingsResponseScript(requestID string, err error) string {
-	ok := err == nil
-	errorText := ""
-	if err != nil {
-		errorText = err.Error()
-	}
-
-	response := struct {
-		RequestID string `json:"requestId"`
-		OK        bool   `json:"ok"`
-		Error     string `json:"error,omitempty"`
-	}{
-		RequestID: requestID,
-		OK:        ok,
-		Error:     errorText,
-	}
-
+func webSettingsResponseScript(response webSettingsResponse) string {
 	payload, marshalErr := json.Marshal(response)
 	if marshalErr != nil {
-		fallback := fmt.Sprintf(`{"requestId":%q,"ok":false,"error":%q}`, requestID, marshalErr.Error())
-		return "window.dispatchEvent(new CustomEvent('joicetyper-native-save', { detail: " + fallback + " }));"
+		fallback := fmt.Sprintf(`{"requestId":%q,"ok":false,"error":%q}`, response.RequestID, marshalErr.Error())
+		return "(() => { window.dispatchEvent(new CustomEvent('joicetyper-native-save', { detail: " + fallback + " })); return false; })();"
 	}
-	return "window.dispatchEvent(new CustomEvent('joicetyper-native-save', { detail: " + string(payload) + " }));"
+	return "(() => { window.dispatchEvent(new CustomEvent('joicetyper-native-save', { detail: " + string(payload) + " })); return " + strings.ToLower(fmt.Sprintf("%t", response.OK)) + "; })();"
 }
 
-//export handleWebSettingsMessage
-func handleWebSettingsMessage(messageJSON *C.char) *C.char {
-	if messageJSON == nil {
-		return C.CString("missing web settings message")
+func processWebSettingsMessage(messageJSON string) webSettingsResponse {
+	response := webSettingsResponse{}
+	var message webSettingsMessage
+	if err := json.Unmarshal([]byte(messageJSON), &message); err != nil {
+		webSettingsPostError(err.Error())
+		response.OK = false
+		response.Error = err.Error()
+		return response
 	}
 
-	var message webSettingsMessage
-	if err := json.Unmarshal([]byte(C.GoString(messageJSON)), &message); err != nil {
-		webSettingsPostError(err.Error())
-		return C.CString(err.Error())
-	}
+	response.RequestID = message.RequestID
 
 	switch message.Type {
 	case "saveConfig":
 		if err := applyWebSettingsConfig(message.Config); err != nil {
 			webSettingsPostError(err.Error())
-			return C.CString(err.Error())
+			response.OK = false
+			response.Error = err.Error()
+			return response
 		}
-		return nil
+		response.OK = true
+		return response
 	default:
 		err := fmt.Errorf("unsupported web settings message %q", message.Type)
 		webSettingsPostError(err.Error())
-		return C.CString(err.Error())
+		response.OK = false
+		response.Error = err.Error()
+		return response
 	}
+}
+
+//export handleWebSettingsMessage
+func handleWebSettingsMessage(messageJSON *C.char) *C.char {
+	if messageJSON == nil {
+		response := webSettingsResponse{
+			OK:    false,
+			Error: "missing web settings message",
+		}
+		return C.CString(webSettingsResponseScript(response))
+	}
+
+	response := processWebSettingsMessage(C.GoString(messageJSON))
+	return C.CString(webSettingsResponseScript(response))
+}
+
+func trackWebSettingsAssetsRoot(root string) {
+	webSettingsAssetsMu.Lock()
+	defer webSettingsAssetsMu.Unlock()
+	if webSettingsAssetsRoot != "" && webSettingsAssetsRoot != root {
+		_ = webSettingsCleanupDir(webSettingsAssetsRoot)
+	}
+	webSettingsAssetsRoot = root
+}
+
+func cleanupTrackedWebSettingsAssets() {
+	webSettingsAssetsMu.Lock()
+	root := webSettingsAssetsRoot
+	webSettingsAssetsRoot = ""
+	webSettingsAssetsMu.Unlock()
+	if root == "" {
+		return
+	}
+	_ = webSettingsCleanupDir(root)
 }
