@@ -23,3 +23,15 @@ func TestRepoLayout_FutureHomesExist(t *testing.T) {
 		}
 	}
 }
+
+func TestRepoLayout_PackagingHomesDocumented(t *testing.T) {
+	root := repoRoot(t)
+	for _, path := range []string{
+		"packaging/macos/README.md",
+		"packaging/windows/README.md",
+	} {
+		if _, err := os.Stat(filepath.Join(root, path)); err != nil {
+			t.Fatalf("expected %s: %v", path, err)
+		}
+	}
+}

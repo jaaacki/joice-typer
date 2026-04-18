@@ -52,6 +52,13 @@ make build-windows-amd64
 
 This currently produces a bootstrap executable at `build/windows-amd64/joicetyper.exe`. The full Windows desktop runtime is not implemented yet.
 
+Repository structure note:
+
+- shared backend code is moving under `internal/core/`
+- platform adapters live under `internal/platform/`
+- future shared frontend code will live under `ui/`
+- packaging resources are being organized under `assets/` and `packaging/`
+
 ## Versioning
 
 `VERSION` is the single source of truth for releases.
