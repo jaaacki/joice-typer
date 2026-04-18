@@ -92,3 +92,22 @@ func TestMakeAppUsesConfiguredPortaudioPrefix(t *testing.T) {
 		t.Fatalf("expected make output to use portaudio path %q\noutput:\n%s", want, out)
 	}
 }
+
+func TestMakeAppUsesAssetPaths(t *testing.T) {
+	root := repoRoot(t)
+
+	cmd := exec.Command("make", "-n", "app")
+	cmd.Dir = root
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("make -n app: %v\n%s", err, out)
+	}
+
+	text := string(out)
+	if !strings.Contains(text, "assets/macos/Info.plist.tmpl") {
+		t.Fatalf("expected app build to use assets/macos/Info.plist.tmpl\noutput:\n%s", text)
+	}
+	if !strings.Contains(text, "assets/icons/icon.icns") {
+		t.Fatalf("expected app build to use assets/icons/icon.icns\noutput:\n%s", text)
+	}
+}

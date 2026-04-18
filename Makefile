@@ -5,7 +5,7 @@ WHISPER_BUILD := $(WHISPER_DIR)/build
 CURL ?= curl
 VERSION_FILE := VERSION
 VERSION := $(shell tr -d '[:space:]' < $(VERSION_FILE))
-GO_LDFLAGS := -X 'voicetype/internal/version.Version=$(VERSION)'
+GO_LDFLAGS := -X 'voicetype/internal/core/version.Version=$(VERSION)'
 HOST_GOOS ?= $(shell go env GOOS)
 HOST_GOARCH ?= $(shell go env GOARCH)
 ifeq ($(HOST_GOOS),darwin)
@@ -50,7 +50,8 @@ download-model:
 
 APP_NAME := JoiceTyper
 APP_BUNDLE := $(APP_NAME).app
-PLIST_TEMPLATE := Info.plist.tmpl
+PLIST_TEMPLATE := assets/macos/Info.plist.tmpl
+APP_ICON := assets/icons/icon.icns
 PORTAUDIO_PREFIX ?= $(shell brew --prefix portaudio 2>/dev/null || echo /opt/homebrew/opt/portaudio)
 PORTAUDIO_DYLIB := $(PORTAUDIO_PREFIX)/lib/libportaudio.2.dylib
 
@@ -69,7 +70,7 @@ app: build
 	mkdir -p $(APP_BUNDLE)/Contents/Frameworks
 	cp $(BIN_PATH) $(APP_BUNDLE)/Contents/MacOS/$(APP_NAME)
 	sed "s/{{VERSION}}/$(VERSION)/g" $(PLIST_TEMPLATE) > $(APP_BUNDLE)/Contents/Info.plist
-	@if [ -f icon.icns ]; then cp icon.icns $(APP_BUNDLE)/Contents/Resources/; fi
+	@if [ -f "$(APP_ICON)" ]; then cp "$(APP_ICON)" $(APP_BUNDLE)/Contents/Resources/; fi
 	@# Bundle PortAudio dylib and fix load path
 	cp "$(PORTAUDIO_DYLIB)" $(APP_BUNDLE)/Contents/Frameworks/
 	install_name_tool -change "$(PORTAUDIO_DYLIB)" \
