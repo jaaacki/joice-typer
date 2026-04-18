@@ -1,4 +1,13 @@
+import { readBootstrap } from "./bridge";
+import { SettingsScreen } from "./settings/SettingsScreen";
+
 export default function App() {
+  const bootstrap = readBootstrap();
+
+  if (bootstrap !== null) {
+    return <SettingsScreen config={bootstrap.config} appState={bootstrap.appState} />;
+  }
+
   return (
     <main className="app-shell">
       <section className="hero">

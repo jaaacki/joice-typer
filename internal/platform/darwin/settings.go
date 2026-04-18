@@ -19,6 +19,7 @@ import (
 	"time"
 	"unsafe"
 
+	bridgepkg "voicetype/internal/core/bridge"
 	config "voicetype/internal/core/config"
 	transcriptionpkg "voicetype/internal/core/transcription"
 
@@ -518,8 +519,16 @@ func OpenPreferences() {
 	}
 
 	if shouldUseWebSettings() {
+		bridgeService := bridgepkg.NewService(&bridgepkg.Dependencies{
+			LoadConfig: func(context.Context) (config.Config, error) {
+				return cfg, nil
+			},
+			LoadAppState: func(context.Context) (AppState, error) {
+				return StateReady, nil
+			},
+		})
 		currentSettingsLogger().Info("showing web settings window", "operation", "OpenPreferences")
-		if err := ShowWebSettingsWindow(); err != nil {
+		if err := ShowWebSettingsWindowWithBridge(context.Background(), bridgeService); err != nil {
 			currentSettingsLogger().Warn("failed to show web settings window, falling back to native preferences",
 				"operation", "OpenPreferences", "error", err)
 		} else {

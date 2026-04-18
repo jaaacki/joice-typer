@@ -83,6 +83,21 @@ func (s *Service) AppState(ctx context.Context) (AppStateSnapshot, error) {
 	return snapshot, nil
 }
 
+func (s *Service) Bootstrap(ctx context.Context) (BootstrapPayload, error) {
+	configSnapshot, err := s.Config(ctx)
+	if err != nil {
+		return BootstrapPayload{}, err
+	}
+	appStateSnapshot, err := s.AppState(ctx)
+	if err != nil {
+		return BootstrapPayload{}, err
+	}
+	return BootstrapPayload{
+		Config:   configSnapshot,
+		AppState: appStateSnapshot,
+	}, nil
+}
+
 func configSnapshotFromConfig(cfg configpkg.Config) ConfigSnapshot {
 	return ConfigSnapshot{
 		TriggerKey:      append([]string(nil), cfg.TriggerKey...),

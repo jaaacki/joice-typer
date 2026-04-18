@@ -10,32 +10,35 @@ package darwin
 import "C"
 
 import (
+	"context"
+	"encoding/json"
 	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
-	"sync"
+	"strings"
 	"unsafe"
 
+	bridgepkg "voicetype/internal/core/bridge"
 	uiembed "voicetype/ui"
 )
 
-var (
-	webSettingsEnabled = func() bool {
-		return os.Getenv("JOICETYPER_USE_WEB_SETTINGS") == "1"
-	}
-	embeddedWebUIRoot   string
-	embeddedWebUIRootMu sync.Mutex
-)
+var webSettingsEnabled = func() bool {
+	return os.Getenv("JOICETYPER_USE_WEB_SETTINGS") == "1"
+}
 
 func shouldUseWebSettings() bool {
 	return webSettingsEnabled()
 }
 
 func ShowWebSettingsWindow() error {
-	indexPath, err := ensureEmbeddedWebUI()
+	return ShowWebSettingsWindowWithBridge(context.Background(), nil)
+}
+
+func ShowWebSettingsWindowWithBridge(ctx context.Context, service *bridgepkg.Service) error {
+	indexPath, err := materializeEmbeddedWebUI(ctx, service)
 	if err != nil {
-		return fmt.Errorf("darwin.ShowWebSettingsWindow: %w", err)
+		return fmt.Errorf("darwin.ShowWebSettingsWindowWithBridge: %w", err)
 	}
 
 	cIndexPath := C.CString(indexPath)
@@ -45,17 +48,15 @@ func ShowWebSettingsWindow() error {
 	return nil
 }
 
-func ensureEmbeddedWebUI() (string, error) {
-	embeddedWebUIRootMu.Lock()
-	defer embeddedWebUIRootMu.Unlock()
-
-	if embeddedWebUIRoot != "" {
-		return filepath.Join(embeddedWebUIRoot, "index.html"), nil
-	}
-
+func materializeEmbeddedWebUI(ctx context.Context, service *bridgepkg.Service) (string, error) {
 	root, err := os.MkdirTemp("", "joicetyper-web-ui-*")
 	if err != nil {
 		return "", fmt.Errorf("create temp UI dir: %w", err)
+	}
+
+	bootstrap, err := buildBootstrapPayload(ctx, service)
+	if err != nil {
+		return "", err
 	}
 
 	if err := fs.WalkDir(uiembed.EmbeddedAssets, "dist", func(path string, d fs.DirEntry, err error) error {
@@ -79,6 +80,12 @@ func ensureEmbeddedWebUI() (string, error) {
 		if err != nil {
 			return err
 		}
+		if relPath == "index.html" {
+			data, err = injectBootstrapScript(data, bootstrap)
+			if err != nil {
+				return err
+			}
+		}
 		if err := os.MkdirAll(filepath.Dir(targetPath), 0755); err != nil {
 			return err
 		}
@@ -87,6 +94,30 @@ func ensureEmbeddedWebUI() (string, error) {
 		return "", fmt.Errorf("materialize embedded UI: %w", err)
 	}
 
-	embeddedWebUIRoot = root
 	return filepath.Join(root, "index.html"), nil
+}
+
+func buildBootstrapPayload(ctx context.Context, service *bridgepkg.Service) (bridgepkg.BootstrapPayload, error) {
+	if service == nil {
+		service = bridgepkg.NewService(nil)
+	}
+	bootstrap, err := service.Bootstrap(ctx)
+	if err != nil {
+		return bridgepkg.BootstrapPayload{}, fmt.Errorf("build bootstrap payload: %w", err)
+	}
+	return bootstrap, nil
+}
+
+func injectBootstrapScript(indexHTML []byte, bootstrap bridgepkg.BootstrapPayload) ([]byte, error) {
+	payload, err := json.Marshal(bootstrap)
+	if err != nil {
+		return nil, fmt.Errorf("marshal bootstrap payload: %w", err)
+	}
+
+	script := `<script>window.__JOICETYPER_BOOTSTRAP__ = ` + string(payload) + `;</script>`
+	html := string(indexHTML)
+	if strings.Contains(html, "</head>") {
+		return []byte(strings.Replace(html, "</head>", script+"\n</head>", 1)), nil
+	}
+	return append(indexHTML, []byte(script)...), nil
 }

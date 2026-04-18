@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	configpkg "voicetype/internal/core/config"
+	apppkg "voicetype/internal/core/runtime"
 )
 
 func TestBridge_NewServiceExposesConfigMethods(t *testing.T) {
@@ -59,5 +60,37 @@ func TestBridge_ConfigReflectsDependencySnapshot(t *testing.T) {
 	}
 	if snapshot.DecodeMode != "beam" {
 		t.Fatalf("DecodeMode = %q, want beam", snapshot.DecodeMode)
+	}
+}
+
+func TestBridge_BootstrapIncludesConfigAndAppState(t *testing.T) {
+	svc := NewService(&Dependencies{
+		LoadConfig: func(context.Context) (configpkg.Config, error) {
+			return configpkg.Config{
+				TriggerKey:      []string{"fn", "shift"},
+				ModelSize:       "medium",
+				Language:        "en",
+				SampleRate:      16000,
+				SoundFeedback:   true,
+				InputDevice:     "USB Headset",
+				DecodeMode:      "beam",
+				PunctuationMode: "opinionated",
+				Vocabulary:      "joice",
+			}, nil
+		},
+		LoadAppState: func(context.Context) (apppkg.AppState, error) {
+			return apppkg.StateReady, nil
+		},
+	})
+
+	bootstrap, err := svc.Bootstrap(context.Background())
+	if err != nil {
+		t.Fatalf("Bootstrap returned error: %v", err)
+	}
+	if bootstrap.Config.ModelSize != "medium" {
+		t.Fatalf("Bootstrap.Config.ModelSize = %q, want medium", bootstrap.Config.ModelSize)
+	}
+	if bootstrap.AppState.State != "ready" {
+		t.Fatalf("Bootstrap.AppState.State = %q, want ready", bootstrap.AppState.State)
 	}
 }
