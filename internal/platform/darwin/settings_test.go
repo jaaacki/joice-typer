@@ -111,3 +111,13 @@ func TestResolveModelPathForSettings_ReportsNotification(t *testing.T) {
 		t.Fatalf("expected notification for model path failure, got title=%q body=%q", gotTitle, gotBody)
 	}
 }
+
+func TestSettingsSource_UsesWebViewHostHook(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join(".", "settings.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "ShowWebSettingsWindow") {
+		t.Fatal("expected settings flow to reference web settings host")
+	}
+}

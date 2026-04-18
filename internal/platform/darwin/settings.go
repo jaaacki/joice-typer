@@ -504,10 +504,6 @@ func OpenPreferences() {
 	}
 	currentSettingsLogger().Info("preferences opened", "operation", "OpenPreferences")
 
-	// Cancel any previous download still running
-	prefsCtx, prefsCancel := context.WithCancel(context.Background())
-	setPreferencesContext(prefsCtx, prefsCancel)
-
 	cfgPath, err := config.DefaultConfigPath()
 	if err != nil {
 		currentSettingsLogger().Error("failed to resolve config path", "operation", "OpenPreferences", "error", err)
@@ -520,6 +516,21 @@ func OpenPreferences() {
 		preferencesOpenStore(0)
 		return
 	}
+
+	if shouldUseWebSettings() {
+		currentSettingsLogger().Info("showing web settings window", "operation", "OpenPreferences")
+		if err := ShowWebSettingsWindow(); err != nil {
+			currentSettingsLogger().Warn("failed to show web settings window, falling back to native preferences",
+				"operation", "OpenPreferences", "error", err)
+		} else {
+			preferencesOpenStore(0)
+			return
+		}
+	}
+
+	// Cancel any previous download still running.
+	prefsCtx, prefsCancel := context.WithCancel(context.Background())
+	setPreferencesContext(prefsCtx, prefsCancel)
 
 	currentSettingsLogger().Info("showing settings window", "operation", "OpenPreferences")
 	C.showSettingsWindow(0)
