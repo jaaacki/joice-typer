@@ -14,6 +14,7 @@ third_party/whisper.cpp/build/
 
 # macOS
 .DS_Store
+JoiceTyper.app/
 
 # Installer
 *.dmg
