@@ -7,6 +7,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 )
 
 func repoRoot(t *testing.T) string {
@@ -146,5 +147,38 @@ func TestMakeWindowsBuildRunsFrontendBuild(t *testing.T) {
 	text := string(out)
 	if !strings.Contains(text, "cd ui && npm run build") {
 		t.Fatalf("expected windows build to include frontend build\noutput:\n%s", text)
+	}
+}
+
+func TestMakeBuildSkipsFrontendInstallWhenStampPresent(t *testing.T) {
+	root := repoRoot(t)
+	stampPath := filepath.Join(root, "ui", "node_modules", ".package-lock.stamp")
+	lockPath := filepath.Join(root, "ui", "package-lock.json")
+
+	lockInfo, err := os.Stat(lockPath)
+	if err != nil {
+		t.Fatalf("stat package-lock.json: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(stampPath), 0755); err != nil {
+		t.Fatalf("mkdir stamp dir: %v", err)
+	}
+	if err := os.WriteFile(stampPath, []byte("ok"), 0644); err != nil {
+		t.Fatalf("write stamp: %v", err)
+	}
+	newer := lockInfo.ModTime().Add(time.Hour)
+	if err := os.Chtimes(stampPath, newer, newer); err != nil {
+		t.Fatalf("chtimes stamp: %v", err)
+	}
+	defer os.Remove(stampPath)
+
+	cmd := exec.Command("make", "-n", "build")
+	cmd.Dir = root
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("make -n build: %v\n%s", err, out)
+	}
+
+	if strings.Contains(string(out), "cd ui && npm ci") {
+		t.Fatalf("expected build to skip npm ci when install stamp is current\noutput:\n%s", out)
 	}
 }

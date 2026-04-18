@@ -1,4 +1,4 @@
-.PHONY: all setup build clean download-model whisper test app dmg release-check build-windows-amd64 frontend-install frontend-build
+.PHONY: all setup build clean download-model whisper test app dmg release-check build-windows-amd64 frontend-build
 
 WHISPER_DIR := third_party/whisper.cpp
 WHISPER_BUILD := $(WHISPER_DIR)/build
@@ -22,6 +22,7 @@ MODEL_URL := https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-smal
 BUILD_DIR := build/$(HOST_GOOS)-$(HOST_GOARCH)
 BIN_PATH := $(BUILD_DIR)/voicetype
 UI_DIR := ui
+FRONTEND_INSTALL_STAMP := $(UI_DIR)/node_modules/.package-lock.stamp
 
 all: whisper build
 
@@ -37,10 +38,12 @@ whisper:
 		-DCMAKE_BUILD_TYPE=Release
 	cd $(WHISPER_DIR) && cmake --build build --config Release -j$$(sysctl -n hw.ncpu)
 
-frontend-install:
+$(FRONTEND_INSTALL_STAMP): $(UI_DIR)/package-lock.json $(UI_DIR)/package.json
 	cd $(UI_DIR) && npm ci
+	@mkdir -p "$(dir $@)"
+	@touch $@
 
-frontend-build: frontend-install
+frontend-build: $(FRONTEND_INSTALL_STAMP)
 	cd $(UI_DIR) && npm run build
 
 build: whisper frontend-build
@@ -66,6 +69,7 @@ clean:
 	rm -rf build
 	rm -rf $(WHISPER_BUILD)
 	rm -rf $(APP_BUNDLE)
+	rm -rf $(UI_DIR)/node_modules
 
 test:
 	go test -v -count=1 ./...

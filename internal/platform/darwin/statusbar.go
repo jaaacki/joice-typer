@@ -28,6 +28,7 @@ func InitStatusBarAsync() {
 
 // UpdateStatusBar changes the menu bar icon state.
 func UpdateStatusBar(state AppState) {
+	storeCurrentAppState(state)
 	C.updateStatusBar(C.int(state))
 }
 

@@ -20,12 +20,19 @@ import (
 	"unsafe"
 
 	bridgepkg "voicetype/internal/core/bridge"
+	configpkg "voicetype/internal/core/config"
 	uiembed "voicetype/ui"
 )
 
-var webSettingsEnabled = func() bool {
-	return os.Getenv("JOICETYPER_USE_WEB_SETTINGS") == "1"
-}
+var (
+	webSettingsEnabled = func() bool {
+		return os.Getenv("JOICETYPER_USE_WEB_SETTINGS") == "1"
+	}
+	webSettingsDefaultConfigPath = configpkg.DefaultConfigPath
+	webSettingsSaveConfig        = configpkg.SaveConfig
+	webSettingsSignalRestart     = signalHotkeyRestart
+	webSettingsPostError         = reportSettingsSaveError
+)
 
 func shouldUseWebSettings() bool {
 	return webSettingsEnabled()
@@ -46,6 +53,24 @@ func ShowWebSettingsWindowWithBridge(ctx context.Context, service *bridgepkg.Ser
 
 	C.showWebSettingsWindow(cIndexPath)
 	return nil
+}
+
+func buildSettingsBridgeService(cfg configpkg.Config) *bridgepkg.Service {
+	return bridgepkg.NewService(&bridgepkg.Dependencies{
+		LoadConfig: func(context.Context) (configpkg.Config, error) {
+			return cfg, nil
+		},
+		SaveConfig: func(_ context.Context, updated configpkg.Config) error {
+			cfgPath, err := webSettingsDefaultConfigPath()
+			if err != nil {
+				return err
+			}
+			return webSettingsSaveConfig(cfgPath, updated)
+		},
+		LoadAppState: func(context.Context) (AppState, error) {
+			return currentAppState(), nil
+		},
+	})
 }
 
 func materializeEmbeddedWebUI(ctx context.Context, service *bridgepkg.Service) (string, error) {
@@ -120,4 +145,58 @@ func injectBootstrapScript(indexHTML []byte, bootstrap bridgepkg.BootstrapPayloa
 		return []byte(strings.Replace(html, "</head>", script+"\n</head>", 1)), nil
 	}
 	return append(indexHTML, []byte(script)...), nil
+}
+
+type webSettingsMessage struct {
+	Type   string                    `json:"type"`
+	Config bridgepkg.ConfigSnapshot  `json:"config"`
+}
+
+func applyWebSettingsConfig(snapshot bridgepkg.ConfigSnapshot) error {
+	cfgPath, err := webSettingsDefaultConfigPath()
+	if err != nil {
+		return fmt.Errorf("resolve config path: %w", err)
+	}
+	cfg := configpkg.Config{
+		TriggerKey:      append([]string(nil), snapshot.TriggerKey...),
+		ModelSize:       snapshot.ModelSize,
+		Language:        snapshot.Language,
+		SampleRate:      snapshot.SampleRate,
+		SoundFeedback:   snapshot.SoundFeedback,
+		InputDevice:     snapshot.InputDevice,
+		DecodeMode:      snapshot.DecodeMode,
+		PunctuationMode: snapshot.PunctuationMode,
+		Vocabulary:      snapshot.Vocabulary,
+	}
+	if err := webSettingsSaveConfig(cfgPath, cfg); err != nil {
+		return fmt.Errorf("save config: %w", err)
+	}
+	webSettingsSignalRestart()
+	return nil
+}
+
+//export handleWebSettingsMessage
+func handleWebSettingsMessage(messageJSON *C.char) *C.char {
+	if messageJSON == nil {
+		return C.CString("missing web settings message")
+	}
+
+	var message webSettingsMessage
+	if err := json.Unmarshal([]byte(C.GoString(messageJSON)), &message); err != nil {
+		webSettingsPostError(err.Error())
+		return C.CString(err.Error())
+	}
+
+	switch message.Type {
+	case "saveConfig":
+		if err := applyWebSettingsConfig(message.Config); err != nil {
+			webSettingsPostError(err.Error())
+			return C.CString(err.Error())
+		}
+		return nil
+	default:
+		err := fmt.Errorf("unsupported web settings message %q", message.Type)
+		webSettingsPostError(err.Error())
+		return C.CString(err.Error())
+	}
 }

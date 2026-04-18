@@ -20,6 +20,7 @@ type runtimeState struct {
 	prefsCtx    context.Context
 	prefsCancel context.CancelFunc
 	prefsOpen   int32
+	appState    int32
 }
 
 var runtimeSingleton = &runtimeState{
@@ -111,6 +112,14 @@ func cancelPreferencesContext() {
 		runtimeSingleton.prefsCancel()
 	}
 	runtimeSingleton.prefsMu.Unlock()
+}
+
+func storeCurrentAppState(state AppState) {
+	atomic.StoreInt32(&runtimeSingleton.appState, int32(state))
+}
+
+func currentAppState() AppState {
+	return AppState(atomic.LoadInt32(&runtimeSingleton.appState))
 }
 
 func ClearHotkeyEvents() {

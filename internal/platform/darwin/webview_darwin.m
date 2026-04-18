@@ -6,6 +6,47 @@
 static NSWindow *sWebSettingsWindow = nil;
 static WKWebView *sWebSettingsView = nil;
 
+@interface JoiceTyperWebSettingsHandler : NSObject <WKScriptMessageHandler>
+@end
+
+@implementation JoiceTyperWebSettingsHandler
+
+- (void)userContentController:(WKUserContentController *)userContentController didReceiveScriptMessage:(WKScriptMessage *)message {
+    if (![message.name isEqualToString:@"joicetyper"]) {
+        return;
+    }
+    if (![NSJSONSerialization isValidJSONObject:message.body]) {
+        return;
+    }
+
+    NSError *jsonError = nil;
+    NSData *data = [NSJSONSerialization dataWithJSONObject:message.body options:0 error:&jsonError];
+    if (data == nil || jsonError != nil) {
+        return;
+    }
+
+    NSString *jsonString = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
+    if (jsonString == nil) {
+        return;
+    }
+
+    char *request = strdup([jsonString UTF8String]);
+    if (request == NULL) {
+        return;
+    }
+
+    char *response = handleWebSettingsMessage(request);
+    free(request);
+    if (response != NULL) {
+        free(response);
+        return;
+    }
+
+    [sWebSettingsWindow close];
+}
+
+@end
+
 void showWebSettingsWindow(const char *indexPath) {
     dispatch_async(dispatch_get_main_queue(), ^{
         if (indexPath == NULL) {
@@ -29,7 +70,13 @@ void showWebSettingsWindow(const char *indexPath) {
                                                                  defer:NO];
             [sWebSettingsWindow setTitle:@"JoiceTyper Preferences"];
 
-            sWebSettingsView = [[WKWebView alloc] initWithFrame:[[sWebSettingsWindow contentView] bounds]];
+            WKWebViewConfiguration *configuration = [[WKWebViewConfiguration alloc] init];
+            WKUserContentController *controller = [[WKUserContentController alloc] init];
+            [controller addScriptMessageHandler:[[JoiceTyperWebSettingsHandler alloc] init] name:@"joicetyper"];
+            configuration.userContentController = controller;
+
+            sWebSettingsView = [[WKWebView alloc] initWithFrame:[[sWebSettingsWindow contentView] bounds]
+                                                  configuration:configuration];
             [sWebSettingsView setAutoresizingMask:NSViewWidthSizable | NSViewHeightSizable];
             [[sWebSettingsWindow contentView] addSubview:sWebSettingsView];
         }
