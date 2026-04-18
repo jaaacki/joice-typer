@@ -1,5 +1,7 @@
 # UI
 
-This directory is reserved for the shared desktop web UI.
+This directory holds the shared desktop frontend authored in React and TypeScript.
 
-No webview runtime or frontend implementation is introduced in this phase.
+The frontend is built into static `html/css/js` assets and will be embedded into the Go binary. The desktop runtime and native integrations remain in Go.
+
+This phase only introduces the frontend toolchain skeleton. It does not wire the UI into the desktop runtime yet.

@@ -35,3 +35,19 @@ func TestRepoLayout_PackagingHomesDocumented(t *testing.T) {
 		}
 	}
 }
+
+func TestRepoLayout_FrontendToolchainFilesExist(t *testing.T) {
+	root := repoRoot(t)
+	for _, path := range []string{
+		"ui/package.json",
+		"ui/tsconfig.json",
+		"ui/vite.config.ts",
+		"ui/index.html",
+		"ui/src/main.tsx",
+		"ui/src/App.tsx",
+	} {
+		if _, err := os.Stat(filepath.Join(root, path)); err != nil {
+			t.Fatalf("expected %s: %v", path, err)
+		}
+	}
+}
