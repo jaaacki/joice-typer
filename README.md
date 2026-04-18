@@ -14,8 +14,9 @@ Works in any app where you can type: editors, browsers, terminals, chat apps.
 
 ## Requirements
 
-- macOS (Apple Silicon / arm64)
+- macOS (Apple Silicon recommended)
 - Homebrew
+- Node.js + npm
 - ~500MB disk for the whisper `small` model (downloaded on first run)
 
 ## Install
@@ -26,7 +27,7 @@ cd joice-typer
 
 make setup          # install portaudio, cmake via Homebrew
 make whisper        # build whisper.cpp with Metal GPU support
-make build          # build the Go binary
+make build          # build the embedded frontend, then the Go binary
 ```
 
 ## Run
@@ -34,7 +35,7 @@ make build          # build the Go binary
 ### Terminal (development)
 
 ```bash
-./voicetype
+./build/<os>-<arch>/voicetype
 ```
 
 ### App bundle
@@ -42,6 +43,46 @@ make build          # build the Go binary
 ```bash
 make app
 open JoiceTyper.app
+```
+
+Windows bootstrap build:
+
+```bash
+make build-windows-amd64
+```
+
+This currently produces a bootstrap executable at `build/windows-amd64/joicetyper.exe`. The full Windows desktop runtime is not implemented yet.
+
+Frontend-only rebuild:
+
+```bash
+make frontend-build
+```
+
+Repository structure note:
+
+- shared backend code is moving under `internal/core/`
+- platform adapters live under `internal/platform/`
+- future shared frontend code will live under `ui/`
+- packaging resources are being organized under `assets/` and `packaging/`
+
+## Versioning
+
+`VERSION` is the single source of truth for releases.
+
+- checked-in version: `VERSION`
+- release tag format: `vX.Y.Z`
+- app bundle and Go binary both derive their version from `VERSION`
+
+Typical release flow:
+
+```bash
+printf '1.0.0\n' > VERSION
+git add VERSION
+git commit -m "release: bump version to 1.0.0"
+git tag v1.0.0
+make release-check
+make dmg
 ```
 
 On first launch, a setup wizard guides you through granting Accessibility permission, selecting a microphone, and downloading the speech model.
@@ -55,11 +96,12 @@ trigger_key:
   - fn
   - shift
 model_size: small        # tiny, base, small, or medium
-language: ""             # empty = auto-detect, or "en", "zh", etc.
+language: "en"           # recommended default; set another explicit code if needed
 sample_rate: 16000
 sound_feedback: true
 input_device: ""         # empty = system default
-type_mode: "clipboard"   # "clipboard" (paste) or "stream" (experimental)
+decode_mode: "beam"      # "beam" or "greedy"
+punctuation_mode: "conservative" # "off", "conservative", or "opinionated"
 ```
 
 ### Trigger keys
@@ -69,7 +111,7 @@ Any combination of: `fn`, `shift`, `ctrl`, `option`, `cmd`
 ### Listing audio devices
 
 ```bash
-./voicetype --list-devices
+./build/<os>-<arch>/voicetype --list-devices
 ```
 
 ## Model Integrity
@@ -80,9 +122,9 @@ Downloaded models are verified against pinned SHA-256 hashes (from HuggingFace G
 
 - **v1** - Core push-to-talk, configurable trigger key
 - **v1.5** - .app bundle, menu bar icon, setup wizard
-- **v2** - Streaming type mode (experimental, default off)
+- **v2** - Faster local transcription pipeline
 - **v2.5** - Settings UI for mic/hotkey selection *(current)*
-- **v3** - Custom dictionary
+- **v3** - Custom dictionary and punctuation controls
 - **v4** - Menu bar UI
 
 ## License

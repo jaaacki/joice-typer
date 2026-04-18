@@ -1,0 +1,41 @@
+//go:build darwin
+
+package darwin
+
+/*
+#cgo LDFLAGS: -framework AppKit -framework CoreGraphics
+#include "paster_darwin.h"
+#include <stdlib.h>
+*/
+import "C"
+
+import (
+	"fmt"
+	"log/slog"
+	"unsafe"
+)
+
+type clipboardPaster struct {
+	logger *slog.Logger
+}
+
+func NewPaster(logger *slog.Logger) Paster {
+	return &clipboardPaster{
+		logger: logger.With("component", "paster"),
+	}
+}
+
+func (p *clipboardPaster) Paste(text string) error {
+	p.logger.Debug("pasting", "operation", "Paste", "text_length", len(text))
+
+	cText := C.CString(text)
+	defer C.free(unsafe.Pointer(cText))
+
+	result := C.pasteText(cText)
+	if result != 0 {
+		return fmt.Errorf("paster.Paste: failed to paste text (error %d)", int(result))
+	}
+
+	p.logger.Debug("pasted", "operation", "Paste")
+	return nil
+}

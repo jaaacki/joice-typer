@@ -1,10 +1,12 @@
 # Binary
 voicetype
+joicetyper
 
 # Build artifacts
 *.o
 *.a
 *.dylib
+build/
 
 # whisper.cpp build directory
 third_party/whisper.cpp/build/

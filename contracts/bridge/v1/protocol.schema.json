@@ -1,0 +1,170 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://joicetyper/contracts/bridge/v1/protocol.schema.json",
+  "title": "JoiceTyper Bridge Protocol v1",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/requestEnvelope"
+    },
+    {
+      "$ref": "#/$defs/responseEnvelope"
+    },
+    {
+      "$ref": "#/$defs/eventEnvelope"
+    }
+  ],
+  "$defs": {
+    "requestEnvelope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "v",
+        "kind",
+        "id",
+        "method",
+        "params"
+      ],
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "kind": {
+          "const": "request"
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "method": {
+          "type": "string",
+          "minLength": 1
+        },
+        "params": {
+          "type": "object"
+        }
+      }
+    },
+    "responseEnvelope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "v",
+        "kind",
+        "id",
+        "ok"
+      ],
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "kind": {
+          "const": "response"
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "ok": {
+          "type": "boolean"
+        },
+        "result": {
+          "type": "object"
+        },
+        "error": {
+          "$ref": "#/$defs/errorObject"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "ok": {
+                "const": true
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "result"
+            ],
+            "not": {
+              "required": [
+                "error"
+              ]
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "ok": {
+                "const": false
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "error"
+            ],
+            "not": {
+              "required": [
+                "result"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "eventEnvelope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "v",
+        "kind",
+        "event",
+        "payload"
+      ],
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "kind": {
+          "const": "event"
+        },
+        "event": {
+          "type": "string",
+          "minLength": 1
+        },
+        "payload": {
+          "type": "object"
+        }
+      }
+    },
+    "errorObject": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "code",
+        "message",
+        "details",
+        "retriable"
+      ],
+      "properties": {
+        "code": {
+          "type": "string",
+          "minLength": 1
+        },
+        "message": {
+          "type": "string",
+          "minLength": 1
+        },
+        "details": {
+          "type": "object"
+        },
+        "retriable": {
+          "type": "boolean"
+        }
+      }
+    }
+  }
+}
