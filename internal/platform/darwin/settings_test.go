@@ -3,10 +3,13 @@
 package darwin
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	bridgepkg "voicetype/internal/core/bridge"
 )
@@ -181,6 +184,78 @@ func TestSettingsSource_WebFlowSeedsActiveModelBeforeOpen(t *testing.T) {
 	}
 	if seedIndex > openIndex {
 		t.Fatal("expected prefsActiveModel seeding before opening web settings")
+	}
+}
+
+func TestSettingsSource_WebFlowStartsPermissionPolling(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join(".", "settings.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := string(data)
+	webFlowIndex := strings.Index(source, "if shouldUseWebSettings() {")
+	if webFlowIndex == -1 {
+		t.Fatal("expected web settings flow in settings.go")
+	}
+	webSlice := source[webFlowIndex:]
+	if !strings.Contains(webSlice, "startPermissionPolling(prefsCtx, false)") {
+		t.Fatal("expected web settings flow to start live permission polling")
+	}
+}
+
+func TestStartPermissionPolling_PublishesWebPermissionChanges(t *testing.T) {
+	originalLoadPermissions := loadPermissionsSnapshot
+	originalApplyNative := applyNativePermissionSnapshot
+	originalInterval := permissionPollingInterval
+	originalDispatch := webSettingsDispatchEnvelope
+	defer func() {
+		loadPermissionsSnapshot = originalLoadPermissions
+		applyNativePermissionSnapshot = originalApplyNative
+		permissionPollingInterval = originalInterval
+		webSettingsDispatchEnvelope = originalDispatch
+	}()
+
+	var mu sync.Mutex
+	snapshot := bridgepkg.PermissionsSnapshot{}
+	loadPermissionsSnapshot = func() bridgepkg.PermissionsSnapshot {
+		mu.Lock()
+		defer mu.Unlock()
+		return snapshot
+	}
+	applyNativePermissionSnapshot = func(bridgepkg.PermissionsSnapshot) {}
+	permissionPollingInterval = 5 * time.Millisecond
+
+	events := make(chan string, 4)
+	webSettingsDispatchEnvelope = func(payload string, _ bool) {
+		if strings.Contains(payload, `"event":"permissions.changed"`) {
+			events <- payload
+		}
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	startPermissionPolling(ctx, false)
+
+	mu.Lock()
+	snapshot = bridgepkg.PermissionsSnapshot{
+		Accessibility:   true,
+		InputMonitoring: false,
+	}
+	mu.Unlock()
+
+	select {
+	case payload := <-events:
+		for _, snippet := range []string{
+			`"event":"permissions.changed"`,
+			`"accessibility":true`,
+			`"inputMonitoring":false`,
+		} {
+			if !strings.Contains(payload, snippet) {
+				t.Fatalf("expected permission event payload to contain %q, got %q", snippet, payload)
+			}
+		}
+	case <-time.After(250 * time.Millisecond):
+		t.Fatal("timed out waiting for permissions.changed event")
 	}
 }
 

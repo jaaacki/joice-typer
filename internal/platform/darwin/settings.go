@@ -33,12 +33,55 @@ var removeFile = os.Remove
 var listAudioDevices = portaudio.Devices
 var downloadModelWithProgress = transcriptionpkg.DownloadModelWithProgress
 var webSettingsOpenPermissionSettings = openWebSettingsPermissionSettings
-
-func loadWebSettingsPermissionsSnapshot() bridgepkg.PermissionsSnapshot {
+var loadPermissionsSnapshot = func() bridgepkg.PermissionsSnapshot {
 	return bridgepkg.PermissionsSnapshot{
 		Accessibility:   C.checkAccessibility() == 1,
 		InputMonitoring: C.checkInputMonitoring() == 1,
 	}
+}
+var applyNativePermissionSnapshot = func(snapshot bridgepkg.PermissionsSnapshot) {
+	C.updateSetupAccessibility(boolToCInt(snapshot.Accessibility))
+	C.updateSetupInputMonitoring(boolToCInt(snapshot.InputMonitoring))
+}
+var permissionPollingInterval = 2 * time.Second
+
+func loadWebSettingsPermissionsSnapshot() bridgepkg.PermissionsSnapshot {
+	return loadPermissionsSnapshot()
+}
+
+func startPermissionPolling(ctx context.Context, applyNativeState bool) {
+	go func() {
+		lastSnapshot := bridgepkg.PermissionsSnapshot{}
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			default:
+			}
+
+			snapshot := loadPermissionsSnapshot()
+			if applyNativeState {
+				applyNativePermissionSnapshot(snapshot)
+			}
+			if snapshot != lastSnapshot {
+				publishPermissionsChanged(snapshot)
+				lastSnapshot = snapshot
+			}
+			if snapshot.Accessibility && snapshot.InputMonitoring {
+				return
+			}
+
+			timer := time.NewTimer(permissionPollingInterval)
+			select {
+			case <-ctx.Done():
+				if !timer.Stop() {
+					<-timer.C
+				}
+				return
+			case <-timer.C:
+			}
+		}
+	}()
 }
 
 func listWebSettingsInputDevices() ([]bridgepkg.DeviceSnapshot, error) {
@@ -788,6 +831,7 @@ func OpenPreferences() {
 			preferencesOpenStore(0)
 			return
 		} else {
+			startPermissionPolling(prefsCtx, false)
 			return
 		}
 	}
@@ -829,34 +873,7 @@ func OpenPreferences() {
 func openPreferencesWait(cfg config.Config, cfgPath string) {
 	defer preferencesOpenStore(0)
 
-	// Poll permissions in background so UI updates if user grants them
-	prefsDone := make(chan struct{})
-	go func() {
-		lastSnapshot := bridgepkg.PermissionsSnapshot{}
-		for {
-			select {
-			case <-prefsDone:
-				return
-			default:
-			}
-			acc := C.checkAccessibility() == 1
-			inp := C.checkInputMonitoring() == 1
-			C.updateSetupAccessibility(boolToCInt(acc))
-			C.updateSetupInputMonitoring(boolToCInt(inp))
-			snapshot := bridgepkg.PermissionsSnapshot{
-				Accessibility:   acc,
-				InputMonitoring: inp,
-			}
-			if snapshot != lastSnapshot {
-				publishPermissionsChanged(snapshot)
-				lastSnapshot = snapshot
-			}
-			if acc && inp {
-				return
-			}
-			time.Sleep(2 * time.Second)
-		}
-	}()
+	startPermissionPolling(currentPreferencesContext(), true)
 
 	// Block until user closes the window
 	currentSettingsLogger().Info("waiting for window close", "operation", "openPreferencesWait")
@@ -866,9 +883,6 @@ func openPreferencesWait(cfg config.Config, cfgPath string) {
 
 	// Cancel downloads from this preferences session
 	cancelPreferencesContext()
-
-	// Stop permission polling goroutine
-	close(prefsDone)
 
 	// Re-check permissions and update status bar icon.
 	if C.checkAccessibility() == 1 && C.checkInputMonitoring() == 1 {
