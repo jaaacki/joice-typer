@@ -198,6 +198,12 @@ func TestBridge_BootstrapIncludesConfigAndAppState(t *testing.T) {
 		LoadAppState: func(context.Context) (apppkg.AppState, error) {
 			return apppkg.StateReady, nil
 		},
+		LoadPermissions: func(context.Context) (PermissionsSnapshot, error) {
+			return PermissionsSnapshot{Accessibility: true, InputMonitoring: false}, nil
+		},
+		LoadModel: func(context.Context) (ModelSnapshot, error) {
+			return ModelSnapshot{Size: "medium", Path: "/tmp/ggml-medium.bin", Ready: true}, nil
+		},
 	})
 
 	bootstrap, err := svc.Bootstrap(context.Background())
@@ -209,5 +215,14 @@ func TestBridge_BootstrapIncludesConfigAndAppState(t *testing.T) {
 	}
 	if bootstrap.AppState.State != "ready" {
 		t.Fatalf("Bootstrap.AppState.State = %q, want ready", bootstrap.AppState.State)
+	}
+	if !bootstrap.Permissions.Accessibility || bootstrap.Permissions.InputMonitoring {
+		t.Fatalf("Bootstrap.Permissions = %#v, want accessibility=true inputMonitoring=false", bootstrap.Permissions)
+	}
+	if bootstrap.Model.Size != "medium" || !bootstrap.Model.Ready {
+		t.Fatalf("Bootstrap.Model = %#v, want size=medium ready=true", bootstrap.Model)
+	}
+	if len(bootstrap.Options.Models) == 0 {
+		t.Fatal("expected bootstrap options to include models")
 	}
 }

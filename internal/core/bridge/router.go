@@ -2,8 +2,10 @@ package bridge
 
 import (
 	"context"
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"os"
 
 	configpkg "voicetype/internal/core/config"
 )
@@ -20,7 +22,7 @@ func NewRouter(service *Service) *Router {
 }
 
 type saveConfigParams struct {
-	Config ConfigSnapshot `json:"config"`
+	Config *saveConfigPayload `json:"config"`
 }
 
 type openPermissionSettingsParams struct {
@@ -31,6 +33,18 @@ type modelCommandParams struct {
 	Size string `json:"size"`
 }
 
+type saveConfigPayload struct {
+	TriggerKey      *[]string `json:"triggerKey"`
+	ModelSize       *string   `json:"modelSize"`
+	Language        *string   `json:"language"`
+	SampleRate      *int      `json:"sampleRate"`
+	SoundFeedback   *bool     `json:"soundFeedback"`
+	InputDevice     *string   `json:"inputDevice"`
+	DecodeMode      *string   `json:"decodeMode"`
+	PunctuationMode *string   `json:"punctuationMode"`
+	Vocabulary      *string   `json:"vocabulary"`
+}
+
 func (r *Router) HandleRequest(ctx context.Context, request RequestEnvelope) ResponseEnvelope {
 	if request.V != ProtocolVersion || request.Kind != KindRequest || request.ID == "" || request.Method == "" {
 		return NewErrorResponse(request.ID, ErrorCodeBadRequest, "invalid bridge request envelope", false, nil)
@@ -38,12 +52,18 @@ func (r *Router) HandleRequest(ctx context.Context, request RequestEnvelope) Res
 
 	switch request.Method {
 	case BootstrapMethod:
+		if response := ensureEmptyParams(request); response != nil {
+			return *response
+		}
 		bootstrap, err := r.service.Bootstrap(ctx)
 		if err != nil {
 			return NewErrorResponseFromError(request.ID, err, ErrorCodeInternal, "failed to load bootstrap state", false, nil)
 		}
 		return NewSuccessResponse(request.ID, bootstrap)
 	case ConfigGetMethod:
+		if response := ensureEmptyParams(request); response != nil {
+			return *response
+		}
 		config, err := r.service.Config(ctx)
 		if err != nil {
 			return NewErrorResponseFromError(request.ID, err, ErrorCodeConfigLoadFailure, "failed to load config", false, nil)
@@ -51,14 +71,21 @@ func (r *Router) HandleRequest(ctx context.Context, request RequestEnvelope) Res
 		return NewSuccessResponse(request.ID, config)
 	case SaveConfigMethod:
 		var params saveConfigParams
-		if err := json.Unmarshal(request.Params, &params); err != nil {
-			return NewErrorResponse(request.ID, ErrorCodeBadRequest, err.Error(), false, nil)
+		if response := decodeRequestParams(request, &params); response != nil {
+			return *response
 		}
-		if err := r.service.SaveConfig(ctx, params.Config); err != nil {
+		snapshot, response := params.snapshot(request.ID)
+		if response != nil {
+			return *response
+		}
+		if err := r.service.SaveConfig(ctx, snapshot); err != nil {
 			return NewErrorResponseFromError(request.ID, err, ErrorCodeSaveFailure, "failed to save config", false, nil)
 		}
 		return NewSuccessResponse(request.ID, map[string]any{"saved": true})
 	case PermissionsGetMethod:
+		if response := ensureEmptyParams(request); response != nil {
+			return *response
+		}
 		permissions, err := r.service.Permissions(ctx)
 		if err != nil {
 			return NewErrorResponseFromError(request.ID, err, ErrorCodePermissionsUnavailable, "failed to load permissions", true, nil)
@@ -66,26 +93,35 @@ func (r *Router) HandleRequest(ctx context.Context, request RequestEnvelope) Res
 		return NewSuccessResponse(request.ID, permissions)
 	case PermissionsOpenSettingsMethod:
 		var params openPermissionSettingsParams
-		if err := json.Unmarshal(request.Params, &params); err != nil {
-			return NewErrorResponse(request.ID, ErrorCodeBadRequest, err.Error(), false, nil)
+		if response := decodeRequestParams(request, &params); response != nil {
+			return *response
 		}
 		if err := r.service.OpenPermissionSettings(ctx, params.Target); err != nil {
 			return NewErrorResponseFromError(request.ID, err, ErrorCodePermissionOpenFailed, "failed to open system permission settings", true, nil)
 		}
 		return NewSuccessResponse(request.ID, map[string]any{"opened": true})
 	case DevicesListMethod:
+		if response := ensureEmptyParams(request); response != nil {
+			return *response
+		}
 		devices, err := r.service.Devices(ctx)
 		if err != nil {
 			return NewErrorResponseFromError(request.ID, err, ErrorCodeDevicesEnumerationFailed, "failed to list input devices", true, nil)
 		}
 		return NewSuccessResponse(request.ID, devices)
 	case DevicesRefreshMethod:
+		if response := ensureEmptyParams(request); response != nil {
+			return *response
+		}
 		devices, err := r.service.RefreshDevices(ctx)
 		if err != nil {
 			return NewErrorResponseFromError(request.ID, err, ErrorCodeDevicesRefreshFailed, "failed to refresh input devices", true, nil)
 		}
 		return NewSuccessResponse(request.ID, DevicesRefreshResult{Devices: devices})
 	case ModelGetMethod:
+		if response := ensureEmptyParams(request); response != nil {
+			return *response
+		}
 		model, err := r.service.Model(ctx)
 		if err != nil {
 			return NewErrorResponseFromError(request.ID, err, ErrorCodeModelUnavailable, "failed to load model state", false, nil)
@@ -119,29 +155,44 @@ func (r *Router) HandleRequest(ctx context.Context, request RequestEnvelope) Res
 		}
 		return NewSuccessResponse(request.ID, ModelCommandResult{Size: params.Size})
 	case HotkeyCaptureStartMethod:
+		if response := ensureEmptyParams(request); response != nil {
+			return *response
+		}
 		snapshot, err := r.service.StartHotkeyCapture(ctx)
 		if err != nil {
 			return NewErrorResponseFromError(request.ID, err, ErrorCodeHotkeyCaptureStartFailed, "failed to start hotkey capture", true, nil)
 		}
 		return NewSuccessResponse(request.ID, snapshot)
 	case HotkeyCaptureCancelMethod:
+		if response := ensureEmptyParams(request); response != nil {
+			return *response
+		}
 		if err := r.service.CancelHotkeyCapture(ctx); err != nil {
 			return NewErrorResponseFromError(request.ID, err, ErrorCodeHotkeyCaptureCancelFailed, "failed to cancel hotkey capture", false, nil)
 		}
 		return NewSuccessResponse(request.ID, map[string]any{"cancelled": true})
 	case HotkeyCaptureConfirmMethod:
+		if response := ensureEmptyParams(request); response != nil {
+			return *response
+		}
 		snapshot, err := r.service.ConfirmHotkeyCapture(ctx)
 		if err != nil {
 			return NewErrorResponseFromError(request.ID, err, ErrorCodeHotkeyCaptureConfirmFailed, "failed to confirm hotkey capture", false, nil)
 		}
 		return NewSuccessResponse(request.ID, snapshot)
 	case RuntimeGetMethod:
+		if response := ensureEmptyParams(request); response != nil {
+			return *response
+		}
 		state, err := r.service.AppState(ctx)
 		if err != nil {
 			return NewErrorResponseFromError(request.ID, err, ErrorCodeRuntimeUnavailable, "failed to load runtime state", true, nil)
 		}
 		return NewSuccessResponse(request.ID, state)
 	case OptionsGetMethod:
+		if response := ensureEmptyParams(request); response != nil {
+			return *response
+		}
 		return NewSuccessResponse(request.ID, settingsOptionsSnapshot())
 	default:
 		return NewErrorResponse(request.ID, ErrorCodeBadMethod, fmt.Sprintf("unsupported bridge method %q", request.Method), false, map[string]any{
@@ -152,9 +203,8 @@ func (r *Router) HandleRequest(ctx context.Context, request RequestEnvelope) Res
 
 func parseModelCommandParams(request RequestEnvelope) (modelCommandParams, *ResponseEnvelope) {
 	var params modelCommandParams
-	if err := json.Unmarshal(request.Params, &params); err != nil {
-		response := NewErrorResponse(request.ID, ErrorCodeBadRequest, err.Error(), false, nil)
-		return modelCommandParams{}, &response
+	if response := decodeRequestParams(request, &params); response != nil {
+		return modelCommandParams{}, response
 	}
 	if params.Size == "" {
 		response := NewErrorResponse(request.ID, ErrorCodeBadRequest, "missing model size", false, map[string]any{"field": "size"})
@@ -163,12 +213,99 @@ func parseModelCommandParams(request RequestEnvelope) (modelCommandParams, *Resp
 	return params, nil
 }
 
+func decodeRequestParams[T any](request RequestEnvelope, target *T) *ResponseEnvelope {
+	if err := decodeStrictJSON(request.Params, target); err != nil {
+		response := NewErrorResponse(request.ID, ErrorCodeBadRequest, err.Error(), false, nil)
+		return &response
+	}
+	return nil
+}
+
+func ensureEmptyParams(request RequestEnvelope) *ResponseEnvelope {
+	var params map[string]json.RawMessage
+	if response := decodeRequestParams(request, &params); response != nil {
+		return response
+	}
+	if len(params) == 0 {
+		return nil
+	}
+	response := NewErrorResponse(request.ID, ErrorCodeBadRequest, "request does not accept params", false, map[string]any{
+		"method": request.Method,
+	})
+	return &response
+}
+
+func decodeStrictJSON(raw json.RawMessage, target any) error {
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 {
+		return fmt.Errorf("missing params object")
+	}
+	decoder := json.NewDecoder(bytes.NewReader(trimmed))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(target); err != nil {
+		return err
+	}
+	if decoder.More() {
+		return fmt.Errorf("unexpected trailing JSON content")
+	}
+	return nil
+}
+
+func (p saveConfigParams) snapshot(requestID string) (ConfigSnapshot, *ResponseEnvelope) {
+	if p.Config == nil {
+		response := NewErrorResponse(requestID, ErrorCodeBadRequest, "missing config object", false, map[string]any{"field": "config"})
+		return ConfigSnapshot{}, &response
+	}
+	return p.Config.snapshot(requestID)
+}
+
+func (p saveConfigPayload) snapshot(requestID string) (ConfigSnapshot, *ResponseEnvelope) {
+	type requiredField struct {
+		name    string
+		present bool
+	}
+	required := []requiredField{
+		{name: "triggerKey", present: p.TriggerKey != nil},
+		{name: "modelSize", present: p.ModelSize != nil},
+		{name: "language", present: p.Language != nil},
+		{name: "sampleRate", present: p.SampleRate != nil},
+		{name: "soundFeedback", present: p.SoundFeedback != nil},
+		{name: "inputDevice", present: p.InputDevice != nil},
+		{name: "decodeMode", present: p.DecodeMode != nil},
+		{name: "punctuationMode", present: p.PunctuationMode != nil},
+		{name: "vocabulary", present: p.Vocabulary != nil},
+	}
+	for _, field := range required {
+		if !field.present {
+			response := NewErrorResponse(requestID, ErrorCodeBadRequest, fmt.Sprintf("missing config field %q", field.name), false, map[string]any{
+				"field": field.name,
+			})
+			return ConfigSnapshot{}, &response
+		}
+	}
+	return ConfigSnapshot{
+		TriggerKey:      append([]string(nil), (*p.TriggerKey)...),
+		ModelSize:       *p.ModelSize,
+		Language:        *p.Language,
+		SampleRate:      *p.SampleRate,
+		SoundFeedback:   *p.SoundFeedback,
+		InputDevice:     *p.InputDevice,
+		DecodeMode:      *p.DecodeMode,
+		PunctuationMode: *p.PunctuationMode,
+		Vocabulary:      *p.Vocabulary,
+	}, nil
+}
+
 func settingsOptionsSnapshot() SettingsOptionsSnapshot {
 	models := make([]OptionSnapshot, 0, len(configpkg.ModelOptions))
 	for _, option := range configpkg.ModelOptions {
+		modelPath, _ := configpkg.DefaultModelPath(option.Size)
+		_, statErr := os.Stat(modelPath)
 		models = append(models, OptionSnapshot{
-			Code: option.Size,
-			Name: option.Description,
+			Code:      option.Size,
+			Name:      option.Description,
+			Bytes:     option.Bytes,
+			Installed: statErr == nil,
 		})
 	}
 

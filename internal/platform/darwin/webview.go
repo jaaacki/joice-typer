@@ -10,6 +10,7 @@ package darwin
 import "C"
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -41,21 +42,25 @@ var (
 	webSettingsSaveConfig        = configpkg.SaveConfig
 	webSettingsSignalRestart     = signalHotkeyRestart
 	webSettingsPostError         = reportSettingsSaveError
-	webSettingsCleanupDir        = os.RemoveAll
 	webSettingsLoadPermissions   = loadWebSettingsPermissionsSnapshot
 	webSettingsListInputDevices  = listWebSettingsInputDevices
 	webSettingsRefreshDevices    = refreshWebSettingsDevices
 	webSettingsDownloadModel     = downloadWebSettingsModel
 	webSettingsDeleteModel       = deleteWebSettingsModel
 	webSettingsUseModel          = useWebSettingsModel
-	webSettingsDispatchScript    = func(script string) {
-		cScript := C.CString(script)
-		defer C.free(unsafe.Pointer(cScript))
-		C.dispatchWebSettingsScript(cScript)
+	webSettingsDispatchEnvelope  = func(payload string, closeWindow bool) {
+		cPayload := C.CString(payload)
+		defer C.free(unsafe.Pointer(cPayload))
+		closeWindowFlag := 0
+		if closeWindow {
+			closeWindowFlag = 1
+		}
+		C.dispatchWebSettingsEnvelope(cPayload, C.int(closeWindowFlag))
 	}
 
-	webSettingsAssetsMu   sync.Mutex
-	webSettingsAssetsRoot string
+	embeddedWebUIHTMLMu       sync.Mutex
+	embeddedWebUIHTMLTemplate []byte
+	embeddedWebUIHTMLInitErr  error
 
 	webHotkeyCaptureMu    sync.Mutex
 	webHotkeyCaptureState bridgepkg.HotkeyCaptureSnapshot
@@ -78,21 +83,25 @@ func ShowWebSettingsWindow() error {
 	return ShowWebSettingsWindowWithBridge(context.Background(), nil)
 }
 
+func FocusWebSettingsWindow() {
+	C.focusWebSettingsWindow()
+}
+
 func ShowWebSettingsWindowWithBridge(ctx context.Context, service *bridgepkg.Service) error {
 	if service == nil {
 		service = buildSettingsBridgeService(configpkg.Config{})
 	}
 	setActiveWebSettingsBridgeService(service)
-	indexPath, err := materializeEmbeddedWebUI(ctx, service)
+	html, err := renderEmbeddedWebUI(ctx, service)
 	if err != nil {
 		clearActiveWebSettingsBridgeService()
 		return fmt.Errorf("darwin.ShowWebSettingsWindowWithBridge: %w", err)
 	}
 
-	cIndexPath := C.CString(indexPath)
-	defer C.free(unsafe.Pointer(cIndexPath))
+	cHTML := C.CString(html)
+	defer C.free(unsafe.Pointer(cHTML))
 
-	C.showWebSettingsWindow(cIndexPath)
+	C.showWebSettingsWindow(cHTML)
 	return nil
 }
 
@@ -106,13 +115,13 @@ func defaultWebSettingsBridgeService() *bridgepkg.Service {
 	return buildSettingsBridgeService(configpkg.Config{})
 }
 
-func activeWebSettingsBridgeService() *bridgepkg.Service {
+func activeWebSettingsBridgeService() (*bridgepkg.Service, bool) {
 	webSettingsServiceMu.Lock()
 	defer webSettingsServiceMu.Unlock()
 	if webSettingsService == nil {
-		return defaultWebSettingsBridgeService()
+		return nil, false
 	}
-	return webSettingsService
+	return webSettingsService, true
 }
 
 func clearActiveWebSettingsBridgeService() {
@@ -205,30 +214,10 @@ func buildSettingsBridgeService(_ configpkg.Config) *bridgepkg.Service {
 			return webSettingsRefreshDevices()
 		},
 		LoadModel: func(context.Context) (bridgepkg.ModelSnapshot, error) {
-			cfgPath, err := webSettingsDefaultConfigPath()
-			if err != nil {
-				return bridgepkg.ModelSnapshot{}, bridgepkg.WrapContractError(
-					bridgepkg.ErrorCodeConfigLoadFailure,
-					"Failed to resolve config path",
-					false,
-					nil,
-					err,
-				)
-			}
-			currentCfg, err := webSettingsLoadConfig(cfgPath)
-			if err != nil {
-				return bridgepkg.ModelSnapshot{}, bridgepkg.WrapContractError(
-					bridgepkg.ErrorCodeConfigLoadFailure,
-					"Failed to load config",
-					false,
-					nil,
-					err,
-				)
-			}
-			return loadWebSettingsModelSnapshot(currentCfg.ModelSize)
+			return loadActiveWebSettingsModelSnapshot()
 		},
 		DownloadModel: func(ctx context.Context, size string) error {
-			return webSettingsDownloadModel(size)
+			return webSettingsDownloadModel(ctx, size)
 		},
 		DeleteModel: func(ctx context.Context, size string) error {
 			return webSettingsDeleteModel(size)
@@ -249,37 +238,41 @@ func buildSettingsBridgeService(_ configpkg.Config) *bridgepkg.Service {
 	})
 }
 
-func materializeEmbeddedWebUI(ctx context.Context, service *bridgepkg.Service) (string, error) {
-	root, err := os.MkdirTemp("", "joicetyper-web-ui-*")
-	if err != nil {
-		return "", fmt.Errorf("create temp UI dir: %w", err)
-	}
-
+func renderEmbeddedWebUI(ctx context.Context, service *bridgepkg.Service) (string, error) {
 	bootstrap, err := buildBootstrapPayload(ctx, service)
 	if err != nil {
 		return "", err
 	}
 
-	indexHTML, err := uiembed.EmbeddedAssets.ReadFile("dist/index.html")
+	indexHTML, err := embeddedWebUIBaseHTML()
 	if err != nil {
-		return "", fmt.Errorf("read embedded index.html: %w", err)
-	}
-	indexHTML, err = inlineEmbeddedAssetReferences(indexHTML, uiembed.EmbeddedAssets.ReadFile)
-	if err != nil {
-		return "", fmt.Errorf("inline embedded UI assets: %w", err)
+		return "", err
 	}
 	indexHTML, err = injectBootstrapScript(indexHTML, bootstrap)
 	if err != nil {
 		return "", fmt.Errorf("inject bootstrap payload: %w", err)
 	}
+	return string(indexHTML), nil
+}
 
-	targetPath := filepath.Join(root, "index.html")
-	if err := os.WriteFile(targetPath, indexHTML, 0644); err != nil {
-		return "", fmt.Errorf("write embedded index.html: %w", err)
+func embeddedWebUIBaseHTML() ([]byte, error) {
+	embeddedWebUIHTMLMu.Lock()
+	defer embeddedWebUIHTMLMu.Unlock()
+	if embeddedWebUIHTMLTemplate != nil || embeddedWebUIHTMLInitErr != nil {
+		return embeddedWebUIHTMLTemplate, embeddedWebUIHTMLInitErr
 	}
-
-	trackWebSettingsAssetsRoot(root)
-	return filepath.Join(root, "index.html"), nil
+	indexHTML, err := uiembed.EmbeddedAssets.ReadFile("dist/index.html")
+	if err != nil {
+		embeddedWebUIHTMLInitErr = fmt.Errorf("read embedded index.html: %w", err)
+		return nil, embeddedWebUIHTMLInitErr
+	}
+	indexHTML, err = inlineEmbeddedAssetReferences(indexHTML, uiembed.EmbeddedAssets.ReadFile)
+	if err != nil {
+		embeddedWebUIHTMLInitErr = fmt.Errorf("inline embedded UI assets: %w", err)
+		return nil, embeddedWebUIHTMLInitErr
+	}
+	embeddedWebUIHTMLTemplate = indexHTML
+	return embeddedWebUIHTMLTemplate, nil
 }
 
 func inlineEmbeddedAssetReferences(indexHTML []byte, readFile func(string) ([]byte, error)) ([]byte, error) {
@@ -455,36 +448,36 @@ func confirmWebSettingsHotkeyCapture() (bridgepkg.HotkeyCaptureSnapshot, error) 
 //export webSettingsWindowClosed
 func webSettingsWindowClosed() {
 	setWebHotkeyCaptureState(bridgepkg.HotkeyCaptureSnapshot{})
+	cancelPreferencesContext()
 	clearActiveWebSettingsBridgeService()
 	preferencesOpenStore(0)
-	cleanupTrackedWebSettingsAssets()
 }
 
-func webSettingsResponseScript(response webSettingsResponse, closeWindow bool) string {
+func webSettingsResponseJSON(response webSettingsResponse) string {
 	payload, marshalErr := json.Marshal(response)
 	if marshalErr != nil {
-		fallback := bridgepkg.NewErrorResponse(response.ID, bridgepkg.ErrorCodeBadRequest, marshalErr.Error(), false, nil)
+		fallback := bridgepkg.NewErrorResponse(response.ID, bridgepkg.ErrorCodeInternal, marshalErr.Error(), false, nil)
 		fallbackPayload, _ := json.Marshal(fallback)
-		return "(() => { window.dispatchEvent(new CustomEvent('" + bridgepkg.BridgeEventName + "', { detail: " + string(fallbackPayload) + " })); return false; })();"
+		return string(fallbackPayload)
 	}
-	return "(() => { window.dispatchEvent(new CustomEvent('" + bridgepkg.BridgeEventName + "', { detail: " + string(payload) + " })); return " + strings.ToLower(fmt.Sprintf("%t", closeWindow)) + "; })();"
+	return string(payload)
 }
 
-func webSettingsEventScript(event bridgepkg.EventEnvelope) string {
+func webSettingsEventPayload(event bridgepkg.EventEnvelope) string {
 	payload, marshalErr := json.Marshal(event)
 	if marshalErr != nil {
 		currentSettingsLogger().Warn("failed to marshal bridge event", "event", event.Event, "error", marshalErr)
 		return ""
 	}
-	return "(() => { window.dispatchEvent(new CustomEvent('" + bridgepkg.BridgeEventName + "', { detail: " + string(payload) + " })); })();"
+	return string(payload)
 }
 
 func dispatchWebSettingsEvent(event bridgepkg.EventEnvelope) {
-	script := webSettingsEventScript(event)
-	if script == "" {
+	payload := webSettingsEventPayload(event)
+	if payload == "" {
 		return
 	}
-	webSettingsDispatchScript(script)
+	webSettingsDispatchEnvelope(payload, false)
 }
 
 func publishRuntimeStateChanged(state AppState) {
@@ -530,12 +523,21 @@ type webSettingsProcessResult struct {
 
 func processWebSettingsMessage(messageJSON string) webSettingsProcessResult {
 	var request bridgepkg.RequestEnvelope
-	if err := json.Unmarshal([]byte(messageJSON), &request); err != nil {
+	if err := decodeStrictBridgeEnvelope([]byte(messageJSON), &request); err != nil {
 		webSettingsPostError(err.Error())
 		return webSettingsProcessResult{response: bridgepkg.NewErrorResponse("", bridgepkg.ErrorCodeBadRequest, err.Error(), false, nil)}
 	}
-	router := bridgepkg.NewRouter(activeWebSettingsBridgeService())
-	response := router.HandleRequest(context.Background(), request)
+	service, ok := activeWebSettingsBridgeService()
+	if !ok {
+		response := bridgepkg.NewErrorResponse(request.ID, bridgepkg.ErrorCodeInternal, "preferences bridge session is closed", false, nil)
+		return webSettingsProcessResult{response: response}
+	}
+	ctx := currentPreferencesContext()
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	router := bridgepkg.NewRouter(service)
+	response := router.HandleRequest(ctx, request)
 	if !response.OK && response.Error != nil {
 		webSettingsPostError(response.Error.Message)
 	}
@@ -545,6 +547,18 @@ func processWebSettingsMessage(messageJSON string) webSettingsProcessResult {
 	}
 }
 
+func decodeStrictBridgeEnvelope(payload []byte, target any) error {
+	decoder := json.NewDecoder(bytes.NewReader(payload))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(target); err != nil {
+		return err
+	}
+	if decoder.More() {
+		return fmt.Errorf("unexpected trailing JSON content")
+	}
+	return nil
+}
+
 //export handleWebSettingsMessage
 func handleWebSettingsMessage(messageJSON *C.char, closeWindow *C.int) *C.char {
 	if closeWindow != nil {
@@ -552,14 +566,14 @@ func handleWebSettingsMessage(messageJSON *C.char, closeWindow *C.int) *C.char {
 	}
 	if messageJSON == nil {
 		response := bridgepkg.NewErrorResponse("", bridgepkg.ErrorCodeBadRequest, "missing web settings message", false, nil)
-		return C.CString(webSettingsResponseScript(response, false))
+		return C.CString(webSettingsResponseJSON(response))
 	}
 
 	result := processWebSettingsMessage(C.GoString(messageJSON))
 	if closeWindow != nil && result.closeWindow {
 		*closeWindow = 1
 	}
-	return C.CString(webSettingsResponseScript(result.response, result.closeWindow))
+	return C.CString(webSettingsResponseJSON(result.response))
 }
 
 //export webSettingsNativeTransportWarning
@@ -586,28 +600,4 @@ func webSettingsNativeTransportInfo(operation *C.char, message *C.char) {
 		msg = C.GoString(message)
 	}
 	currentSettingsLogger().Info("web settings native transport info", "operation", op, "message", msg)
-}
-
-func trackWebSettingsAssetsRoot(root string) {
-	webSettingsAssetsMu.Lock()
-	defer webSettingsAssetsMu.Unlock()
-	if webSettingsAssetsRoot != "" && webSettingsAssetsRoot != root {
-		if err := webSettingsCleanupDir(webSettingsAssetsRoot); err != nil {
-			currentSettingsLogger().Warn("failed to clean up web settings assets", "path", webSettingsAssetsRoot, "error", err)
-		}
-	}
-	webSettingsAssetsRoot = root
-}
-
-func cleanupTrackedWebSettingsAssets() {
-	webSettingsAssetsMu.Lock()
-	root := webSettingsAssetsRoot
-	webSettingsAssetsRoot = ""
-	webSettingsAssetsMu.Unlock()
-	if root == "" {
-		return
-	}
-	if err := webSettingsCleanupDir(root); err != nil {
-		currentSettingsLogger().Warn("failed to clean up web settings assets", "path", root, "error", err)
-	}
 }

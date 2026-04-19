@@ -22,11 +22,15 @@ func TestRouterHandleRequest_SaveConfig(t *testing.T) {
 
 	params, err := json.Marshal(map[string]ConfigSnapshot{
 		"config": {
+			TriggerKey:      []string{"fn", "shift"},
 			ModelSize:       "medium",
 			Language:        "en",
 			SampleRate:      16000,
+			SoundFeedback:   true,
+			InputDevice:     "Built-in Microphone",
 			DecodeMode:      "beam",
 			PunctuationMode: "conservative",
+			Vocabulary:      "git rebase",
 		},
 	})
 	if err != nil {
@@ -84,7 +88,7 @@ func TestRouterHandleRequest_SaveConfigFailure(t *testing.T) {
 		Kind:   KindRequest,
 		ID:     "req-3",
 		Method: SaveConfigMethod,
-		Params: json.RawMessage(`{"config":{"modelSize":"small","language":"en","sampleRate":16000,"decodeMode":"beam","punctuationMode":"conservative"}}`),
+		Params: json.RawMessage(`{"config":{"triggerKey":["fn","shift"],"modelSize":"small","language":"en","sampleRate":16000,"soundFeedback":true,"inputDevice":"","decodeMode":"beam","punctuationMode":"conservative","vocabulary":""}}`),
 	})
 
 	if response.OK {
@@ -92,6 +96,65 @@ func TestRouterHandleRequest_SaveConfigFailure(t *testing.T) {
 	}
 	if response.Error == nil || response.Error.Code != ErrorCodeSaveFailure {
 		t.Fatalf("Error = %#v, want code %q", response.Error, ErrorCodeSaveFailure)
+	}
+}
+
+func TestRouterHandleRequest_SaveConfigRejectsMissingFields(t *testing.T) {
+	router := NewRouter(NewService(&Dependencies{
+		SaveConfig: func(context.Context, configpkg.Config) error {
+			t.Fatal("SaveConfig should not be called when required fields are missing")
+			return nil
+		},
+	}))
+
+	response := router.HandleRequest(context.Background(), RequestEnvelope{
+		V:      ProtocolVersion,
+		Kind:   KindRequest,
+		ID:     "req-save-missing",
+		Method: SaveConfigMethod,
+		Params: json.RawMessage(`{"config":{"modelSize":"small","language":"en","sampleRate":16000,"decodeMode":"beam","punctuationMode":"conservative"}}`),
+	})
+
+	if response.OK {
+		t.Fatal("expected missing field save request to fail")
+	}
+	if response.Error == nil || response.Error.Code != ErrorCodeBadRequest {
+		t.Fatalf("Error = %#v, want code %q", response.Error, ErrorCodeBadRequest)
+	}
+	if got := response.Error.Details["field"]; got != "triggerKey" {
+		t.Fatalf("Error.Details[field] = %#v, want triggerKey", got)
+	}
+}
+
+func TestRouterHandleRequest_RejectsUnexpectedParamsForQueryMethods(t *testing.T) {
+	router := NewRouter(NewService(&Dependencies{
+		LoadConfig: func(context.Context) (configpkg.Config, error) {
+			return configpkg.Config{
+				TriggerKey:      []string{"fn", "shift"},
+				ModelSize:       "small",
+				Language:        "en",
+				SampleRate:      16000,
+				SoundFeedback:   true,
+				InputDevice:     "",
+				DecodeMode:      "beam",
+				PunctuationMode: "conservative",
+			}, nil
+		},
+	}))
+
+	response := router.HandleRequest(context.Background(), RequestEnvelope{
+		V:      ProtocolVersion,
+		Kind:   KindRequest,
+		ID:     "req-config-extra",
+		Method: ConfigGetMethod,
+		Params: json.RawMessage(`{"unexpected":true}`),
+	})
+
+	if response.OK {
+		t.Fatal("expected config.get with unexpected params to fail")
+	}
+	if response.Error == nil || response.Error.Code != ErrorCodeBadRequest {
+		t.Fatalf("Error = %#v, want code %q", response.Error, ErrorCodeBadRequest)
 	}
 }
 
@@ -165,6 +228,12 @@ func TestRouterHandleRequest_BootstrapGet(t *testing.T) {
 		LoadAppState: func(context.Context) (apppkg.AppState, error) {
 			return apppkg.StateReady, nil
 		},
+		LoadPermissions: func(context.Context) (PermissionsSnapshot, error) {
+			return PermissionsSnapshot{Accessibility: true, InputMonitoring: false}, nil
+		},
+		LoadModel: func(context.Context) (ModelSnapshot, error) {
+			return ModelSnapshot{Size: "small", Ready: true}, nil
+		},
 	})
 	router := NewRouter(service)
 
@@ -185,6 +254,12 @@ func TestRouterHandleRequest_BootstrapGet(t *testing.T) {
 	}
 	if payload.Config.ModelSize != "small" {
 		t.Fatalf("payload.Config.ModelSize = %q, want small", payload.Config.ModelSize)
+	}
+	if payload.Model.Size != "small" || !payload.Model.Ready {
+		t.Fatalf("payload.Model = %#v, want size=small ready=true", payload.Model)
+	}
+	if !payload.Permissions.Accessibility || payload.Permissions.InputMonitoring {
+		t.Fatalf("payload.Permissions = %#v, want accessibility=true inputMonitoring=false", payload.Permissions)
 	}
 }
 

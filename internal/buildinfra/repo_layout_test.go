@@ -172,8 +172,8 @@ func TestDarwinWebviewTransportSource_LogsNativeFailures(t *testing.T) {
 		`failed to encode web settings message`,
 		`failed to decode web settings message`,
 		`failed to duplicate web settings request`,
-		`failed to evaluate web settings response script`,
-		`failed to evaluate web settings event script`,
+		`failed to evaluate bridge envelope dispatch`,
+		`failed to encode bridge payload string literal`,
 	} {
 		if !strings.Contains(source, required) {
 			t.Fatalf("expected webview_darwin.m to contain %q", required)
@@ -200,7 +200,7 @@ func TestDarwinWebviewTransportSource_LogsWindowLifecycle(t *testing.T) {
 		`didFailProvisionalNavigation`,
 		`show web settings window requested`,
 		`created web settings window`,
-		`loading web settings index`,
+		`loading embedded web settings html`,
 		`web settings navigation finished`,
 		`web settings DOM snapshot`,
 		`failed provisional web settings navigation`,
@@ -213,7 +213,7 @@ func TestDarwinWebviewTransportSource_LogsWindowLifecycle(t *testing.T) {
 	}
 }
 
-func TestDarwinWebviewTransportSource_CopiesIndexPathBeforeAsyncWindowShow(t *testing.T) {
+func TestDarwinWebviewTransportSource_CopiesHTMLBeforeAsyncWindowShow(t *testing.T) {
 	root := repoRoot(t)
 	data, err := os.ReadFile(filepath.Join(root, "internal", "platform", "darwin", "webview_darwin.m"))
 	if err != nil {
@@ -226,12 +226,12 @@ func TestDarwinWebviewTransportSource_CopiesIndexPathBeforeAsyncWindowShow(t *te
 	}
 	beforeDispatch := source[:dispatchIndex]
 	insideDispatch := source[dispatchIndex:]
-	if !strings.Contains(beforeDispatch, `NSString *path = nil;`) ||
-		!strings.Contains(beforeDispatch, `path = [NSString stringWithUTF8String:indexPath];`) {
-		t.Fatal("expected indexPath to be copied into NSString before dispatch_async for window show")
+	if !strings.Contains(beforeDispatch, `NSString *html = nil;`) ||
+		!strings.Contains(beforeDispatch, `html = [NSString stringWithUTF8String:htmlContent];`) {
+		t.Fatal("expected htmlContent to be copied into NSString before dispatch_async for window show")
 	}
-	if strings.Contains(insideDispatch, `NSString *path = [NSString stringWithUTF8String:indexPath];`) {
-		t.Fatal("expected async window block not to decode indexPath directly after Go frees the C string")
+	if strings.Contains(insideDispatch, `NSString *html = [NSString stringWithUTF8String:htmlContent];`) {
+		t.Fatal("expected async window block not to decode htmlContent directly after Go frees the C string")
 	}
 }
 
@@ -277,7 +277,8 @@ func TestDarwinWebviewTransportSource_UsesExplicitCloseFlagFromBridge(t *testing
 	for _, required := range []string{
 		"int closeWindow = 0;",
 		"char *response = handleWebSettingsMessage(request, &closeWindow);",
-		"if (closeWindow == 1) {",
+		"dispatchBridgeEnvelopeJSON(responseJSON, closeWindow == 1);",
+		"if (closeWindow && sWebSettingsWindow != nil) {",
 		"[sWebSettingsWindow close];",
 	} {
 		if !strings.Contains(source, required) {
@@ -290,19 +291,14 @@ func TestDarwinWebviewTransportSource_UsesExplicitCloseFlagFromBridge(t *testing
 }
 
 func TestSettingsScreenSource_DoesNotOverclaimPermissionOpenSuccess(t *testing.T) {
-	root := repoRoot(t)
-	data, err := os.ReadFile(filepath.Join(root, "ui", "src", "settings", "SettingsScreen.tsx"))
-	if err != nil {
-		t.Fatalf("read SettingsScreen.tsx: %v", err)
-	}
-	source := string(data)
+	source := readSettingsSourceTree(t)
 	for _, forbidden := range []string{
 		`Opened ${label} settings.`,
 		`Opened Accessibility settings.`,
 		`Opened Input Monitoring settings.`,
 	} {
 		if strings.Contains(source, forbidden) {
-			t.Fatalf("expected SettingsScreen.tsx not to overclaim permission-open success with %q", forbidden)
+			t.Fatalf("expected settings sources not to overclaim permission-open success with %q", forbidden)
 		}
 	}
 	for _, required := range []string{
@@ -310,18 +306,13 @@ func TestSettingsScreenSource_DoesNotOverclaimPermissionOpenSuccess(t *testing.T
 		`Opening ${label} settings...`,
 	} {
 		if !strings.Contains(source, required) {
-			t.Fatalf("expected SettingsScreen.tsx to contain %q", required)
+			t.Fatalf("expected settings sources to contain %q", required)
 		}
 	}
 }
 
 func TestSettingsScreenSource_SeparatesConfigTargetFromActiveModelState(t *testing.T) {
-	root := repoRoot(t)
-	data, err := os.ReadFile(filepath.Join(root, "ui", "src", "settings", "SettingsScreen.tsx"))
-	if err != nil {
-		t.Fatalf("read SettingsScreen.tsx: %v", err)
-	}
-	source := string(data)
+	source := readSettingsSourceTree(t)
 	for _, required := range []string{
 		`Config target:`,
 		`Active session model:`,
@@ -330,7 +321,7 @@ func TestSettingsScreenSource_SeparatesConfigTargetFromActiveModelState(t *testi
 		`Save to keep it.`,
 	} {
 		if !strings.Contains(source, required) {
-			t.Fatalf("expected SettingsScreen.tsx to contain %q", required)
+			t.Fatalf("expected settings sources to contain %q", required)
 		}
 	}
 	for _, forbidden := range []string{
@@ -339,7 +330,7 @@ func TestSettingsScreenSource_SeparatesConfigTargetFromActiveModelState(t *testi
 		`Selected ${size} model. Save to apply it.`,
 	} {
 		if strings.Contains(source, forbidden) {
-			t.Fatalf("expected SettingsScreen.tsx not to contain stale model semantics %q", forbidden)
+			t.Fatalf("expected settings sources not to contain stale model semantics %q", forbidden)
 		}
 	}
 }
@@ -431,12 +422,7 @@ func TestBridgeSource_ExposesRuntimeStateEventSubscription(t *testing.T) {
 }
 
 func TestSettingsScreenSource_UsesRuntimeStateSubscription(t *testing.T) {
-	root := repoRoot(t)
-	data, err := os.ReadFile(filepath.Join(root, "ui", "src", "settings", "SettingsScreen.tsx"))
-	if err != nil {
-		t.Fatalf("read SettingsScreen.tsx: %v", err)
-	}
-	source := string(data)
+	source := readSettingsSourceTree(t)
 	for _, snippet := range []string{
 		`subscribeRuntimeStateChanged`,
 		`subscribePermissionsChanged`,
@@ -445,8 +431,8 @@ func TestSettingsScreenSource_UsesRuntimeStateSubscription(t *testing.T) {
 		`subscribeConfigSaved`,
 		`subscribeDevicesChanged`,
 		`subscribeHotkeyCaptureChanged`,
-		`handleOpenPermissionSettings("accessibility", "Accessibility")`,
-		`handleOpenPermissionSettings("input_monitoring", "Input Monitoring")`,
+		`"accessibility", "Accessibility"`,
+		`"input_monitoring", "Input Monitoring"`,
 		`handleRefreshDevices`,
 		`handleDownloadModel`,
 		`handleDeleteModel`,
@@ -459,7 +445,7 @@ func TestSettingsScreenSource_UsesRuntimeStateSubscription(t *testing.T) {
 		`hotkeyCapture`,
 		`useEffect`,
 		`setCurrentAppState`,
-		`refreshSettingsContext`,
+		`refreshDevices()`,
 		`setPermissions`,
 		`setDevices`,
 		`setModel`,
@@ -480,11 +466,11 @@ func TestSettingsScreenSource_UsesRuntimeStateSubscription(t *testing.T) {
 		`Cancel`,
 		`Confirm Hotkey`,
 		"Downloaded ${size} model.",
-		`handleDeleteModel(modelActionSize)`,
-		`handleUseModel(modelActionSize)`,
+		`onDeleteModel(modelActionSize)`,
+		`onUseModel(modelActionSize)`,
 	} {
 		if !strings.Contains(source, snippet) {
-			t.Fatalf("expected SettingsScreen.tsx to contain %q", snippet)
+			t.Fatalf("expected settings sources to contain %q", snippet)
 		}
 	}
 	for _, forbidden := range []string{
@@ -503,9 +489,38 @@ func TestSettingsScreenSource_UsesRuntimeStateSubscription(t *testing.T) {
 		`.split(",")`,
 	} {
 		if strings.Contains(source, forbidden) {
-			t.Fatalf("expected SettingsScreen.tsx not to contain legacy free-text field %q", forbidden)
+			t.Fatalf("expected settings sources not to contain legacy free-text field %q", forbidden)
 		}
 	}
+}
+
+func readSettingsSourceTree(t *testing.T) string {
+	t.Helper()
+	root := repoRoot(t)
+	settingsRoot := filepath.Join(root, "ui", "src", "settings")
+	var builder strings.Builder
+	err := filepath.WalkDir(settingsRoot, func(path string, d os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if d.IsDir() {
+			return nil
+		}
+		if filepath.Ext(path) != ".ts" && filepath.Ext(path) != ".tsx" {
+			return nil
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		builder.Write(data)
+		builder.WriteString("\n")
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("read settings sources: %v", err)
+	}
+	return builder.String()
 }
 
 func TestFrontendSource_RespectsBridgeBoundary(t *testing.T) {

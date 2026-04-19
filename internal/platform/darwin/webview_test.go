@@ -84,12 +84,14 @@ func TestBuildSettingsBridgeService_LoadsPermissionsDevicesAndModel(t *testing.T
 	originalModelPath := defaultModelPath
 	originalConfigPath := webSettingsDefaultConfigPath
 	originalLoadConfig := webSettingsLoadConfig
+	originalActiveModel := prefsActiveModel
 	defer func() {
 		webSettingsLoadPermissions = originalPermissions
 		webSettingsListInputDevices = originalDevices
 		defaultModelPath = originalModelPath
 		webSettingsDefaultConfigPath = originalConfigPath
 		webSettingsLoadConfig = originalLoadConfig
+		prefsActiveModel = originalActiveModel
 	}()
 
 	webSettingsLoadPermissions = func() bridgepkg.PermissionsSnapshot {
@@ -115,6 +117,7 @@ func TestBuildSettingsBridgeService_LoadsPermissionsDevicesAndModel(t *testing.T
 			PunctuationMode: "conservative",
 		}, nil
 	}
+	prefsActiveModel = ""
 
 	service := buildSettingsBridgeService(configpkg.Config{
 		ModelSize:       "small",
@@ -165,12 +168,17 @@ func TestBuildSettingsBridgeService_RefreshDevicesAndModelCommands(t *testing.T)
 	var downloaded string
 	var deleted string
 	var selected string
+	requestCtxKey := struct{}{}
+	requestCtxValue := "download-context"
 	webSettingsRefreshDevices = func() ([]bridgepkg.DeviceSnapshot, error) {
 		refreshed = true
 		return []bridgepkg.DeviceSnapshot{{Name: "USB Headset", IsDefault: false}}, nil
 	}
-	webSettingsDownloadModel = func(size string) error {
+	webSettingsDownloadModel = func(ctx context.Context, size string) error {
 		downloaded = size
+		if got, _ := ctx.Value(requestCtxKey).(string); got != requestCtxValue {
+			t.Fatalf("download ctx value = %q, want %q", got, requestCtxValue)
+		}
 		return nil
 	}
 	webSettingsDeleteModel = func(size string) error {
@@ -197,7 +205,8 @@ func TestBuildSettingsBridgeService_RefreshDevicesAndModelCommands(t *testing.T)
 	if !refreshed || len(devices) != 1 || devices[0].Name != "USB Headset" {
 		t.Fatalf("devices = %#v, refreshed=%t", devices, refreshed)
 	}
-	if err := service.DownloadModel(context.Background(), "medium"); err != nil {
+	downloadCtx := context.WithValue(context.Background(), requestCtxKey, requestCtxValue)
+	if err := service.DownloadModel(downloadCtx, "medium"); err != nil {
 		t.Fatalf("DownloadModel returned error: %v", err)
 	}
 	if err := service.DeleteModel(context.Background(), "base"); err != nil {
@@ -226,7 +235,7 @@ func TestBuildSettingsBridgeService_CommandFailuresPreserveContractCodes(t *test
 	webSettingsRefreshDevices = func() ([]bridgepkg.DeviceSnapshot, error) {
 		return nil, bridgepkg.NewContractError(bridgepkg.ErrorCodeDevicesRefreshFailed, "Failed to refresh input devices", true, nil)
 	}
-	webSettingsDownloadModel = func(size string) error {
+	webSettingsDownloadModel = func(_ context.Context, size string) error {
 		return bridgepkg.NewContractError(bridgepkg.ErrorCodeModelDownloadFailed, "Failed to download model", true, map[string]any{"size": size})
 	}
 	webSettingsDeleteModel = func(size string) error {
@@ -401,14 +410,9 @@ func TestInlineEmbeddedAssetReferences_InlinesScriptAndStylesheet(t *testing.T) 
 
 func TestWebSettingsWindowClosed_ClearsPreferencesOpenFlag(t *testing.T) {
 	preferencesOpenStore(1)
-	dir := t.TempDir()
-	trackWebSettingsAssetsRoot(dir)
 	webSettingsWindowClosed()
 	if !preferencesOpenCompareAndSwap(0, 1) {
 		t.Fatal("expected webSettingsWindowClosed to clear preferences open flag")
-	}
-	if _, err := os.Stat(dir); !os.IsNotExist(err) {
-		t.Fatalf("expected tracked web settings assets dir %q to be removed, stat err=%v", dir, err)
 	}
 	preferencesOpenStore(0)
 }
@@ -418,11 +422,17 @@ func TestProcessWebSettingsMessage_ReturnsStructuredErrorResponse(t *testing.T) 
 	originalPostError := webSettingsPostError
 	originalConfigPath := webSettingsDefaultConfigPath
 	originalLoadConfig := webSettingsLoadConfig
+	originalService, hadService := activeWebSettingsBridgeService()
 	defer func() {
 		webSettingsSaveConfig = originalSave
 		webSettingsPostError = originalPostError
 		webSettingsDefaultConfigPath = originalConfigPath
 		webSettingsLoadConfig = originalLoadConfig
+		if hadService {
+			setActiveWebSettingsBridgeService(originalService)
+		} else {
+			clearActiveWebSettingsBridgeService()
+		}
 	}()
 	webSettingsDefaultConfigPath = func() (string, error) { return filepath.Join(t.TempDir(), "config.yaml"), nil }
 	webSettingsLoadConfig = func(string) (configpkg.Config, error) {
@@ -439,8 +449,9 @@ func TestProcessWebSettingsMessage_ReturnsStructuredErrorResponse(t *testing.T) 
 		return os.ErrPermission
 	}
 	webSettingsPostError = func(string) {}
+	setActiveWebSettingsBridgeService(buildSettingsBridgeService(configpkg.Config{}))
 
-	result := processWebSettingsMessage(`{"v":1,"kind":"request","id":"abc","method":"config.save","params":{"config":{"modelSize":"small","language":"en","sampleRate":16000,"soundFeedback":true,"decodeMode":"beam","punctuationMode":"conservative"}}}`)
+	result := processWebSettingsMessage(`{"v":1,"kind":"request","id":"abc","method":"config.save","params":{"config":{"triggerKey":["fn","shift"],"modelSize":"small","language":"en","sampleRate":16000,"soundFeedback":true,"inputDevice":"","decodeMode":"beam","punctuationMode":"conservative","vocabulary":""}}}`)
 	response := result.response
 	if response.ID != "abc" {
 		t.Fatalf("ID = %q, want abc", response.ID)
@@ -459,12 +470,62 @@ func TestProcessWebSettingsMessage_ReturnsStructuredErrorResponse(t *testing.T) 
 	}
 }
 
-func TestProcessWebSettingsMessage_ConfigGetUsesFullBridgeService(t *testing.T) {
+func TestBuildSettingsBridgeService_ModelUsesActiveSessionSelection(t *testing.T) {
+	originalActiveModel := prefsActiveModel
+	originalModelPath := defaultModelPath
 	originalConfigPath := webSettingsDefaultConfigPath
 	originalLoadConfig := webSettingsLoadConfig
 	defer func() {
+		prefsActiveModel = originalActiveModel
+		defaultModelPath = originalModelPath
 		webSettingsDefaultConfigPath = originalConfigPath
 		webSettingsLoadConfig = originalLoadConfig
+	}()
+
+	prefsActiveModel = "medium"
+	modelPath := filepath.Join(t.TempDir(), "ggml-medium.bin")
+	defaultModelPath = func(modelSize string) (string, error) {
+		if modelSize != "medium" {
+			t.Fatalf("defaultModelPath called with %q, want medium", modelSize)
+		}
+		return modelPath, nil
+	}
+	webSettingsDefaultConfigPath = func() (string, error) { return filepath.Join(t.TempDir(), "config.yaml"), nil }
+	webSettingsLoadConfig = func(string) (configpkg.Config, error) {
+		return configpkg.Config{
+			TriggerKey:      []string{"fn", "shift"},
+			ModelSize:       "small",
+			Language:        "en",
+			SampleRate:      16000,
+			SoundFeedback:   true,
+			InputDevice:     "",
+			DecodeMode:      "beam",
+			PunctuationMode: "conservative",
+		}, nil
+	}
+
+	service := buildSettingsBridgeService(configpkg.Config{})
+	model, err := service.Model(context.Background())
+	if err != nil {
+		t.Fatalf("Model returned error: %v", err)
+	}
+	if model.Size != "medium" || model.Path != modelPath {
+		t.Fatalf("Model = %#v, want size=medium path=%q", model, modelPath)
+	}
+}
+
+func TestProcessWebSettingsMessage_ConfigGetUsesFullBridgeService(t *testing.T) {
+	originalConfigPath := webSettingsDefaultConfigPath
+	originalLoadConfig := webSettingsLoadConfig
+	originalService, hadService := activeWebSettingsBridgeService()
+	defer func() {
+		webSettingsDefaultConfigPath = originalConfigPath
+		webSettingsLoadConfig = originalLoadConfig
+		if hadService {
+			setActiveWebSettingsBridgeService(originalService)
+		} else {
+			clearActiveWebSettingsBridgeService()
+		}
 	}()
 
 	webSettingsDefaultConfigPath = func() (string, error) { return filepath.Join(t.TempDir(), "config.yaml"), nil }
@@ -480,6 +541,7 @@ func TestProcessWebSettingsMessage_ConfigGetUsesFullBridgeService(t *testing.T) 
 			PunctuationMode: "conservative",
 		}, nil
 	}
+	setActiveWebSettingsBridgeService(buildSettingsBridgeService(configpkg.Config{}))
 
 	result := processWebSettingsMessage(`{"v":1,"kind":"request","id":"cfg","method":"config.get","params":{}}`)
 	if result.closeWindow {
@@ -494,6 +556,30 @@ func TestProcessWebSettingsMessage_ConfigGetUsesFullBridgeService(t *testing.T) 
 	}
 	if configResult.ModelSize != "medium" || configResult.InputDevice != "USB Headset" {
 		t.Fatalf("configResult = %#v", configResult)
+	}
+}
+
+func TestProcessWebSettingsMessage_RejectsRequestsAfterSessionClose(t *testing.T) {
+	originalService, hadService := activeWebSettingsBridgeService()
+	defer func() {
+		if hadService {
+			setActiveWebSettingsBridgeService(originalService)
+		} else {
+			clearActiveWebSettingsBridgeService()
+		}
+	}()
+
+	clearActiveWebSettingsBridgeService()
+	result := processWebSettingsMessage(`{"v":1,"kind":"request","id":"late","method":"config.get","params":{}}`)
+
+	if result.response.OK {
+		t.Fatal("expected late request to fail")
+	}
+	if result.response.Error == nil || result.response.Error.Code != bridgepkg.ErrorCodeInternal {
+		t.Fatalf("Error = %#v, want code %q", result.response.Error, bridgepkg.ErrorCodeInternal)
+	}
+	if result.response.Error.Message != "preferences bridge session is closed" {
+		t.Fatalf("Error.Message = %q, want preferences bridge session is closed", result.response.Error.Message)
 	}
 }
 
@@ -526,8 +612,7 @@ func TestWebviewSource_DoesNotSilentlyDropEventOrCleanupFailures(t *testing.T) {
 	}
 	source := string(data)
 	for _, forbidden := range []string{
-		"_ = webSettingsCleanupDir(webSettingsAssetsRoot)",
-		"_ = webSettingsCleanupDir(root)",
+		"_ = embeddedWebUIHTMLTemplate",
 	} {
 		if strings.Contains(source, forbidden) {
 			t.Fatalf("expected webview.go not to silently drop failure path %q", forbidden)
@@ -535,7 +620,7 @@ func TestWebviewSource_DoesNotSilentlyDropEventOrCleanupFailures(t *testing.T) {
 	}
 	for _, required := range []string{
 		"failed to marshal bridge event",
-		"failed to clean up web settings assets",
+		"inline embedded UI assets",
 		"dispatchWebSettingsEvent(",
 	} {
 		if !strings.Contains(source, required) {
@@ -544,72 +629,74 @@ func TestWebviewSource_DoesNotSilentlyDropEventOrCleanupFailures(t *testing.T) {
 	}
 }
 
-func TestWebSettingsResponseScript_ReturnsBooleanResult(t *testing.T) {
-	script := webSettingsResponseScript(webSettingsResponse{
+func TestWebSettingsResponseJSON_EncodesResponseEnvelope(t *testing.T) {
+	payload := webSettingsResponseJSON(webSettingsResponse{
 		V:    1,
 		Kind: "response",
 		ID:   "abc",
 		OK:   true,
-	}, false)
+	})
 	for _, snippet := range []string{
-		`joicetyper-bridge-message`,
 		`"kind":"response"`,
 		`"id":"abc"`,
-		`return false`,
 	} {
-		if !strings.Contains(script, snippet) {
-			t.Fatalf("expected success script to contain %q, got %q", snippet, script)
+		if !strings.Contains(payload, snippet) {
+			t.Fatalf("expected response payload to contain %q, got %q", snippet, payload)
 		}
 	}
 }
 
-func TestWebSettingsResponseScript_CanRequestWindowClose(t *testing.T) {
-	script := webSettingsResponseScript(webSettingsResponse{
+func TestWebSettingsResponseJSON_PreservesSuccessfulSaveEnvelope(t *testing.T) {
+	payload := webSettingsResponseJSON(webSettingsResponse{
 		V:    1,
 		Kind: "response",
 		ID:   "save",
 		OK:   true,
-	}, true)
-	if !strings.Contains(script, "return true") {
-		t.Fatalf("expected save script to request window close, got %q", script)
+	})
+	if !strings.Contains(payload, `"id":"save"`) {
+		t.Fatalf("expected save payload to preserve response id, got %q", payload)
 	}
 }
 
 func TestPublishRuntimeStateChanged_DispatchesBridgeEventScript(t *testing.T) {
-	originalDispatch := webSettingsDispatchScript
+	originalDispatch := webSettingsDispatchEnvelope
 	defer func() {
-		webSettingsDispatchScript = originalDispatch
+		webSettingsDispatchEnvelope = originalDispatch
 	}()
 
-	var script string
-	webSettingsDispatchScript = func(s string) {
-		script = s
+	var payload string
+	var closeWindow bool
+	webSettingsDispatchEnvelope = func(s string, close bool) {
+		payload = s
+		closeWindow = close
 	}
 
 	publishRuntimeStateChanged(StateRecording)
 
 	for _, snippet := range []string{
-		`joicetyper-bridge-message`,
 		`"kind":"event"`,
 		`"event":"runtime.state_changed"`,
 		`"state":"recording"`,
 		`"version":"`,
 	} {
-		if !strings.Contains(script, snippet) {
-			t.Fatalf("expected runtime state event script to contain %q, got %q", snippet, script)
+		if !strings.Contains(payload, snippet) {
+			t.Fatalf("expected runtime state event payload to contain %q, got %q", snippet, payload)
 		}
+	}
+	if closeWindow {
+		t.Fatal("did not expect event dispatch to request window close")
 	}
 }
 
 func TestDispatchWebSettingsEvent_LogsMarshalFailure(t *testing.T) {
 	var logs bytes.Buffer
-	originalDispatch := webSettingsDispatchScript
+	originalDispatch := webSettingsDispatchEnvelope
 	defer func() {
-		webSettingsDispatchScript = originalDispatch
+		webSettingsDispatchEnvelope = originalDispatch
 		SetSettingsLogger(nil)
 	}()
 
-	webSettingsDispatchScript = func(string) {
+	webSettingsDispatchEnvelope = func(string, bool) {
 		t.Fatal("did not expect dispatch when event marshaling fails")
 	}
 	SetSettingsLogger(slog.New(slog.NewJSONHandler(&logs, nil)))
@@ -626,36 +713,42 @@ func TestDispatchWebSettingsEvent_LogsMarshalFailure(t *testing.T) {
 	}
 }
 
-func TestCleanupTrackedWebSettingsAssets_LogsCleanupFailure(t *testing.T) {
-	var logs bytes.Buffer
-	originalCleanup := webSettingsCleanupDir
+func TestEmbeddedWebUIBaseHTML_CachesInlinedTemplate(t *testing.T) {
+	originalTemplate := embeddedWebUIHTMLTemplate
+	originalErr := embeddedWebUIHTMLInitErr
 	defer func() {
-		webSettingsCleanupDir = originalCleanup
-		SetSettingsLogger(nil)
+		embeddedWebUIHTMLTemplate = originalTemplate
+		embeddedWebUIHTMLInitErr = originalErr
 	}()
 
-	webSettingsCleanupDir = func(string) error {
-		return os.ErrPermission
+	embeddedWebUIHTMLTemplate = nil
+	embeddedWebUIHTMLInitErr = nil
+
+	first, err := embeddedWebUIBaseHTML()
+	if err != nil {
+		t.Fatalf("embeddedWebUIBaseHTML returned error: %v", err)
 	}
-	SetSettingsLogger(slog.New(slog.NewJSONHandler(&logs, nil)))
-
-	trackWebSettingsAssetsRoot("/tmp/joicetyper-web-ui-stale")
-	cleanupTrackedWebSettingsAssets()
-
-	if !strings.Contains(logs.String(), "failed to clean up web settings assets") {
-		t.Fatalf("expected cleanup failure to be logged, got %q", logs.String())
+	second, err := embeddedWebUIBaseHTML()
+	if err != nil {
+		t.Fatalf("embeddedWebUIBaseHTML returned error on second call: %v", err)
+	}
+	if len(first) == 0 || len(second) == 0 {
+		t.Fatal("expected cached embedded web UI template bytes")
+	}
+	if &first[0] != &second[0] {
+		t.Fatal("expected embeddedWebUIBaseHTML to reuse cached template bytes")
 	}
 }
 
 func TestPublishPermissionsChanged_DispatchesBridgeEventScript(t *testing.T) {
-	originalDispatch := webSettingsDispatchScript
+	originalDispatch := webSettingsDispatchEnvelope
 	defer func() {
-		webSettingsDispatchScript = originalDispatch
+		webSettingsDispatchEnvelope = originalDispatch
 	}()
 
-	var script string
-	webSettingsDispatchScript = func(s string) {
-		script = s
+	var payload string
+	webSettingsDispatchEnvelope = func(s string, _ bool) {
+		payload = s
 	}
 
 	publishPermissionsChanged(bridgepkg.PermissionsSnapshot{
@@ -664,27 +757,26 @@ func TestPublishPermissionsChanged_DispatchesBridgeEventScript(t *testing.T) {
 	})
 
 	for _, snippet := range []string{
-		`joicetyper-bridge-message`,
 		`"kind":"event"`,
 		`"event":"permissions.changed"`,
 		`"accessibility":true`,
 		`"inputMonitoring":false`,
 	} {
-		if !strings.Contains(script, snippet) {
-			t.Fatalf("expected permissions event script to contain %q, got %q", snippet, script)
+		if !strings.Contains(payload, snippet) {
+			t.Fatalf("expected permissions event payload to contain %q, got %q", snippet, payload)
 		}
 	}
 }
 
 func TestPublishModelChanged_DispatchesBridgeEventScript(t *testing.T) {
-	originalDispatch := webSettingsDispatchScript
+	originalDispatch := webSettingsDispatchEnvelope
 	defer func() {
-		webSettingsDispatchScript = originalDispatch
+		webSettingsDispatchEnvelope = originalDispatch
 	}()
 
-	var script string
-	webSettingsDispatchScript = func(s string) {
-		script = s
+	var payload string
+	webSettingsDispatchEnvelope = func(s string, _ bool) {
+		payload = s
 	}
 
 	publishModelChanged(bridgepkg.ModelSnapshot{
@@ -694,33 +786,31 @@ func TestPublishModelChanged_DispatchesBridgeEventScript(t *testing.T) {
 	})
 
 	for _, snippet := range []string{
-		`joicetyper-bridge-message`,
 		`"kind":"event"`,
 		`"event":"model.changed"`,
 		`"size":"medium"`,
 		`"ready":true`,
 	} {
-		if !strings.Contains(script, snippet) {
-			t.Fatalf("expected model event script to contain %q, got %q", snippet, script)
+		if !strings.Contains(payload, snippet) {
+			t.Fatalf("expected model event payload to contain %q, got %q", snippet, payload)
 		}
 	}
 }
 
 func TestPublishModelDownloadProgress_DispatchesBridgeEventScript(t *testing.T) {
-	originalDispatch := webSettingsDispatchScript
+	originalDispatch := webSettingsDispatchEnvelope
 	defer func() {
-		webSettingsDispatchScript = originalDispatch
+		webSettingsDispatchEnvelope = originalDispatch
 	}()
 
-	var script string
-	webSettingsDispatchScript = func(s string) {
-		script = s
+	var payload string
+	webSettingsDispatchEnvelope = func(s string, _ bool) {
+		payload = s
 	}
 
 	publishModelDownloadProgress("large", 0.5, 50, 100)
 
 	for _, snippet := range []string{
-		`joicetyper-bridge-message`,
 		`"kind":"event"`,
 		`"event":"model.download_progress"`,
 		`"size":"large"`,
@@ -728,21 +818,21 @@ func TestPublishModelDownloadProgress_DispatchesBridgeEventScript(t *testing.T) 
 		`"bytesDownloaded":50`,
 		`"bytesTotal":100`,
 	} {
-		if !strings.Contains(script, snippet) {
-			t.Fatalf("expected model progress event script to contain %q, got %q", snippet, script)
+		if !strings.Contains(payload, snippet) {
+			t.Fatalf("expected model progress event payload to contain %q, got %q", snippet, payload)
 		}
 	}
 }
 
 func TestPublishConfigSaved_DispatchesBridgeEventScript(t *testing.T) {
-	originalDispatch := webSettingsDispatchScript
+	originalDispatch := webSettingsDispatchEnvelope
 	defer func() {
-		webSettingsDispatchScript = originalDispatch
+		webSettingsDispatchEnvelope = originalDispatch
 	}()
 
-	var script string
-	webSettingsDispatchScript = func(s string) {
-		script = s
+	var payload string
+	webSettingsDispatchEnvelope = func(s string, _ bool) {
+		payload = s
 	}
 
 	publishConfigSaved(bridgepkg.ConfigSnapshot{
@@ -754,27 +844,26 @@ func TestPublishConfigSaved_DispatchesBridgeEventScript(t *testing.T) {
 	})
 
 	for _, snippet := range []string{
-		`joicetyper-bridge-message`,
 		`"kind":"event"`,
 		`"event":"config.saved"`,
 		`"modelSize":"medium"`,
 		`"decodeMode":"beam"`,
 	} {
-		if !strings.Contains(script, snippet) {
-			t.Fatalf("expected config saved event script to contain %q, got %q", snippet, script)
+		if !strings.Contains(payload, snippet) {
+			t.Fatalf("expected config saved event payload to contain %q, got %q", snippet, payload)
 		}
 	}
 }
 
 func TestPublishDevicesChanged_DispatchesBridgeEventScript(t *testing.T) {
-	originalDispatch := webSettingsDispatchScript
+	originalDispatch := webSettingsDispatchEnvelope
 	defer func() {
-		webSettingsDispatchScript = originalDispatch
+		webSettingsDispatchEnvelope = originalDispatch
 	}()
 
-	var script string
-	webSettingsDispatchScript = func(s string) {
-		script = s
+	var payload string
+	webSettingsDispatchEnvelope = func(s string, _ bool) {
+		payload = s
 	}
 
 	publishDevicesChanged([]bridgepkg.DeviceSnapshot{
@@ -783,14 +872,13 @@ func TestPublishDevicesChanged_DispatchesBridgeEventScript(t *testing.T) {
 	})
 
 	for _, snippet := range []string{
-		`joicetyper-bridge-message`,
 		`"kind":"event"`,
 		`"event":"devices.changed"`,
 		`"name":"Built-in Microphone"`,
 		`"isDefault":true`,
 	} {
-		if !strings.Contains(script, snippet) {
-			t.Fatalf("expected devices changed event script to contain %q, got %q", snippet, script)
+		if !strings.Contains(payload, snippet) {
+			t.Fatalf("expected devices changed event payload to contain %q, got %q", snippet, payload)
 		}
 	}
 }

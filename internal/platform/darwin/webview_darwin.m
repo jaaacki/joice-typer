@@ -2,6 +2,7 @@
 
 #import <Cocoa/Cocoa.h>
 #import <WebKit/WebKit.h>
+#import <string.h>
 
 static NSWindow *sWebSettingsWindow = nil;
 static WKWebView *sWebSettingsView = nil;
@@ -11,11 +12,21 @@ static id sWebHotkeyFlagsMonitor = nil;
 static id sWebHotkeyLocalMonitor = nil;
 static uint64_t sWebRecordedFlags = 0;
 static int sWebRecordedKeycode = -1;
+static NSString * const kJoiceTyperBridgeEventName = @"joicetyper-bridge-message";
+static NSString * const kJoiceTyperBridgeDispatchFunction = @"window.__JOICETYPER_NATIVE_BRIDGE_DISPATCH__";
 
 extern void webSettingsHotkeyCaptureChanged(unsigned long long flags, int keycode, int recording);
 extern void webSettingsNativeTransportInfo(char *operation, char *message);
 extern void webSettingsNativeTransportWarning(char *operation, char *message);
 static void stopWebHotkeyCaptureRecorder(void);
+static void dispatchBridgeErrorResponse(NSString *requestID, NSString *message);
+static NSString *bridgeJSONStringLiteral(NSString *value);
+static void dispatchBridgeEnvelopeJSON(NSString *payloadJSON, BOOL closeWindow);
+
+static BOOL shouldProbeWebSettingsDOM(void) {
+    const char *value = getenv("JOICETYPER_DEBUG_WEB_SETTINGS");
+    return value != NULL && strcmp(value, "1") == 0;
+}
 
 static void reportWebSettingsNativeTransportInfo(NSString *operation, NSString *message) {
     char *op = (char *)(operation != nil ? [operation UTF8String] : "unknown");
@@ -27,6 +38,79 @@ static void reportWebSettingsNativeTransportWarning(NSString *operation, NSStrin
     char *op = (char *)(operation != nil ? [operation UTF8String] : "unknown");
     char *msg = (char *)(message != nil ? [message UTF8String] : "unknown");
     webSettingsNativeTransportWarning(op, msg);
+}
+
+static NSString *bridgeJSONStringLiteral(NSString *value) {
+    NSError *jsonError = nil;
+    NSData *data = [NSJSONSerialization dataWithJSONObject:@[value ?: @""] options:0 error:&jsonError];
+    if (data == nil || jsonError != nil) {
+        reportWebSettingsNativeTransportWarning(@"failed to encode bridge payload string literal",
+                                                jsonError.localizedDescription ?: @"unknown JSON string encoding error");
+        return nil;
+    }
+    NSString *arrayLiteral = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
+    if (arrayLiteral == nil || arrayLiteral.length < 2) {
+        reportWebSettingsNativeTransportWarning(@"failed to encode bridge payload string literal",
+                                                @"failed to decode UTF-8 payload string literal");
+        return nil;
+    }
+    return [arrayLiteral substringWithRange:NSMakeRange(1, arrayLiteral.length - 2)];
+}
+
+static void dispatchBridgeEnvelopeJSON(NSString *payloadJSON, BOOL closeWindow) {
+    if (sWebSettingsView == nil || payloadJSON == nil) {
+        return;
+    }
+    NSString *payloadLiteral = bridgeJSONStringLiteral(payloadJSON);
+    if (payloadLiteral == nil) {
+        return;
+    }
+    NSString *script = [NSString stringWithFormat:@"%@(%@);",
+                        kJoiceTyperBridgeDispatchFunction,
+                        payloadLiteral];
+    [sWebSettingsView evaluateJavaScript:script completionHandler:^(id result, NSError *error) {
+        (void)result;
+        if (error != nil) {
+            reportWebSettingsNativeTransportWarning(@"failed to evaluate bridge envelope dispatch",
+                                                    error.localizedDescription ?: @"unknown JavaScript evaluation error");
+            return;
+        }
+        if (closeWindow && sWebSettingsWindow != nil) {
+            [sWebSettingsWindow close];
+        }
+    }];
+}
+
+static void dispatchBridgeErrorResponse(NSString *requestID, NSString *message) {
+    if (sWebSettingsView == nil) {
+        return;
+    }
+    NSDictionary *payload = @{
+        @"v": @1,
+        @"kind": @"response",
+        @"id": requestID ?: @"",
+        @"ok": @NO,
+        @"error": @{
+            @"code": @"bridge.invalid_request",
+            @"message": message ?: @"invalid bridge request",
+            @"details": @{},
+            @"retriable": @NO,
+        },
+    };
+    NSError *jsonError = nil;
+    NSData *data = [NSJSONSerialization dataWithJSONObject:payload options:0 error:&jsonError];
+    if (data == nil || jsonError != nil) {
+        reportWebSettingsNativeTransportWarning(@"failed to encode bridge error response",
+                                                jsonError.localizedDescription ?: @"unknown JSON encoding error");
+        return;
+    }
+    NSString *jsonString = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
+    if (jsonString == nil) {
+        reportWebSettingsNativeTransportWarning(@"failed to encode bridge error response",
+                                                @"failed to decode UTF-8 response string");
+        return;
+    }
+    dispatchBridgeEnvelopeJSON(jsonString, NO);
 }
 
 @interface JoiceTyperWebSettingsWindowDelegate : NSObject <NSWindowDelegate>
@@ -59,6 +143,9 @@ static void reportWebSettingsNativeTransportWarning(NSString *operation, NSStrin
     (void)navigation;
     reportWebSettingsNativeTransportInfo(@"web settings navigation finished",
                                          @"WKWebView finished loading embedded preferences");
+    if (!shouldProbeWebSettingsDOM()) {
+        return;
+    }
     NSString *domProbe =
         @"JSON.stringify({"
         "readyState: document.readyState,"
@@ -111,6 +198,13 @@ didFailProvisionalNavigation:(WKNavigation *)navigation
 @implementation JoiceTyperWebSettingsHandler
 
 - (void)userContentController:(WKUserContentController *)userContentController didReceiveScriptMessage:(WKScriptMessage *)message {
+    NSString *requestID = nil;
+    if ([message.body isKindOfClass:[NSDictionary class]]) {
+        id maybeID = ((NSDictionary *)message.body)[@"id"];
+        if ([maybeID isKindOfClass:[NSString class]]) {
+            requestID = (NSString *)maybeID;
+        }
+    }
     if ([message.name isEqualToString:@"joicetyperConsole"]) {
         NSString *level = @"log";
         NSString *text = @"";
@@ -147,6 +241,7 @@ didFailProvisionalNavigation:(WKNavigation *)navigation
     if (![NSJSONSerialization isValidJSONObject:message.body]) {
         reportWebSettingsNativeTransportWarning(@"invalid web settings message body",
                                                 @"message body is not valid JSON");
+        dispatchBridgeErrorResponse(requestID, @"message body is not valid JSON");
         return;
     }
 
@@ -155,6 +250,7 @@ didFailProvisionalNavigation:(WKNavigation *)navigation
     if (data == nil || jsonError != nil) {
         reportWebSettingsNativeTransportWarning(@"failed to encode web settings message",
                                                 jsonError.localizedDescription ?: @"unknown JSON encoding error");
+        dispatchBridgeErrorResponse(requestID, jsonError.localizedDescription ?: @"unknown JSON encoding error");
         return;
     }
 
@@ -162,6 +258,7 @@ didFailProvisionalNavigation:(WKNavigation *)navigation
     if (jsonString == nil) {
         reportWebSettingsNativeTransportWarning(@"failed to decode web settings message",
                                                 @"failed to decode UTF-8 request string");
+        dispatchBridgeErrorResponse(requestID, @"failed to decode UTF-8 request string");
         return;
     }
 
@@ -169,57 +266,56 @@ didFailProvisionalNavigation:(WKNavigation *)navigation
     if (request == NULL) {
         reportWebSettingsNativeTransportWarning(@"failed to duplicate web settings request",
                                                 @"strdup returned NULL");
+        dispatchBridgeErrorResponse(requestID, @"strdup returned NULL");
         return;
     }
 
     int closeWindow = 0;
     char *response = handleWebSettingsMessage(request, &closeWindow);
     free(request);
-    NSString *responseScript = nil;
+    NSString *responseJSON = nil;
     if (response != NULL) {
-        responseScript = [NSString stringWithUTF8String:response];
+        responseJSON = [NSString stringWithUTF8String:response];
         free(response);
     }
 
-    if (responseScript != nil) {
-        [sWebSettingsView evaluateJavaScript:responseScript
-                           completionHandler:^(id result, NSError *error) {
-            if (error != nil) {
-                reportWebSettingsNativeTransportWarning(@"failed to evaluate web settings response script",
-                                                        error.localizedDescription ?: @"unknown JavaScript evaluation error");
-            }
-            (void)result;
-            if (closeWindow == 1) {
-                [sWebSettingsWindow close];
-            }
-        }];
+    if (responseJSON != nil) {
+        dispatchBridgeEnvelopeJSON(responseJSON, closeWindow == 1);
     }
 }
 
 @end
 
-void showWebSettingsWindow(const char *indexPath) {
-    NSString *path = nil;
-    if (indexPath != NULL) {
-        path = [NSString stringWithUTF8String:indexPath];
+void showWebSettingsWindow(const char *htmlContent) {
+    NSString *html = nil;
+    if (htmlContent != NULL) {
+        html = [NSString stringWithUTF8String:htmlContent];
     }
     dispatch_async(dispatch_get_main_queue(), ^{
         reportWebSettingsNativeTransportInfo(@"show web settings window requested",
                                              @"received request to present web preferences");
-        if (indexPath == NULL) {
+        if (htmlContent == NULL) {
             reportWebSettingsNativeTransportWarning(@"show web settings window requested",
-                                                   @"index path is NULL");
+                                                   @"html content is NULL");
             return;
         }
 
-        if (path == nil || path.length == 0) {
+        if (html == nil || html.length == 0) {
             reportWebSettingsNativeTransportWarning(@"show web settings window requested",
-                                                   @"index path string is empty");
+                                                   @"html content string is empty");
+            return;
+        }
+
+        if (sWebSettingsWindow != nil) {
+            [sWebSettingsWindow makeKeyAndOrderFront:nil];
+            [NSApp activateIgnoringOtherApps:YES];
+            reportWebSettingsNativeTransportInfo(@"focused existing web settings window",
+                                                 @"reused existing web preferences window");
             return;
         }
 
         if (sWebSettingsWindow == nil) {
-            NSRect frame = NSMakeRect(0, 0, 960, 700);
+            NSRect frame = NSMakeRect(0, 0, 1120, 860);
             NSUInteger styleMask = NSWindowStyleMaskTitled |
                                    NSWindowStyleMaskClosable |
                                    NSWindowStyleMaskMiniaturizable |
@@ -229,6 +325,7 @@ void showWebSettingsWindow(const char *indexPath) {
                                                                backing:NSBackingStoreBuffered
                                                                  defer:NO];
             [sWebSettingsWindow setTitle:@"JoiceTyper Preferences"];
+            [sWebSettingsWindow setMinSize:NSMakeSize(1080, 820)];
             sWebSettingsWindowDelegate = [[JoiceTyperWebSettingsWindowDelegate alloc] init];
             [sWebSettingsWindow setDelegate:sWebSettingsWindowDelegate];
             reportWebSettingsNativeTransportInfo(@"created web settings window",
@@ -238,6 +335,15 @@ void showWebSettingsWindow(const char *indexPath) {
             WKUserContentController *controller = [[WKUserContentController alloc] init];
             [controller addScriptMessageHandler:[[JoiceTyperWebSettingsHandler alloc] init] name:@"joicetyper"];
             [controller addScriptMessageHandler:[[JoiceTyperWebSettingsHandler alloc] init] name:@"joicetyperConsole"];
+            NSString *bridgeDispatchSource = [NSString stringWithFormat:
+                @"(function(){"
+                "window.__JOICETYPER_NATIVE_BRIDGE_DISPATCH__ = function(payloadJSON) {"
+                "  const detail = typeof payloadJSON === 'string' ? JSON.parse(payloadJSON) : payloadJSON;"
+                "  window.dispatchEvent(new CustomEvent('%@', { detail }));"
+                "  return true;"
+                "};"
+                "})();",
+                kJoiceTyperBridgeEventName];
             NSString *consoleBridgeSource =
                 @"(function(){"
                 "const native = window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.joicetyperConsole;"
@@ -265,6 +371,10 @@ void showWebSettingsWindow(const char *indexPath) {
                 "  if (originalError) { originalError.apply(console, arguments); }"
                 "};"
                 "})();";
+            WKUserScript *bridgeDispatchScript = [[WKUserScript alloc] initWithSource:bridgeDispatchSource
+                                                                       injectionTime:WKUserScriptInjectionTimeAtDocumentStart
+                                                                    forMainFrameOnly:YES];
+            [controller addUserScript:bridgeDispatchScript];
             WKUserScript *consoleBridgeScript = [[WKUserScript alloc] initWithSource:consoleBridgeSource
                                                                        injectionTime:WKUserScriptInjectionTimeAtDocumentStart
                                                                     forMainFrameOnly:YES];
@@ -279,11 +389,9 @@ void showWebSettingsWindow(const char *indexPath) {
             [[sWebSettingsWindow contentView] addSubview:sWebSettingsView];
         }
 
-        NSURL *indexURL = [NSURL fileURLWithPath:path];
-        NSURL *readAccessURL = [indexURL URLByDeletingLastPathComponent];
-        reportWebSettingsNativeTransportInfo(@"loading web settings index",
-                                             indexURL.absoluteString ?: @"missing index URL");
-        [sWebSettingsView loadFileURL:indexURL allowingReadAccessToURL:readAccessURL];
+        reportWebSettingsNativeTransportInfo(@"loading embedded web settings html",
+                                             @"loading inlined web preferences shell");
+        [sWebSettingsView loadHTMLString:html baseURL:nil];
         [sWebSettingsWindow center];
         [sWebSettingsWindow makeKeyAndOrderFront:nil];
         [NSApp activateIgnoringOtherApps:YES];
@@ -292,24 +400,29 @@ void showWebSettingsWindow(const char *indexPath) {
     });
 }
 
-void dispatchWebSettingsScript(const char *script) {
+void focusWebSettingsWindow(void) {
     dispatch_async(dispatch_get_main_queue(), ^{
-        if (script == NULL || sWebSettingsView == nil) {
+        if (sWebSettingsWindow == nil) {
+            return;
+        }
+        [sWebSettingsWindow makeKeyAndOrderFront:nil];
+        [NSApp activateIgnoringOtherApps:YES];
+        reportWebSettingsNativeTransportInfo(@"focused existing web settings window",
+                                             @"requested key/front activation for existing web preferences window");
+    });
+}
+
+void dispatchWebSettingsEnvelope(const char *payloadJSON, int closeWindow) {
+    dispatch_async(dispatch_get_main_queue(), ^{
+        if (payloadJSON == NULL || sWebSettingsView == nil) {
             return;
         }
 
-        NSString *scriptString = [NSString stringWithUTF8String:script];
-        if (scriptString == nil || scriptString.length == 0) {
+        NSString *payloadString = [NSString stringWithUTF8String:payloadJSON];
+        if (payloadString == nil || payloadString.length == 0) {
             return;
         }
-
-        [sWebSettingsView evaluateJavaScript:scriptString completionHandler:^(id result, NSError *error) {
-            (void)result;
-            if (error != nil) {
-                reportWebSettingsNativeTransportWarning(@"failed to evaluate web settings event script",
-                                                        error.localizedDescription ?: @"unknown JavaScript evaluation error");
-            }
-        }];
+        dispatchBridgeEnvelopeJSON(payloadString, closeWindow == 1);
     });
 }
 

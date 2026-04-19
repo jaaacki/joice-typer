@@ -34,6 +34,9 @@ export type AppStateSnapshot = {
 export type BootstrapPayload = {
   config: ConfigSnapshot;
   appState: AppStateSnapshot;
+  permissions: PermissionsSnapshot;
+  model: ModelSnapshot;
+  options: SettingsOptionsSnapshot;
 };
 
 export type PermissionsSnapshot = {
@@ -62,6 +65,8 @@ export type ModelDownloadProgressSnapshot = {
 export type OptionSnapshot = {
   code: string;
   name: string;
+  bytes?: number;
+  installed: boolean;
 };
 
 export type SettingsOptionsSnapshot = {
@@ -107,9 +112,50 @@ export class BridgeRequestError extends Error {
   }
 }
 
+function isBridgeError(value: unknown): value is BridgeError {
+  if (typeof value !== "object" || value === null) {
+    return false;
+  }
+  const candidate = value as Partial<BridgeError>;
+  return typeof candidate.code === "string" && typeof candidate.message === "string" && typeof candidate.retriable === "boolean";
+}
+
+function normalizeBridgeError(error: unknown, fallbackMessage: string, fallbackDetails: Record<string, unknown>): BridgeError {
+  if (isBridgeError(error)) {
+    return {
+      code: error.code,
+      message: error.message,
+      details: typeof error.details === "object" && error.details !== null ? error.details : {},
+      retriable: error.retriable,
+    };
+  }
+  return {
+    code: ERROR_CODES.internalError,
+    message: fallbackMessage,
+    details: fallbackDetails,
+    retriable: false,
+  };
+}
+
+function isBridgeResponseEnvelope<TResult>(value: unknown): value is BridgeResponseEnvelope<TResult> {
+  if (typeof value !== "object" || value === null) {
+    return false;
+  }
+  const candidate = value as Partial<BridgeResponseEnvelope<TResult>>;
+  return candidate.v === PROTOCOL_VERSION && candidate.kind === KINDS.response && typeof candidate.id === "string" && typeof candidate.ok === "boolean";
+}
+
+function isBridgeEventEnvelope<TPayload>(value: unknown): value is BridgeEventEnvelope<TPayload> {
+  if (typeof value !== "object" || value === null) {
+    return false;
+  }
+  const candidate = value as Partial<BridgeEventEnvelope<TPayload>>;
+  return candidate.v === PROTOCOL_VERSION && candidate.kind === KINDS.event && typeof candidate.event === "string";
+}
+
 export function readBootstrap(): BootstrapPayload | null {
   const envelope = (window as BootstrapWindow).__JOICETYPER_BOOTSTRAP__;
-  if (envelope?.kind === KINDS.response && envelope.ok === true) {
+  if (isBridgeResponseEnvelope<BootstrapPayload>(envelope) && envelope.ok === true) {
     return envelope.result ?? null;
   }
   return null;
@@ -156,8 +202,8 @@ function query<TResult, TParams extends Record<string, unknown>>(method: BridgeM
     };
 
     const onResponse = (event: Event) => {
-      const detail = (event as CustomEvent<BridgeResponseEnvelope<TResult>>).detail;
-      if (detail?.kind !== KINDS.response || detail?.id !== requestId) {
+      const detail = (event as CustomEvent<unknown>).detail;
+      if (!isBridgeResponseEnvelope<TResult>(detail) || detail.id !== requestId) {
         return;
       }
       cleanup(timeoutId);
@@ -165,12 +211,14 @@ function query<TResult, TParams extends Record<string, unknown>>(method: BridgeM
         resolve(detail.result as TResult);
         return;
       }
-      reject(new BridgeRequestError(detail.error ?? {
-        code: ERROR_CODES.internalError,
-        message: `Bridge request failed: ${method}`,
-        details: {},
-        retriable: false,
-      }));
+      reject(
+        new BridgeRequestError(
+          normalizeBridgeError(detail.error, `Bridge request failed: ${method}`, {
+            method,
+            requestId,
+          }),
+        ),
+      );
     };
 
     const timeoutId = window.setTimeout(() => {
@@ -191,14 +239,30 @@ function query<TResult, TParams extends Record<string, unknown>>(method: BridgeM
       params,
     };
     window.addEventListener(BRIDGE_EVENT_NAME, onResponse as EventListener);
-    handler.postMessage(request);
+    try {
+      handler.postMessage(request);
+    } catch (error) {
+      cleanup(timeoutId);
+      reject(
+        new BridgeRequestError({
+          code: ERROR_CODES.internalError,
+          message: `Native settings bridge failed to send request: ${method}`,
+          details: {
+            method,
+            requestId,
+            cause: error instanceof Error ? error.message : String(error),
+          },
+          retriable: true,
+        }),
+      );
+    }
   });
 }
 
 function subscribeEvent<TPayload>(eventName: BridgeEventName, handler: (payload: TPayload) => void): () => void {
   const onEvent = (event: Event) => {
-    const detail = (event as CustomEvent<BridgeEventEnvelope<TPayload>>).detail;
-    if (detail?.kind !== KINDS.event || detail?.event !== eventName) {
+    const detail = (event as CustomEvent<unknown>).detail;
+    if (!isBridgeEventEnvelope<TPayload>(detail) || detail.event !== eventName) {
       return;
     }
     handler(detail.payload);

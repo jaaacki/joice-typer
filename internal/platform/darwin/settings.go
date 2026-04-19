@@ -14,6 +14,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"math"
 	"os"
 	"strings"
 	"time"
@@ -73,7 +74,7 @@ func loadWebSettingsModelSnapshot(modelSize string) (bridgepkg.ModelSnapshot, er
 			bridgepkg.ErrorCodeModelUnavailable,
 			"Failed to resolve model state",
 			false,
-			map[string]any{"modelSize": modelSize},
+			map[string]any{"size": modelSize},
 			err,
 		)
 	}
@@ -83,6 +84,34 @@ func loadWebSettingsModelSnapshot(modelSize string) (bridgepkg.ModelSnapshot, er
 		Path:  modelPath,
 		Ready: statErr == nil,
 	}, nil
+}
+
+func loadActiveWebSettingsModelSnapshot() (bridgepkg.ModelSnapshot, error) {
+	activeModelSize := prefsActiveModel
+	if activeModelSize == "" {
+		cfgPath, err := webSettingsDefaultConfigPath()
+		if err != nil {
+			return bridgepkg.ModelSnapshot{}, bridgepkg.WrapContractError(
+				bridgepkg.ErrorCodeModelUnavailable,
+				"Failed to resolve active model config path",
+				false,
+				nil,
+				err,
+			)
+		}
+		cfg, err := webSettingsLoadConfig(cfgPath)
+		if err != nil {
+			return bridgepkg.ModelSnapshot{}, bridgepkg.WrapContractError(
+				bridgepkg.ErrorCodeModelUnavailable,
+				"Failed to load active model config",
+				false,
+				nil,
+				err,
+			)
+		}
+		activeModelSize = cfg.ModelSize
+	}
+	return loadWebSettingsModelSnapshot(activeModelSize)
 }
 
 func openWebSettingsPermissionSettings(target string) error {
@@ -123,7 +152,7 @@ func refreshWebSettingsDevices() ([]bridgepkg.DeviceSnapshot, error) {
 	return devices, nil
 }
 
-func downloadWebSettingsModel(modelSize string) error {
+func downloadWebSettingsModel(ctx context.Context, modelSize string) error {
 	modelPath, err := defaultModelPath(modelSize)
 	if err != nil {
 		return bridgepkg.WrapContractError(
@@ -135,11 +164,29 @@ func downloadWebSettingsModel(modelSize string) error {
 		)
 	}
 
-	ctx := currentPreferencesContext()
+	if ctx == nil {
+		ctx = currentPreferencesContext()
+	}
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	lastPublishedAt := time.Time{}
+	lastPublishedPercent := -1
 	if err := downloadModelWithProgress(ctx, modelPath, modelSize, func(progress float64, downloaded, total int64) {
+		now := time.Now()
+		percent := int(math.Round(progress * 100))
+		shouldPublish := downloaded == 0 || downloaded == total || lastPublishedPercent == -1
+		if !shouldPublish {
+			shouldPublish = percent != lastPublishedPercent && percent%5 == 0
+		}
+		if !shouldPublish && now.Sub(lastPublishedAt) >= 200*time.Millisecond {
+			shouldPublish = true
+		}
+		if !shouldPublish {
+			return
+		}
+		lastPublishedAt = now
+		lastPublishedPercent = percent
 		publishModelDownloadProgress(modelSize, progress, downloaded, total)
 	}, currentSettingsLogger()); err != nil {
 		return bridgepkg.WrapContractError(
@@ -150,12 +197,6 @@ func downloadWebSettingsModel(modelSize string) error {
 			err,
 		)
 	}
-
-	snapshot, err := loadWebSettingsModelSnapshot(modelSize)
-	if err != nil {
-		return err
-	}
-	publishModelChanged(snapshot)
 	return nil
 }
 
@@ -196,11 +237,6 @@ func deleteWebSettingsModel(modelSize string) error {
 			removeErr,
 		)
 	}
-	publishModelChanged(bridgepkg.ModelSnapshot{
-		Size:  modelSize,
-		Path:  modelPath,
-		Ready: false,
-	})
 	return nil
 }
 
@@ -712,8 +748,15 @@ func signalHotkeyRestart() {
 // main thread, then moves to a goroutine so [NSApp run] stays responsive.
 func OpenPreferences() {
 	if !preferencesOpenCompareAndSwap(0, 1) {
-		currentSettingsLogger().Warn("preferences already open, ignoring",
+		currentSettingsLogger().Info("preferences already open, reactivating existing window",
 			"operation", "OpenPreferences")
+		if shouldUseWebSettings() {
+			currentSettingsLogger().Info("focusing existing web settings window", "operation", "OpenPreferences")
+			FocusWebSettingsWindow()
+			return
+		}
+		currentSettingsLogger().Info("re-showing native settings window", "operation", "OpenPreferences")
+		C.showSettingsWindow(0)
 		return
 	}
 	currentSettingsLogger().Info("preferences opened", "operation", "OpenPreferences")
@@ -731,20 +774,14 @@ func OpenPreferences() {
 		return
 	}
 
-	// Refresh audio devices to pick up newly connected mics (e.g. Bluetooth).
-	if recorder := currentSettingsRecorder(); recorder != nil {
-		if refreshErr := recorder.RefreshDevices(); refreshErr != nil {
-			currentSettingsLogger().Warn("failed to refresh audio devices", "operation", "OpenPreferences", "error", refreshErr)
-		} else if devices, devicesErr := listWebSettingsInputDevices(); devicesErr == nil {
-			publishDevicesChanged(devices)
-		}
-	}
-
 	if shouldUseWebSettings() {
 		prefsActiveModel = cfg.ModelSize
+		prefsCtx, prefsCancel := context.WithCancel(context.Background())
+		setPreferencesContext(prefsCtx, prefsCancel)
 		bridgeService := buildSettingsBridgeService(cfg)
 		currentSettingsLogger().Info("showing web settings window", "operation", "OpenPreferences")
-		if err := ShowWebSettingsWindowWithBridge(context.Background(), bridgeService); err != nil {
+		if err := ShowWebSettingsWindowWithBridge(prefsCtx, bridgeService); err != nil {
+			cancelPreferencesContext()
 			currentSettingsLogger().Error("failed to show web settings window",
 				"operation", "OpenPreferences", "error", err)
 			postNotification("JoiceTyper Preferences", "Failed to open web preferences. Set JOICETYPER_USE_NATIVE_PREFERENCES=1 only if you need the debug fallback.")

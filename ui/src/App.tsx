@@ -5,7 +5,7 @@ export default function App() {
   const bootstrap = readBootstrap();
 
   if (bootstrap !== null) {
-    return <SettingsScreen config={bootstrap.config} appState={bootstrap.appState} />;
+    return <SettingsScreen bootstrap={bootstrap} />;
   }
 
   return (

@@ -184,6 +184,32 @@ func TestSettingsSource_WebFlowSeedsActiveModelBeforeOpen(t *testing.T) {
 	}
 }
 
+func TestSettingsSource_ReactivatesExistingPreferencesWindow(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join(".", "settings.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := string(data)
+	reopenIndex := strings.Index(source, `if !preferencesOpenCompareAndSwap(0, 1) {`)
+	if reopenIndex == -1 {
+		t.Fatal("expected preferences-open guard in settings.go")
+	}
+	reopenSlice := source[reopenIndex:]
+	for _, required := range []string{
+		`preferences already open, reactivating existing window`,
+		`if shouldUseWebSettings() {`,
+		`FocusWebSettingsWindow()`,
+		`C.showSettingsWindow(0)`,
+	} {
+		if !strings.Contains(reopenSlice, required) {
+			t.Fatalf("expected existing-open branch to contain %q", required)
+		}
+	}
+	if strings.Contains(reopenSlice, `preferences already open, ignoring`) {
+		t.Fatal("expected existing-open branch to stop ignoring repeated preferences clicks")
+	}
+}
+
 func TestDeleteWebSettingsModel_RejectsActiveModel(t *testing.T) {
 	originalPath := defaultModelPath
 	originalRemove := removeFile

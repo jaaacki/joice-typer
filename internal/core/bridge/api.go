@@ -168,9 +168,20 @@ func (s *Service) Bootstrap(ctx context.Context) (BootstrapPayload, error) {
 	if err != nil {
 		return BootstrapPayload{}, err
 	}
+	permissionsSnapshot, err := s.Permissions(ctx)
+	if err != nil {
+		return BootstrapPayload{}, err
+	}
+	modelSnapshot, err := s.Model(ctx)
+	if err != nil {
+		return BootstrapPayload{}, err
+	}
 	return BootstrapPayload{
-		Config:   configSnapshot,
-		AppState: appStateSnapshot,
+		Config:      configSnapshot,
+		AppState:    appStateSnapshot,
+		Permissions: permissionsSnapshot,
+		Model:       modelSnapshot,
+		Options:     settingsOptionsSnapshot(),
 	}, nil
 }
 

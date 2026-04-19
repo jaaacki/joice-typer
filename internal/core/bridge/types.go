@@ -34,13 +34,18 @@ type AppStateSnapshot struct {
 }
 
 type BootstrapPayload struct {
-	Config   ConfigSnapshot   `json:"config"`
-	AppState AppStateSnapshot `json:"appState"`
+	Config      ConfigSnapshot          `json:"config"`
+	AppState    AppStateSnapshot        `json:"appState"`
+	Permissions PermissionsSnapshot     `json:"permissions"`
+	Model       ModelSnapshot           `json:"model"`
+	Options     SettingsOptionsSnapshot `json:"options"`
 }
 
 type OptionSnapshot struct {
-	Code string `json:"code"`
-	Name string `json:"name"`
+	Code      string `json:"code"`
+	Name      string `json:"name"`
+	Bytes     int64  `json:"bytes,omitempty"`
+	Installed bool   `json:"installed"`
 }
 
 type SettingsOptionsSnapshot struct {
