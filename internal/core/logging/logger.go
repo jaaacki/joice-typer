@@ -9,14 +9,17 @@ import (
 	"path/filepath"
 )
 
-const maxLogBytes int64 = 5 * 1024 * 1024 // 5MB
+const (
+	maxLogBytes int64 = 5 * 1024 * 1024 // 5MB
+	logFileName       = "voicetype.log"
+)
 
 func SetupLogger(logDir string) (*slog.Logger, func(), error) {
 	if err := os.MkdirAll(logDir, 0755); err != nil {
 		return nil, nil, fmt.Errorf("logger.SetupLogger: create dir: %w", err)
 	}
 
-	logPath := filepath.Join(logDir, "voicetype.log")
+	logPath := filepath.Join(logDir, logFileName)
 
 	if err := truncateIfNeeded(logPath, maxLogBytes); err != nil {
 		return nil, nil, fmt.Errorf("logger.SetupLogger: truncate: %w", err)
