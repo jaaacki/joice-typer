@@ -225,6 +225,12 @@ func buildSettingsBridgeService(_ configpkg.Config) *bridgepkg.Service {
 		UseModel: func(ctx context.Context, size string) error {
 			return webSettingsUseModel(size)
 		},
+		LoadLogsTail: func(context.Context) (bridgepkg.LogTailSnapshot, error) {
+			return loadWebSettingsLogTailSnapshot()
+		},
+		LoadLogsFull: func(context.Context) (string, error) {
+			return loadWebSettingsLogFullText()
+		},
 		StartHotkeyCapture: func(context.Context) (bridgepkg.HotkeyCaptureSnapshot, error) {
 			return startWebSettingsHotkeyCapture(), nil
 		},
@@ -510,6 +516,10 @@ func publishConfigSaved(snapshot bridgepkg.ConfigSnapshot) {
 
 func publishDevicesChanged(devices []bridgepkg.DeviceSnapshot) {
 	dispatchWebSettingsEvent(bridgepkg.NewEvent(bridgepkg.DevicesChangedEvent, devices))
+}
+
+func publishLogsUpdated(snapshot bridgepkg.LogTailSnapshot) {
+	dispatchWebSettingsEvent(bridgepkg.NewEvent(bridgepkg.LogsUpdatedEvent, snapshot))
 }
 
 func publishHotkeyCaptureChanged(snapshot bridgepkg.HotkeyCaptureSnapshot) {

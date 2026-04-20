@@ -16,12 +16,14 @@ import (
 	"log/slog"
 	"math"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 	"unsafe"
 
 	bridgepkg "voicetype/internal/core/bridge"
 	config "voicetype/internal/core/config"
+	loggingpkg "voicetype/internal/core/logging"
 	transcriptionpkg "voicetype/internal/core/transcription"
 
 	"github.com/gordonklaus/portaudio"
@@ -33,6 +35,13 @@ var removeFile = os.Remove
 var listAudioDevices = portaudio.Devices
 var downloadModelWithProgress = transcriptionpkg.DownloadModelWithProgress
 var webSettingsOpenPermissionSettings = openWebSettingsPermissionSettings
+var webSettingsLogPath = func() (string, error) {
+	dir, err := config.DefaultConfigDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, "voicetype.log"), nil
+}
 var loadPermissionsSnapshot = func() bridgepkg.PermissionsSnapshot {
 	return bridgepkg.PermissionsSnapshot{
 		Accessibility:   C.checkAccessibility() == 1,
@@ -193,6 +202,91 @@ func refreshWebSettingsDevices() ([]bridgepkg.DeviceSnapshot, error) {
 	}
 	publishDevicesChanged(devices)
 	return devices, nil
+}
+
+func loadWebSettingsLogTailSnapshot() (bridgepkg.LogTailSnapshot, error) {
+	path, err := webSettingsLogPath()
+	if err != nil {
+		return bridgepkg.LogTailSnapshot{}, bridgepkg.WrapContractError(
+			bridgepkg.ErrorCodeLogsUnavailable,
+			"Failed to resolve log path",
+			false,
+			nil,
+			err,
+		)
+	}
+
+	info, err := os.Stat(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return bridgepkg.LogTailSnapshot{}, nil
+		}
+		return bridgepkg.LogTailSnapshot{}, bridgepkg.WrapContractError(
+			bridgepkg.ErrorCodeLogsUnavailable,
+			"Failed to inspect log file",
+			false,
+			nil,
+			err,
+		)
+	}
+
+	text, truncated, err := loggingpkg.ReadLogTail(path, 500)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return bridgepkg.LogTailSnapshot{}, nil
+		}
+		return bridgepkg.LogTailSnapshot{}, bridgepkg.WrapContractError(
+			bridgepkg.ErrorCodeLogsUnavailable,
+			"Failed to read log tail",
+			false,
+			nil,
+			err,
+		)
+	}
+
+	return bridgepkg.LogTailSnapshot{
+		Text:      text,
+		Truncated: truncated,
+		ByteSize:  info.Size(),
+		UpdatedAt: info.ModTime().UTC().Format(time.RFC3339),
+	}, nil
+}
+
+func loadWebSettingsLogFullText() (string, error) {
+	path, err := webSettingsLogPath()
+	if err != nil {
+		return "", bridgepkg.WrapContractError(
+			bridgepkg.ErrorCodeLogsUnavailable,
+			"Failed to resolve log path",
+			false,
+			nil,
+			err,
+		)
+	}
+
+	full, err := loggingpkg.ReadFullLog(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", nil
+		}
+		return "", bridgepkg.WrapContractError(
+			bridgepkg.ErrorCodeLogsUnavailable,
+			"Failed to read full logs",
+			false,
+			nil,
+			err,
+		)
+	}
+	return full, nil
+}
+
+func notifyWebSettingsLogsUpdated() {
+	snapshot, err := loadWebSettingsLogTailSnapshot()
+	if err != nil {
+		currentSettingsLogger().Warn("failed to refresh logs", "operation", "notifyWebSettingsLogsUpdated", "error", err)
+		return
+	}
+	publishLogsUpdated(snapshot)
 }
 
 func downloadWebSettingsModel(ctx context.Context, modelSize string) error {
@@ -832,6 +926,7 @@ func OpenPreferences() {
 			return
 		} else {
 			startPermissionPolling(prefsCtx, false)
+			notifyWebSettingsLogsUpdated()
 			return
 		}
 	}
@@ -951,6 +1046,7 @@ func openPreferencesWait(cfg config.Config, cfgPath string) {
 	}
 
 	currentSettingsLogger().Info("config saved", "operation", "openPreferencesWait")
+	notifyWebSettingsLogsUpdated()
 	signalHotkeyRestart()
 }
 

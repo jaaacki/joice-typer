@@ -322,3 +322,69 @@ func TestDeleteWebSettingsModel_RejectsActiveModel(t *testing.T) {
 		t.Fatalf("removeCalls = %d, want 0", removeCalls)
 	}
 }
+
+func TestLoadWebSettingsLogTailSnapshot_MissingFileIsEmptySafe(t *testing.T) {
+	originalLogPath := webSettingsLogPath
+	defer func() {
+		webSettingsLogPath = originalLogPath
+	}()
+
+	webSettingsLogPath = func() (string, error) {
+		return filepath.Join(t.TempDir(), "missing.log"), nil
+	}
+
+	tail, err := loadWebSettingsLogTailSnapshot()
+	if err != nil {
+		t.Fatalf("loadWebSettingsLogTailSnapshot returned error: %v", err)
+	}
+	if tail.Text != "" || tail.Truncated || tail.ByteSize != 0 || tail.UpdatedAt != "" {
+		t.Fatalf("tail = %#v, want zero-value snapshot for missing file", tail)
+	}
+
+	full, err := loadWebSettingsLogFullText()
+	if err != nil {
+		t.Fatalf("loadWebSettingsLogFullText returned error: %v", err)
+	}
+	if full != "" {
+		t.Fatalf("full = %q, want empty string for missing file", full)
+	}
+}
+
+func TestLoadWebSettingsLogTailSnapshot_UnreadableFileReturnsContractError(t *testing.T) {
+	originalLogPath := webSettingsLogPath
+	defer func() {
+		webSettingsLogPath = originalLogPath
+	}()
+
+	dir := t.TempDir()
+	webSettingsLogPath = func() (string, error) {
+		return dir, nil
+	}
+
+	tail, err := loadWebSettingsLogTailSnapshot()
+	if err == nil {
+		t.Fatalf("expected unreadable log path to fail, got tail %#v", tail)
+	}
+	if contractErr, ok := bridgepkg.AsContractError(err); !ok || contractErr.Code != bridgepkg.ErrorCodeLogsUnavailable {
+		t.Fatalf("error = %#v, want contract code %q", err, bridgepkg.ErrorCodeLogsUnavailable)
+	}
+
+	full, err := loadWebSettingsLogFullText()
+	if err == nil {
+		t.Fatalf("expected unreadable log path to fail, got full %q", full)
+	}
+	if contractErr, ok := bridgepkg.AsContractError(err); !ok || contractErr.Code != bridgepkg.ErrorCodeLogsUnavailable {
+		t.Fatalf("error = %#v, want contract code %q", err, bridgepkg.ErrorCodeLogsUnavailable)
+	}
+}
+
+func TestSettingsSource_PublishesLogsUpdatedFromPreferencesRuntime(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join(".", "settings.go"))
+	if err != nil {
+		t.Fatalf("read settings.go: %v", err)
+	}
+	source := string(data)
+	if !strings.Contains(source, "notifyWebSettingsLogsUpdated()") {
+		t.Fatal("expected settings.go to call notifyWebSettingsLogsUpdated() from preferences runtime plumbing")
+	}
+}

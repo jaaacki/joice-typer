@@ -59,6 +59,92 @@ func TestBuildSettingsBridgeService_UsesTrackedRuntimeState(t *testing.T) {
 	}
 }
 
+func TestBuildSettingsBridgeService_UsesSharedLogHandlers(t *testing.T) {
+	originalLogPath := webSettingsLogPath
+	defer func() {
+		webSettingsLogPath = originalLogPath
+	}()
+
+	dir := t.TempDir()
+	logPath := filepath.Join(dir, "voicetype.log")
+	if err := os.WriteFile(logPath, []byte("line 001\nline 002\nline 003\n"), 0644); err != nil {
+		t.Fatalf("write log file: %v", err)
+	}
+
+	webSettingsLogPath = func() (string, error) {
+		return logPath, nil
+	}
+
+	service := buildSettingsBridgeService(configpkg.Config{})
+
+	tail, err := service.LogsGet(context.Background())
+	if err != nil {
+		t.Fatalf("LogsGet returned error: %v", err)
+	}
+	if tail.Text != "line 001\nline 002\nline 003\n" {
+		t.Fatalf("LogsGet.Text = %q, want full tail text", tail.Text)
+	}
+	if tail.Truncated {
+		t.Fatal("expected untruncated tail for a short log file")
+	}
+	if tail.ByteSize != int64(len("line 001\nline 002\nline 003\n")) {
+		t.Fatalf("LogsGet.ByteSize = %d, want %d", tail.ByteSize, len("line 001\nline 002\nline 003\n"))
+	}
+	if tail.UpdatedAt == "" {
+		t.Fatal("expected LogsGet.UpdatedAt to be populated")
+	}
+
+	full, err := service.LogsCopyAll(context.Background())
+	if err != nil {
+		t.Fatalf("LogsCopyAll returned error: %v", err)
+	}
+	if full != "line 001\nline 002\nline 003\n" {
+		t.Fatalf("LogsCopyAll = %q, want full log text", full)
+	}
+}
+
+func TestNotifyWebSettingsLogsUpdated_DispatchesBridgeEvent(t *testing.T) {
+	originalLogPath := webSettingsLogPath
+	originalDispatch := webSettingsDispatchEnvelope
+	defer func() {
+		webSettingsLogPath = originalLogPath
+		webSettingsDispatchEnvelope = originalDispatch
+	}()
+
+	dir := t.TempDir()
+	logPath := filepath.Join(dir, "voicetype.log")
+	if err := os.WriteFile(logPath, []byte("line 001\nline 002\n"), 0644); err != nil {
+		t.Fatalf("write log file: %v", err)
+	}
+
+	var payload string
+	webSettingsLogPath = func() (string, error) {
+		return logPath, nil
+	}
+	webSettingsDispatchEnvelope = func(s string, _ bool) {
+		payload = s
+	}
+
+	notifyWebSettingsLogsUpdated()
+
+	for _, snippet := range []string{
+		`"kind":"event"`,
+		`"event":"logs.updated"`,
+		`"text":"line 001\nline 002\n"`,
+		`"truncated":false`,
+	} {
+		if !strings.Contains(payload, snippet) {
+			t.Fatalf("expected logs.updated payload to contain %q, got %q", snippet, payload)
+		}
+	}
+	if !strings.Contains(payload, `"byteSize":18`) {
+		t.Fatalf("expected logs.updated payload to contain byteSize, got %q", payload)
+	}
+	if !strings.Contains(payload, `"updatedAt":"`) {
+		t.Fatalf("expected logs.updated payload to contain updatedAt, got %q", payload)
+	}
+}
+
 func TestShouldUseWebSettings_DefaultsToWebAndAllowsFallbackEnv(t *testing.T) {
 	t.Setenv("JOICETYPER_USE_WEB_SETTINGS", "")
 	t.Setenv("JOICETYPER_USE_NATIVE_PREFERENCES", "")
