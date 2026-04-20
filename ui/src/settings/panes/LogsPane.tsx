@@ -40,9 +40,13 @@ function describeError(error: unknown, fallback: string): string {
 }
 
 async function copyTextToClipboard(text: string) {
-  if (navigator.clipboard?.writeText) {
-    await navigator.clipboard.writeText(text);
-    return;
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+      return;
+    }
+  } catch {
+    // Fall through to the legacy clipboard path below.
   }
 
   const buffer = document.createElement("textarea");
@@ -73,21 +77,23 @@ export default function LogsPane({ fetchLogs, copyFullLog, subscribeLogsUpdated 
 
   useEffect(() => {
     let cancelled = false;
+    let refreshSequence = 0;
 
     const refreshLogs = async () => {
+      const sequence = ++refreshSequence;
       try {
         const nextTail = await fetchLogs();
-        if (cancelled) {
+        if (cancelled || sequence !== refreshSequence) {
           return;
         }
         setTail(nextTail);
         setStatus("");
       } catch (error) {
-        if (!cancelled) {
+        if (!cancelled && sequence === refreshSequence) {
           setStatus(describeError(error, "Failed to load logs"));
         }
       } finally {
-        if (!cancelled) {
+        if (!cancelled && sequence === refreshSequence) {
           setLoading(false);
         }
       }

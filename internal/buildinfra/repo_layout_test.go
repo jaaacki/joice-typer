@@ -199,16 +199,6 @@ func TestSettingsScreenSource_UsesSharedLogsPaneBridge(t *testing.T) {
 			t.Fatalf("expected LogsPane.tsx to contain %q", required)
 		}
 	}
-	for _, forbidden := range []string{
-		`webkit?.messageHandlers`,
-		`postMessage(`,
-		`window.webkit`,
-		`joicetyper-bridge-message`,
-	} {
-		if strings.Contains(source, forbidden) {
-			t.Fatalf("expected LogsPane.tsx not to contain %q; bridge boundary violation", forbidden)
-		}
-	}
 
 	bridgeSource, err := os.ReadFile(filepath.Join(root, "ui", "src", "bridge", "client.ts"))
 	if err != nil {
@@ -225,6 +215,18 @@ func TestSettingsScreenSource_UsesSharedLogsPaneBridge(t *testing.T) {
 	} {
 		if !strings.Contains(bridge, required) {
 			t.Fatalf("expected bridge/client.ts to contain %q", required)
+		}
+	}
+
+	settingsSource := readSettingsSourceTree(t)
+	for _, forbidden := range []string{
+		`webkit?.messageHandlers`,
+		`postMessage(`,
+		`window.webkit`,
+		`joicetyper-bridge-message`,
+	} {
+		if strings.Contains(settingsSource, forbidden) {
+			t.Fatalf("expected settings sources not to contain %q; bridge boundary violation", forbidden)
 		}
 	}
 }
