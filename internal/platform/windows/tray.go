@@ -16,8 +16,13 @@ import (
 const (
 	wmAppTrayCallback = 0x8002
 	wmCommand         = 0x0111
+	wmPowerBroadcast  = 0x0218
 	wmLButtonUp       = 0x0202
 	wmRButtonUp       = 0x0205
+
+	pbtAPMSuspend         = 0x0004
+	pbtAPMResumeSuspend   = 0x0007
+	pbtAPMResumeAutomatic = 0x0012
 
 	nimAdd    = 0x00000000
 	nimModify = 0x00000001
@@ -268,6 +273,14 @@ func windowsTrayWndProc(hwnd uintptr, msg uint32, wParam, lParam uintptr) uintpt
 			showWindowsTrayMenu(hwnd)
 		}
 		return 0
+	case wmPowerBroadcast:
+		switch uint32(wParam) {
+		case pbtAPMSuspend:
+			dispatchPowerEvent(PowerEventSleep)
+		case pbtAPMResumeSuspend, pbtAPMResumeAutomatic:
+			dispatchPowerEvent(PowerEventWake)
+		}
+		return 1
 	case wmDestroy:
 		if sharedWindowsTrayHost.hwnd != 0 {
 			data := sharedWindowsTrayHost.notifyIconData()

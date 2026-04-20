@@ -380,11 +380,36 @@ func TestWindowsTraySource_UsesShellNotifyIconAndMenuActions(t *testing.T) {
 		`go OpenPreferences()`,
 		`go os.Exit(0)`,
 		`publishRuntimeStateChanged(state)`,
+		`wmPowerBroadcast`,
+		`dispatchPowerEvent(PowerEventWake)`,
 		`SetStatusBarHotkeyText`,
 	} {
 		if !strings.Contains(source, required) {
 			t.Fatalf("expected windows/tray.go to contain %q", required)
 		}
+	}
+}
+
+func TestWindowsPowerSource_RefreshesDevicesAfterWake(t *testing.T) {
+	root := repoRoot(t)
+	data, err := os.ReadFile(filepath.Join(root, "internal", "platform", "windows", "power.go"))
+	if err != nil {
+		t.Fatalf("read windows/power.go: %v", err)
+	}
+	source := string(data)
+	for _, required := range []string{
+		`rec.MarkStale("system_sleep")`,
+		`rec.RefreshDevices()`,
+		`publishDevicesChanged(devices)`,
+		`UpdateStatusBar(StateReady)`,
+		`dispatchPowerEvent(event PowerEvent)`,
+	} {
+		if !strings.Contains(source, required) {
+			t.Fatalf("expected windows/power.go to contain %q", required)
+		}
+	}
+	if strings.Contains(source, `handler := powerHandler`) && strings.Contains(source, `handler(event)`) && !strings.Contains(source, `dispatchPowerEvent`) {
+		t.Fatalf("unexpected direct recursive power handler pattern in windows/power.go")
 	}
 }
 
