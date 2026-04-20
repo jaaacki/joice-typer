@@ -1,6 +1,7 @@
 package bridge
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -320,6 +321,15 @@ func TestRouterHandleRequest_QueryMethods(t *testing.T) {
 				payload, ok := response.Result.(LogTailSnapshot)
 				if !ok {
 					t.Fatalf("Result = %#v, want LogTailSnapshot", response.Result)
+				}
+				raw, err := json.Marshal(payload)
+				if err != nil {
+					t.Fatalf("Marshal logs payload: %v", err)
+				}
+				for _, want := range []string{`"text":"line 499\nline 500\n"`, `"truncated":true`, `"byteSize":1234`, `"updatedAt":"2026-04-20T03:04:05Z"`} {
+					if !bytes.Contains(raw, []byte(want)) {
+						t.Fatalf("serialized payload = %s, want field %s", raw, want)
+					}
 				}
 				if !payload.Truncated || payload.ByteSize != 1234 || payload.UpdatedAt != "2026-04-20T03:04:05Z" {
 					t.Fatalf("payload = %#v, want tail metadata", payload)
