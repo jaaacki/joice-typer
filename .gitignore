@@ -10,6 +10,9 @@ build/
 
 # whisper.cpp build directory
 third_party/whisper.cpp/build/
+third_party/portaudio-windows-src/
+third_party/portaudio-windows-install/
+third_party/portaudio-windows-static-install/
 
 # Model files
 *.bin
@@ -20,6 +23,7 @@ JoiceTyper.app/
 
 # Installer
 *.dmg
+*.zip
 dmg-staging/
 
 # IDE

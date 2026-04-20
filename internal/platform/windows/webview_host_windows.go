@@ -299,6 +299,7 @@ func (h *windowsWebView2Host) show(html string) error {
 	h.chromium.NavigateToString(html)
 	procShowWindow.Call(h.hwnd, swShow)
 	procUpdateWindow.Call(h.hwnd)
+	h.chromium.Resize()
 	procSetForegroundWindow.Call(h.hwnd)
 	procSetFocus.Call(h.hwnd)
 	h.visible = true
@@ -384,6 +385,7 @@ func (h *windowsWebView2Host) ensureWindow() error {
 		)
 	}
 	chromium.Init(webView2DocumentCreatedScript())
+	chromium.Resize()
 
 	h.hwnd = hwnd
 	h.chromium = chromium

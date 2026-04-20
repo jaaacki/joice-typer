@@ -143,6 +143,12 @@ func TestMakeWindowsBuildRunsFrontendBuild(t *testing.T) {
 	if !strings.Contains(text, "cd ui && npm run build") {
 		t.Fatalf("expected windows build to include frontend build\noutput:\n%s", text)
 	}
+	if !strings.Contains(text, "-H=windowsgui") {
+		t.Fatalf("expected windows build to use the Windows GUI subsystem\noutput:\n%s", text)
+	}
+	if !strings.Contains(text, "--subsystem,windows") {
+		t.Fatalf("expected windows build to force the Windows GUI subsystem at external link time\noutput:\n%s", text)
+	}
 }
 
 func TestMakePackageWindowsUsesInstallerScript(t *testing.T) {
@@ -159,8 +165,17 @@ func TestMakePackageWindowsUsesInstallerScript(t *testing.T) {
 	if !strings.Contains(text, "packaging/windows/joicetyper.iss") {
 		t.Fatalf("expected windows packaging to use packaging/windows/joicetyper.iss\noutput:\n%s", text)
 	}
-	if !strings.Contains(text, "CGO_ENABLED=1 go build") || !strings.Contains(text, "windows-runtime-stage-check") {
+	if !strings.Contains(text, "CGO_ENABLED=1") || !strings.Contains(text, "go build -ldflags") || !strings.Contains(text, "windows-runtime-stage-check") {
 		t.Fatalf("expected windows packaging to use the runtime windows build path\noutput:\n%s", text)
+	}
+	if !strings.Contains(text, "PKG_CONFIG_LIBDIR=") || !strings.Contains(text, "portaudio-windows-static-install/lib/pkgconfig/portaudio-2.0.pc") {
+		t.Fatalf("expected windows packaging to build against static Windows PortAudio metadata\noutput:\n%s", text)
+	}
+	if !strings.Contains(text, "-H=windowsgui") {
+		t.Fatalf("expected windows packaging to use the Windows GUI subsystem\noutput:\n%s", text)
+	}
+	if !strings.Contains(text, "--subsystem,windows") {
+		t.Fatalf("expected windows packaging to force the Windows GUI subsystem at external link time\noutput:\n%s", text)
 	}
 	if !strings.Contains(text, "/DAppVersion=") {
 		t.Fatalf("expected windows packaging to pass version into installer\noutput:\n%s", text)

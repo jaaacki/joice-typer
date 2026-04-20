@@ -517,13 +517,22 @@ func TestWindowsTranscriptionSource_UsesDedicatedWindowsCGOPath(t *testing.T) {
 		"build-windows-runtime-amd64:",
 		"package-windows-runtime:",
 		"CGO_ENABLED=1",
+		"WINDOWS_GO_LDFLAGS :=",
+		"-H=windowsgui",
+		"--subsystem,windows",
 		"WINDOWS_CC ?=",
 		"WINDOWS_CXX ?=",
+		"WINDOWS_PORTAUDIO_STATIC_LIB :=",
+		"WINDOWS_PORTAUDIO_PC :=",
 		"CC=$(WINDOWS_CC)",
 		"CXX=$(WINDOWS_CXX)",
+		"PKG_CONFIG_LIBDIR=",
 		"WINDOWS_RUNTIME_IMPORT_DIR :=",
+		"windows-portaudio-static:",
 		"windows-runtime-prereqs:",
 		"windows-runtime-stage-check:",
+		"fatal: missing static PortAudio library",
+		"fatal: missing Windows PortAudio pkg-config file",
 		"fatal: missing Windows runtime payload",
 		"fatal: missing staged Windows runtime artifact",
 	} {
@@ -581,12 +590,20 @@ func TestDarwinSettingsSource_UsesSharedAudioDeviceSnapshots(t *testing.T) {
 		t.Fatalf("expected darwin/settings.go to use shared core audio device snapshots")
 	}
 
-	recorderData, err := os.ReadFile(filepath.Join(root, "internal", "core", "audio", "recorder.go"))
-	if err != nil {
-		t.Fatalf("read core/audio/recorder.go: %v", err)
+	foundListHelper := false
+	for _, rel := range []string{
+		filepath.Join("internal", "core", "audio", "audio_devices_darwin.go"),
+		filepath.Join("internal", "core", "audio", "audio_devices_windows.go"),
+		filepath.Join("internal", "core", "audio", "recorder.go"),
+	} {
+		data, err := os.ReadFile(filepath.Join(root, rel))
+		if err == nil && strings.Contains(string(data), `func ListInputDeviceSnapshots() ([]bridgepkg.DeviceSnapshot, error) {`) {
+			foundListHelper = true
+			break
+		}
 	}
-	if !strings.Contains(string(recorderData), `func ListInputDeviceSnapshots() ([]bridgepkg.DeviceSnapshot, error) {`) {
-		t.Fatalf("expected core/audio/recorder.go to define ListInputDeviceSnapshots")
+	if !foundListHelper {
+		t.Fatalf("expected core/audio to define ListInputDeviceSnapshots")
 	}
 }
 
@@ -608,6 +625,8 @@ func TestWindowsWebviewTransportSource_LogsNativeFailures(t *testing.T) {
 		`Software\Microsoft\EdgeUpdate\Clients\`,
 		`window.dispatchEvent(new CustomEvent("`,
 		`function dispatchBridgePayload(payload)`,
+		`h.chromium.Resize()`,
+		`chromium.Resize()`,
 	} {
 		if !strings.Contains(source, required) {
 			t.Fatalf("expected webview_host_windows.go to contain %q", required)

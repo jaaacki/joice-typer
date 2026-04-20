@@ -1,4 +1,4 @@
-.PHONY: all setup build clean download-model whisper test app dmg release-check build-windows-amd64 build-windows-runtime-amd64 package-windows package-windows-runtime frontend-build bridge-contract bridge-contract-check windows-runtime-prereqs windows-runtime-stage-check
+.PHONY: all setup build clean download-model whisper test app dmg release-check build-windows-amd64 build-windows-runtime-amd64 package-windows package-windows-runtime frontend-build bridge-contract bridge-contract-check windows-runtime-prereqs windows-runtime-stage-check windows-portaudio-static
 
 WHISPER_DIR := third_party/whisper.cpp
 WHISPER_BUILD := $(WHISPER_DIR)/build
@@ -6,6 +6,7 @@ CURL ?= curl
 VERSION_FILE := VERSION
 VERSION := $(shell tr -d '[:space:]' < $(VERSION_FILE))
 GO_LDFLAGS := -X 'voicetype/internal/core/version.Version=$(VERSION)'
+WINDOWS_GO_LDFLAGS := $(GO_LDFLAGS) -H=windowsgui -extldflags=-Wl,--subsystem,windows
 HOST_GOOS ?= $(shell go env GOOS)
 HOST_GOARCH ?= $(shell go env GOARCH)
 ifeq ($(HOST_GOOS),darwin)
@@ -28,11 +29,16 @@ WINDOWS_RUNTIME_IMPORT_DIR := $(WHISPER_DIR)/build/src/Release
 WINDOWS_RUNTIME_DLLS := whisper.dll ggml.dll ggml-base.dll ggml-cpu.dll
 WINDOWS_CC ?= x86_64-w64-mingw32-gcc
 WINDOWS_CXX ?= x86_64-w64-mingw32-g++
-WINDOWS_PORTAUDIO_DLL ?= $(shell find "$(CURDIR)/third_party/portaudio-windows-src/lib/.libs" -name 'libportaudio-2.dll' -print -quit 2>/dev/null)
+WINDOWS_PORTAUDIO_SRC_DIR := third_party/portaudio-windows-src
+WINDOWS_PORTAUDIO_BUILD_DIR := $(WINDOWS_PORTAUDIO_SRC_DIR)/build-windows-static
+WINDOWS_PORTAUDIO_INSTALL_DIR := third_party/portaudio-windows-static-install
+WINDOWS_PORTAUDIO_STATIC_LIB := $(WINDOWS_PORTAUDIO_INSTALL_DIR)/lib/libportaudio.a
+WINDOWS_PORTAUDIO_PKGCONFIG_DIR := $(WINDOWS_PORTAUDIO_INSTALL_DIR)/lib/pkgconfig
+WINDOWS_PORTAUDIO_PC := $(WINDOWS_PORTAUDIO_PKGCONFIG_DIR)/portaudio-2.0.pc
 WINDOWS_LIBGCC_DLL ?= $(shell $(WINDOWS_CC) -print-file-name=libgcc_s_seh-1.dll)
 WINDOWS_LIBSTDCXX_DLL ?= $(shell $(WINDOWS_CXX) -print-file-name=libstdc++-6.dll)
 WINDOWS_WINPTHREAD_DLL ?= $(shell find "$(dir $(WINDOWS_LIBGCC_DLL))/.." -name 'libwinpthread-1.dll' -print -quit 2>/dev/null)
-WINDOWS_EXTRA_RUNTIME_DLLS := libwhisper.dll libportaudio-2.dll libgcc_s_seh-1.dll libstdc++-6.dll
+WINDOWS_EXTRA_RUNTIME_DLLS := libwhisper.dll libgcc_s_seh-1.dll libstdc++-6.dll
 WINDOWS_RUNTIME_STAGE_FILES := joicetyper.exe $(WINDOWS_RUNTIME_DLLS) $(WINDOWS_EXTRA_RUNTIME_DLLS)
 WINDOWS_INSTALLER_SCRIPT := packaging/windows/joicetyper.iss
 WINDOWS_INSTALLER_NAME := JoiceTyper-$(VERSION)-setup.exe
@@ -145,14 +151,52 @@ release-check:
 
 build-windows-amd64: bridge-contract frontend-build
 	mkdir -p $(WINDOWS_BUILD_DIR)
-	GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -ldflags "$(GO_LDFLAGS)" -o $(WINDOWS_BIN_PATH) ./cmd/joicetyper
+	GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -ldflags "$(WINDOWS_GO_LDFLAGS)" -o $(WINDOWS_BIN_PATH) ./cmd/joicetyper
 
-windows-runtime-prereqs:
+windows-portaudio-static:
+	@test -d "$(WINDOWS_PORTAUDIO_SRC_DIR)" || (echo "fatal: missing Windows PortAudio source directory $(WINDOWS_PORTAUDIO_SRC_DIR)" && exit 1)
+	cmake -S "$(WINDOWS_PORTAUDIO_SRC_DIR)" -B "$(WINDOWS_PORTAUDIO_BUILD_DIR)" \
+		-DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
+		-DCMAKE_SYSTEM_NAME=Windows \
+		-DCMAKE_C_COMPILER="$(WINDOWS_CC)" \
+		-DCMAKE_CXX_COMPILER="$(WINDOWS_CXX)" \
+		-DCMAKE_INSTALL_PREFIX="$(CURDIR)/$(WINDOWS_PORTAUDIO_INSTALL_DIR)" \
+		-DPA_BUILD_SHARED=OFF \
+		-DPA_BUILD_STATIC=ON \
+		-DPA_BUILD_TESTS=OFF \
+		-DPA_BUILD_EXAMPLES=OFF \
+		-DPA_BUILD_DOCS=OFF \
+		-DPA_USE_WMME=ON \
+		-DPA_USE_WASAPI=OFF \
+		-DPA_USE_DS=OFF \
+		-DPA_USE_WDMKS=OFF \
+		-DCMAKE_BUILD_TYPE=Release
+	cmake --build "$(WINDOWS_PORTAUDIO_BUILD_DIR)" -j$$(sysctl -n hw.ncpu)
+	cmake --install "$(WINDOWS_PORTAUDIO_BUILD_DIR)"
+	@mkdir -p "$(WINDOWS_PORTAUDIO_PKGCONFIG_DIR)"
+	@printf '%s\n' \
+		'prefix=$(CURDIR)/$(WINDOWS_PORTAUDIO_INSTALL_DIR)' \
+		'exec_prefix=$${prefix}' \
+		'libdir=$${prefix}/lib' \
+		'includedir=$${prefix}/include' \
+		'' \
+		'Name: PortAudio' \
+		'Description: Portable audio I/O' \
+		'Requires:' \
+		'Version: 19' \
+		'' \
+		'Libs: -L$${libdir} -lportaudio -lwinmm -lole32 -luuid' \
+		'Cflags: -I$${includedir}' > "$(WINDOWS_PORTAUDIO_PC)"
+	@test -f "$(WINDOWS_PORTAUDIO_STATIC_LIB)" || (echo "fatal: missing static PortAudio library $(WINDOWS_PORTAUDIO_STATIC_LIB)" && exit 1)
+	@test -f "$(WINDOWS_PORTAUDIO_PC)" || (echo "fatal: missing Windows PortAudio pkg-config file $(WINDOWS_PORTAUDIO_PC)" && exit 1)
+
+windows-runtime-prereqs: windows-portaudio-static
 	@command -v $(WINDOWS_CC) >/dev/null 2>&1 || (echo "fatal: missing Windows C compiler $(WINDOWS_CC)" && exit 1)
 	@command -v $(WINDOWS_CXX) >/dev/null 2>&1 || (echo "fatal: missing Windows C++ compiler $(WINDOWS_CXX)" && exit 1)
 	@test -d "$(WINDOWS_RUNTIME_DIR)" || (echo "fatal: missing Windows runtime directory $(WINDOWS_RUNTIME_DIR)" && exit 1)
 	@test -d "$(WINDOWS_RUNTIME_IMPORT_DIR)" || (echo "fatal: missing Windows import library directory $(WINDOWS_RUNTIME_IMPORT_DIR)" && exit 1)
-	@test -f "$(WINDOWS_PORTAUDIO_DLL)" || (echo "fatal: missing Windows PortAudio runtime $(WINDOWS_PORTAUDIO_DLL)" && exit 1)
+	@test -f "$(WINDOWS_PORTAUDIO_STATIC_LIB)" || (echo "fatal: missing static PortAudio library $(WINDOWS_PORTAUDIO_STATIC_LIB)" && exit 1)
+	@test -f "$(WINDOWS_PORTAUDIO_PC)" || (echo "fatal: missing Windows PortAudio pkg-config file $(WINDOWS_PORTAUDIO_PC)" && exit 1)
 	@test -f "$(WINDOWS_LIBGCC_DLL)" || (echo "fatal: missing MinGW runtime $(WINDOWS_LIBGCC_DLL)" && exit 1)
 	@test -f "$(WINDOWS_LIBSTDCXX_DLL)" || (echo "fatal: missing MinGW runtime $(WINDOWS_LIBSTDCXX_DLL)" && exit 1)
 	@for dll in $(WINDOWS_RUNTIME_DLLS); do \
@@ -166,12 +210,15 @@ windows-runtime-stage-check:
 
 build-windows-runtime-amd64: bridge-contract frontend-build windows-runtime-prereqs
 	mkdir -p $(WINDOWS_BUILD_DIR)
-	CC=$(WINDOWS_CC) CXX=$(WINDOWS_CXX) GOOS=windows GOARCH=amd64 CGO_ENABLED=1 go build -ldflags "$(GO_LDFLAGS)" -o $(WINDOWS_BIN_PATH) ./cmd/joicetyper
+	rm -f "$(WINDOWS_BUILD_DIR)/libportaudio-2.dll"
+	go clean -cache
+	PKG_CONFIG_PATH= PKG_CONFIG_LIBDIR="$(CURDIR)/$(WINDOWS_PORTAUDIO_PKGCONFIG_DIR)" \
+		CC=$(WINDOWS_CC) CXX=$(WINDOWS_CXX) GOOS=windows GOARCH=amd64 CGO_ENABLED=1 \
+		go build -ldflags "$(WINDOWS_GO_LDFLAGS)" -o $(WINDOWS_BIN_PATH) ./cmd/joicetyper
 	@for dll in $(WINDOWS_RUNTIME_DLLS); do \
 		cp "$(WINDOWS_RUNTIME_DIR)/$$dll" "$(WINDOWS_BUILD_DIR)/$$dll"; \
 	done
 	cp "$(WINDOWS_RUNTIME_DIR)/whisper.dll" "$(WINDOWS_BUILD_DIR)/libwhisper.dll"
-	cp "$(WINDOWS_PORTAUDIO_DLL)" "$(WINDOWS_BUILD_DIR)/libportaudio-2.dll"
 	cp "$(WINDOWS_LIBGCC_DLL)" "$(WINDOWS_BUILD_DIR)/libgcc_s_seh-1.dll"
 	cp "$(WINDOWS_LIBSTDCXX_DLL)" "$(WINDOWS_BUILD_DIR)/libstdc++-6.dll"
 	@if [ -n "$(WINDOWS_WINPTHREAD_DLL)" ] && [ -f "$(WINDOWS_WINPTHREAD_DLL)" ]; then \
