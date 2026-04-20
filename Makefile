@@ -1,4 +1,4 @@
-.PHONY: all setup build clean download-model whisper test app dmg release-check build-windows-amd64 package-windows frontend-build bridge-contract bridge-contract-check
+.PHONY: all setup build clean download-model whisper test app dmg release-check build-windows-amd64 build-windows-runtime-amd64 package-windows package-windows-runtime frontend-build bridge-contract bridge-contract-check windows-runtime-prereqs windows-runtime-stage-check
 
 WHISPER_DIR := third_party/whisper.cpp
 WHISPER_BUILD := $(WHISPER_DIR)/build
@@ -23,6 +23,12 @@ BUILD_DIR := build/$(HOST_GOOS)-$(HOST_GOARCH)
 BIN_PATH := $(BUILD_DIR)/voicetype
 WINDOWS_BUILD_DIR := build/windows-amd64
 WINDOWS_BIN_PATH := $(WINDOWS_BUILD_DIR)/joicetyper.exe
+WINDOWS_RUNTIME_DIR := $(WHISPER_DIR)/build/bin/Release
+WINDOWS_RUNTIME_IMPORT_DIR := $(WHISPER_DIR)/build/src/Release
+WINDOWS_RUNTIME_DLLS := whisper.dll ggml.dll ggml-base.dll ggml-cpu.dll
+WINDOWS_RUNTIME_STAGE_FILES := joicetyper.exe $(WINDOWS_RUNTIME_DLLS)
+WINDOWS_CC ?= x86_64-w64-mingw32-gcc
+WINDOWS_CXX ?= x86_64-w64-mingw32-g++
 WINDOWS_INSTALLER_SCRIPT := packaging/windows/joicetyper.iss
 WINDOWS_INSTALLER_NAME := JoiceTyper-$(VERSION)-setup.exe
 WINDOWS_INSTALLER_PATH := $(WINDOWS_BUILD_DIR)/$(WINDOWS_INSTALLER_NAME)
@@ -135,7 +141,38 @@ release-check:
 build-windows-amd64: bridge-contract frontend-build
 	mkdir -p $(WINDOWS_BUILD_DIR)
 	GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -ldflags "$(GO_LDFLAGS)" -o $(WINDOWS_BIN_PATH) ./cmd/joicetyper
+	@for dll in $(WINDOWS_RUNTIME_DLLS); do \
+		if [ -f "$(WINDOWS_RUNTIME_DIR)/$$dll" ]; then \
+			cp "$(WINDOWS_RUNTIME_DIR)/$$dll" "$(WINDOWS_BUILD_DIR)/$$dll"; \
+		fi; \
+	done
+
+windows-runtime-prereqs:
+	@command -v $(WINDOWS_CC) >/dev/null 2>&1 || (echo "fatal: missing Windows C compiler $(WINDOWS_CC)" && exit 1)
+	@command -v $(WINDOWS_CXX) >/dev/null 2>&1 || (echo "fatal: missing Windows C++ compiler $(WINDOWS_CXX)" && exit 1)
+	@test -d "$(WINDOWS_RUNTIME_DIR)" || (echo "fatal: missing Windows runtime directory $(WINDOWS_RUNTIME_DIR)" && exit 1)
+	@test -d "$(WINDOWS_RUNTIME_IMPORT_DIR)" || (echo "fatal: missing Windows import library directory $(WINDOWS_RUNTIME_IMPORT_DIR)" && exit 1)
+	@for dll in $(WINDOWS_RUNTIME_DLLS); do \
+		test -f "$(WINDOWS_RUNTIME_DIR)/$$dll" || (echo "fatal: missing Windows runtime payload $(WINDOWS_RUNTIME_DIR)/$$dll" && exit 1); \
+	done
+
+windows-runtime-stage-check:
+	@for artifact in $(WINDOWS_RUNTIME_STAGE_FILES); do \
+		test -f "$(WINDOWS_BUILD_DIR)/$$artifact" || (echo "fatal: missing staged Windows runtime artifact $(WINDOWS_BUILD_DIR)/$$artifact" && exit 1); \
+	done
+
+build-windows-runtime-amd64: bridge-contract frontend-build windows-runtime-prereqs
+	mkdir -p $(WINDOWS_BUILD_DIR)
+	CC=$(WINDOWS_CC) CXX=$(WINDOWS_CXX) GOOS=windows GOARCH=amd64 CGO_ENABLED=1 go build -ldflags "$(GO_LDFLAGS)" -o $(WINDOWS_BIN_PATH) ./cmd/joicetyper
+	@for dll in $(WINDOWS_RUNTIME_DLLS); do \
+		cp "$(WINDOWS_RUNTIME_DIR)/$$dll" "$(WINDOWS_BUILD_DIR)/$$dll"; \
+	done
+	@$(MAKE) windows-runtime-stage-check
 
 package-windows: build-windows-amd64
+	@test -f "$(WINDOWS_INSTALLER_SCRIPT)" || (echo "fatal: missing $(WINDOWS_INSTALLER_SCRIPT)" && exit 1)
+	$(ISCC) /DAppVersion=$(VERSION) /DRepoRoot="$(CURDIR)" /DOutputDir="$(CURDIR)/$(WINDOWS_BUILD_DIR)" "$(WINDOWS_INSTALLER_SCRIPT)"
+
+package-windows-runtime: build-windows-runtime-amd64 windows-runtime-stage-check
 	@test -f "$(WINDOWS_INSTALLER_SCRIPT)" || (echo "fatal: missing $(WINDOWS_INSTALLER_SCRIPT)" && exit 1)
 	$(ISCC) /DAppVersion=$(VERSION) /DRepoRoot="$(CURDIR)" /DOutputDir="$(CURDIR)/$(WINDOWS_BUILD_DIR)" "$(WINDOWS_INSTALLER_SCRIPT)"

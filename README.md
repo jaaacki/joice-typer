@@ -45,7 +45,7 @@ make app
 open JoiceTyper.app
 ```
 
-Windows bootstrap build:
+Windows portable shell build:
 
 ```bash
 make build-windows-amd64
@@ -57,9 +57,18 @@ Windows installer packaging:
 make package-windows
 ```
 
+Windows runtime build:
+
+```bash
+make build-windows-runtime-amd64
+make package-windows-runtime
+```
+
 This produces a Windows build at `build/windows-amd64/joicetyper.exe` and, when `iscc` (Inno Setup) is available, packages it with `packaging/windows/joicetyper.iss`.
 
-The Windows desktop runtime is under active adapter work. The shared web Preferences shell and bridge host are in place, but full runtime parity is still in progress.
+`build-windows-amd64` is the non-CGO Windows shell build.
+`build-windows-runtime-amd64` is the native Windows runtime build path for whisper-backed transcription and recorder support, and requires a Windows CGO toolchain plus staged whisper/ggml runtime artifacts.
+Missing runtime DLLs or the Windows CGO toolchain now fail that target immediately instead of producing a partial package.
 
 Frontend-only rebuild:
 

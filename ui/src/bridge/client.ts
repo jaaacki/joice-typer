@@ -74,7 +74,18 @@ export type SettingsOptionsSnapshot = {
   languages: OptionSnapshot[];
   decodeModes: OptionSnapshot[];
   punctuationModes: OptionSnapshot[];
+  permissions: PermissionOptionsSnapshot;
   hotkey: HotkeyOptionsSnapshot;
+};
+
+export type PermissionOptionsSnapshot = {
+  accessibility: PermissionRequirementSnapshot;
+  inputMonitoring: PermissionRequirementSnapshot;
+};
+
+export type PermissionRequirementSnapshot = {
+  required: boolean;
+  actionable: boolean;
 };
 
 export type HotkeyOptionsSnapshot = {

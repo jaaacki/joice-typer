@@ -4,16 +4,21 @@ package windows
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"math"
 	"os"
 	"path/filepath"
 	"time"
+	"unsafe"
 
+	audiopkg "voicetype/internal/core/audio"
 	bridgepkg "voicetype/internal/core/bridge"
 	configpkg "voicetype/internal/core/config"
 	loggingpkg "voicetype/internal/core/logging"
 	transcriptionpkg "voicetype/internal/core/transcription"
+
+	"golang.org/x/sys/windows"
 )
 
 var webSettingsEnabled = func() bool {
@@ -56,9 +61,12 @@ var (
 		}
 		return filepath.Join(dir, "voicetype.log"), nil
 	}
-	defaultModelPath = configpkg.DefaultModelPath
-	removeFile       = os.Remove
-	listAudioDevices = listWindowsCaptureDevices
+	defaultModelPath                  = configpkg.DefaultModelPath
+	removeFile                        = os.Remove
+	listAudioDevices                  = audiopkg.ListInputDeviceSnapshots
+	showWindowsPreferencesUnavailable = func(message string) {
+		showWindowsMessageBox("JoiceTyper Preferences unavailable", message)
+	}
 )
 
 func shouldUseWebSettings() bool {
@@ -75,14 +83,24 @@ func IsFirstRun() bool {
 }
 
 func RunSetupWizard(context.Context, *slog.Logger) (string, error) {
+	if err := openPreferences(); err != nil {
+		return "", err
+	}
 	return "", nil
 }
 
 func OpenPreferences() {
+	if err := openPreferences(); err != nil {
+		currentSettingsLogger().Error("failed to open preferences", "operation", "OpenPreferences", "error", err)
+		showWindowsPreferencesUnavailable(err.Error())
+	}
+}
+
+func openPreferences() error {
 	if !preferencesOpenCompareAndSwap(0, 1) {
 		currentSettingsLogger().Info("preferences already open, reactivating existing window", "operation", "OpenPreferences")
 		FocusWebSettingsWindow()
-		return
+		return nil
 	}
 	currentSettingsLogger().Info("preferences opened", "operation", "OpenPreferences")
 
@@ -90,19 +108,19 @@ func OpenPreferences() {
 	if err != nil {
 		currentSettingsLogger().Error("failed to resolve config path", "operation", "OpenPreferences", "error", err)
 		preferencesOpenStore(0)
-		return
+		return fmt.Errorf("failed to resolve config path: %w", err)
 	}
 	cfg, err := webSettingsLoadConfig(cfgPath)
 	if err != nil {
 		currentSettingsLogger().Error("failed to load config", "operation", "OpenPreferences", "error", err)
 		preferencesOpenStore(0)
-		return
+		return fmt.Errorf("failed to load config: %w", err)
 	}
 
 	if !shouldUseWebSettings() {
-		currentSettingsLogger().Info("web settings disabled, no Windows native fallback is implemented", "operation", "OpenPreferences")
+		currentSettingsLogger().Warn("web settings disabled on Windows", "operation", "OpenPreferences")
 		preferencesOpenStore(0)
-		return
+		return fmt.Errorf("web preferences are disabled on Windows; unset JOICETYPER_USE_NATIVE_PREFERENCES or enable WebView2-backed settings")
 	}
 
 	prefsCtx, prefsCancel := context.WithCancel(context.Background())
@@ -111,12 +129,12 @@ func OpenPreferences() {
 	currentSettingsLogger().Info("showing web settings window", "operation", "OpenPreferences")
 	if err := ShowWebSettingsWindowWithBridge(prefsCtx, buildSettingsBridgeService(cfg)); err != nil {
 		cancelPreferencesContext()
-		currentSettingsLogger().Error("failed to show web settings window", "operation", "OpenPreferences", "error", err)
 		preferencesOpenStore(0)
-		return
+		return fmt.Errorf("failed to start the Windows preferences host: %w", err)
 	}
 
 	notifyWebSettingsLogsUpdated()
+	return nil
 }
 
 func signalHotkeyRestart() {
@@ -127,6 +145,25 @@ func signalHotkeyRestart() {
 		if err := h.Stop(); err != nil {
 			currentSettingsLogger().Warn("failed to stop hotkey for restart", "operation", "signalHotkeyRestart", "error", err)
 		}
+	}
+}
+
+const (
+	mbOK        = 0x00000000
+	mbIconError = 0x00000010
+)
+
+var procMessageBoxW = user32.NewProc("MessageBoxW")
+
+func showWindowsMessageBox(title string, message string) {
+	titlePtr, titleErr := windows.UTF16PtrFromString(title)
+	messagePtr, messageErr := windows.UTF16PtrFromString(message)
+	if titleErr != nil || messageErr != nil {
+		currentSettingsLogger().Warn("failed to prepare native message box", "operation", "showWindowsMessageBox", "title_error", titleErr, "message_error", messageErr)
+		return
+	}
+	if ret, _, callErr := procMessageBoxW.Call(0, uintptr(unsafe.Pointer(messagePtr)), uintptr(unsafe.Pointer(titlePtr)), mbOK|mbIconError); ret == 0 && callErr != nil && callErr.Error() != "The operation completed successfully." {
+		currentSettingsLogger().Warn("failed to show native message box", "operation", "showWindowsMessageBox", "error", callErr)
 	}
 }
 
@@ -197,9 +234,15 @@ func buildSettingsBridgeService(_ configpkg.Config) *bridgepkg.Service {
 		LoadPermissions: func(context.Context) (bridgepkg.PermissionsSnapshot, error) {
 			return webSettingsLoadPermissions(), nil
 		},
-		OpenPermissionSettings: func(context.Context, string) error {
+		OpenPermissionSettings: func(_ context.Context, target string) error {
 			// Windows does not require the macOS-specific accessibility/input-monitoring grants.
-			return nil
+			return bridgepkg.WrapContractError(
+				bridgepkg.ErrorCodePermissionOpenFailed,
+				"Windows does not require additional accessibility or input-monitoring settings",
+				false,
+				map[string]any{"target": target},
+				nil,
+			)
 		},
 		ListDevices: func(context.Context) ([]bridgepkg.DeviceSnapshot, error) {
 			return webSettingsListInputDevices()

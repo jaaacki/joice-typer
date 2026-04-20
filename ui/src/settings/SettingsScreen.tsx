@@ -157,7 +157,13 @@ export function SettingsScreen({ bootstrap }: SettingsScreenProps) {
     [draft.triggerKey, supportedHotkeyKeys, supportedHotkeyModifiers],
   );
   const runtimeStatus = currentAppState.state || "Unknown";
-  const selectedPane = NAV_ITEMS.find((item) => item.id === activePane) ?? NAV_ITEMS[0];
+  const permissionsPaneVisible =
+    options.permissions.accessibility.required ||
+    options.permissions.accessibility.actionable ||
+    options.permissions.inputMonitoring.required ||
+    options.permissions.inputMonitoring.actionable;
+  const navItems = permissionsPaneVisible ? NAV_ITEMS : NAV_ITEMS.filter((item) => item.id !== "permissions");
+  const selectedPane = navItems.find((item) => item.id === activePane) ?? navItems[0];
   const selectedModelName = modelOptionsByCode.get(modelActionSize)?.name ?? modelActionSize;
   const activeModelName = modelOptionsByCode.get(model.size || modelActionSize)?.name ?? (model.size || modelActionSize);
   const hasUnsavedChanges = useMemo(
@@ -229,7 +235,13 @@ export function SettingsScreen({ bootstrap }: SettingsScreenProps) {
 
   useEffect(() => subscribePermissionsChanged((nextPermissions) => setPermissions(nextPermissions)), []);
   useEffect(() => {
-    if (permissions.accessibility && permissions.inputMonitoring) {
+    if (!permissionsPaneVisible) {
+      return;
+    }
+
+    const accessibilityNeedsAttention = options.permissions.accessibility.required && !permissions.accessibility;
+    const inputMonitoringNeedsAttention = options.permissions.inputMonitoring.required && !permissions.inputMonitoring;
+    if (!accessibilityNeedsAttention && !inputMonitoringNeedsAttention) {
       return;
     }
 
@@ -267,7 +279,18 @@ export function SettingsScreen({ bootstrap }: SettingsScreenProps) {
       window.removeEventListener("focus", onAttention);
       document.removeEventListener("visibilitychange", onAttention);
     };
-  }, [permissions.accessibility, permissions.inputMonitoring]);
+  }, [
+    options.permissions.accessibility.required,
+    options.permissions.inputMonitoring.required,
+    permissions.accessibility,
+    permissions.inputMonitoring,
+    permissionsPaneVisible,
+  ]);
+  useEffect(() => {
+    if (!permissionsPaneVisible && activePane === "permissions") {
+      setActivePane("capture");
+    }
+  }, [activePane, permissionsPaneVisible]);
   useEffect(
     () =>
       subscribeModelChanged((nextModel) => {
@@ -591,7 +614,13 @@ export function SettingsScreen({ bootstrap }: SettingsScreenProps) {
         return <VocabularyPane draft={draft} onVocabularyChange={(value) => update("vocabulary", value)} />;
 
       case "permissions":
-        return <PermissionsPane permissions={permissions} onOpenPermissionSettings={handleOpenPermissionSettings} />;
+        return (
+          <PermissionsPane
+            options={options.permissions}
+            permissions={permissions}
+            onOpenPermissionSettings={handleOpenPermissionSettings}
+          />
+        );
 
       case "logs":
         return <LogsPane copyFullLog={copyFullLog} fetchLogs={fetchLogs} subscribeLogsUpdated={subscribeLogsUpdated} />;
@@ -632,9 +661,9 @@ export function SettingsScreen({ bootstrap }: SettingsScreenProps) {
             </div>
 
             <nav className="settings-sidebar__nav" aria-label="Preferences sections">
-              {NAV_ITEMS.map((item) => (
-                <SidebarButton key={item.id} item={item} active={item.id === activePane} onClick={() => setActivePane(item.id)} />
-              ))}
+            {navItems.map((item) => (
+              <SidebarButton key={item.id} item={item} active={item.id === activePane} onClick={() => setActivePane(item.id)} />
+            ))}
             </nav>
 
             <div className="settings-sidebar__footer">

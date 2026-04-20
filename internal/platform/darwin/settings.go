@@ -21,18 +21,17 @@ import (
 	"time"
 	"unsafe"
 
+	audiopkg "voicetype/internal/core/audio"
 	bridgepkg "voicetype/internal/core/bridge"
 	config "voicetype/internal/core/config"
 	loggingpkg "voicetype/internal/core/logging"
 	transcriptionpkg "voicetype/internal/core/transcription"
-
-	"github.com/gordonklaus/portaudio"
 )
 
 var postNotification = PostNotification
 var defaultModelPath = config.DefaultModelPath
 var removeFile = os.Remove
-var listAudioDevices = portaudio.Devices
+var listAudioDevices = audiopkg.ListInputDeviceSnapshots
 var downloadModelWithProgress = transcriptionpkg.DownloadModelWithProgress
 var webSettingsOpenPermissionSettings = openWebSettingsPermissionSettings
 var webSettingsLogPath = func() (string, error) {
@@ -104,19 +103,7 @@ func listWebSettingsInputDevices() ([]bridgepkg.DeviceSnapshot, error) {
 			err,
 		)
 	}
-	snapshots := make([]bridgepkg.DeviceSnapshot, 0, len(devices))
-	defaultInput, defaultErr := portaudio.DefaultInputDevice()
-	for _, device := range devices {
-		if device.MaxInputChannels <= 0 {
-			continue
-		}
-		isDefault := defaultErr == nil && defaultInput != nil && defaultInput.Name == device.Name
-		snapshots = append(snapshots, bridgepkg.DeviceSnapshot{
-			Name:      device.Name,
-			IsDefault: isDefault,
-		})
-	}
-	return snapshots, nil
+	return devices, nil
 }
 
 func loadWebSettingsModelSnapshot(modelSize string) (bridgepkg.ModelSnapshot, error) {
@@ -548,20 +535,18 @@ func RunSetupWizard(ctx context.Context, logger *slog.Logger) (string, error) {
 }
 
 func populateMicList(selectedDevice string, l *slog.Logger) {
-	devices, err := portaudio.Devices()
+	devices, err := audiopkg.ListInputDeviceSnapshots()
 	if err != nil {
 		l.Error("failed to list devices", "operation", "populateMicList", "error", err)
 		return
 	}
 	var inputNames []string
 	defaultIdx := 0
-	for _, d := range devices {
-		if d.MaxInputChannels > 0 {
-			if d.Name == selectedDevice {
-				defaultIdx = len(inputNames)
-			}
-			inputNames = append(inputNames, d.Name)
+	for _, device := range devices {
+		if device.Name == selectedDevice {
+			defaultIdx = len(inputNames)
 		}
+		inputNames = append(inputNames, device.Name)
 	}
 	if len(inputNames) == 0 {
 		return

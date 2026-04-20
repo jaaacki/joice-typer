@@ -1,12 +1,14 @@
-//go:build !darwin && !windows
+//go:build windows && !cgo
 
 package audio
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"runtime"
 
+	configpkg "voicetype/internal/core/config"
 	apppkg "voicetype/internal/core/runtime"
 )
 
@@ -23,15 +25,36 @@ func NewRecorder(sampleRate int, deviceName string, logger *slog.Logger) apppkg.
 }
 
 func InitAudio() error {
-	return unsupportedAudioError("InitAudio")
+	return nil
 }
 
 func TerminateAudio() error {
-	return unsupportedAudioError("TerminateAudio")
+	return nil
 }
 
 func ListInputDevices() error {
-	return unsupportedAudioError("ListInputDevices")
+	devices, err := ListInputDeviceSnapshots()
+	if err != nil {
+		return fmt.Errorf("recorder.ListInputDevices: %w", err)
+	}
+	fmt.Println("Available input devices:")
+	for _, device := range devices {
+		defaultSuffix := ""
+		if device.IsDefault {
+			defaultSuffix = " (default)"
+		}
+		fmt.Printf("  %s%s\n", device.Name, defaultSuffix)
+	}
+	fmt.Printf("\nSet input_device in %s to use a specific device.\n", listDevicesConfigHint())
+	return nil
+}
+
+func listDevicesConfigHint() string {
+	cfgPath, err := configpkg.DefaultConfigPath()
+	if err != nil {
+		return `%APPDATA%\JoiceTyper\config.yaml`
+	}
+	return cfgPath
 }
 
 func (r *unsupportedRecorder) Warm() {}

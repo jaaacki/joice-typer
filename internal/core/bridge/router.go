@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"runtime"
 
 	configpkg "voicetype/internal/core/config"
 )
@@ -356,9 +357,23 @@ func settingsOptionsSnapshot() SettingsOptionsSnapshot {
 		Languages:        languages,
 		DecodeModes:      decodeModes,
 		PunctuationModes: punctuationModes,
+		Permissions:      permissionOptionsSnapshot(),
 		Hotkey: HotkeyOptions{
 			Modifiers: configpkg.SupportedHotkeyModifiers(),
 			Keys:      configpkg.SupportedHotkeyKeys(),
 		},
+	}
+}
+
+func permissionOptionsSnapshot() PermissionOptions {
+	if runtime.GOOS == "windows" {
+		return PermissionOptions{
+			Accessibility:   PermissionRequirement{Required: false, Actionable: false},
+			InputMonitoring: PermissionRequirement{Required: false, Actionable: false},
+		}
+	}
+	return PermissionOptions{
+		Accessibility:   PermissionRequirement{Required: true, Actionable: true},
+		InputMonitoring: PermissionRequirement{Required: true, Actionable: true},
 	}
 }

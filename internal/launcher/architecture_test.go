@@ -71,3 +71,41 @@ func TestArchitecture_UsesCorePackages(t *testing.T) {
 		}
 	}
 }
+
+func TestLauncherUnsupportedExcludesWindows(t *testing.T) {
+	path := filepath.Join(launcherDir(t), "launcher_unsupported.go")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read launcher_unsupported.go: %v", err)
+	}
+	source := string(data)
+	if strings.Contains(source, "//go:build !darwin\n") || strings.Contains(source, "//go:build !darwin\r\n") {
+		t.Fatalf("launcher_unsupported.go still includes windows in unsupported build tag")
+	}
+	if !strings.Contains(source, "!windows") {
+		t.Fatalf("launcher_unsupported.go must explicitly exclude windows")
+	}
+}
+
+func TestWindowsLauncherExistsAndAvoidsBootstrapShim(t *testing.T) {
+	path := filepath.Join(launcherDir(t), "launcher_windows.go")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read launcher_windows.go: %v", err)
+	}
+	source := string(data)
+	if strings.Contains(source, "runUnsupported(") {
+		t.Fatalf("launcher_windows.go must not route through runUnsupported")
+	}
+	for _, needle := range []string{
+		"voicetype/internal/core/runtime",
+		"voicetype/internal/core/config",
+		"voicetype/internal/core/logging",
+		"voicetype/internal/core/version",
+		"voicetype/internal/platform",
+	} {
+		if !strings.Contains(source, needle) {
+			t.Fatalf("launcher_windows.go missing shared import %q", needle)
+		}
+	}
+}

@@ -272,6 +272,240 @@ func TestDarwinWebviewTransportSource_LogsNativeFailures(t *testing.T) {
 	}
 }
 
+func TestWindowsLauncherSource_UsesRealLauncherAndExcludesUnsupportedShim(t *testing.T) {
+	root := repoRoot(t)
+
+	unsupportedPath := filepath.Join(root, "internal", "launcher", "launcher_unsupported.go")
+	unsupportedData, err := os.ReadFile(unsupportedPath)
+	if err != nil {
+		t.Fatalf("read launcher_unsupported.go: %v", err)
+	}
+	unsupported := string(unsupportedData)
+	if !strings.Contains(unsupported, "//go:build !darwin && !windows") {
+		t.Fatalf("expected launcher_unsupported.go to exclude windows explicitly")
+	}
+
+	windowsPath := filepath.Join(root, "internal", "launcher", "launcher_windows.go")
+	windowsData, err := os.ReadFile(windowsPath)
+	if err != nil {
+		t.Fatalf("read launcher_windows.go: %v", err)
+	}
+	source := string(windowsData)
+	if strings.Contains(source, "runUnsupported(") {
+		t.Fatalf("expected launcher_windows.go not to route through runUnsupported")
+	}
+	for _, required := range []string{
+		"voicetype/internal/core/runtime",
+		"voicetype/internal/core/config",
+		"voicetype/internal/core/logging",
+		"voicetype/internal/core/version",
+		"voicetype/internal/platform",
+		"runWindowsDesktopMode",
+		"platformpkg.InitStatusBar()",
+		"platformpkg.HotkeyRestartCh()",
+	} {
+		if !strings.Contains(source, required) {
+			t.Fatalf("expected launcher_windows.go to contain %q", required)
+		}
+	}
+}
+
+func TestWindowsAudioSource_UsesDedicatedWindowsSurfaceAndExcludesUnsupportedShim(t *testing.T) {
+	root := repoRoot(t)
+
+	unsupportedPath := filepath.Join(root, "internal", "core", "audio", "recorder_unsupported.go")
+	unsupportedData, err := os.ReadFile(unsupportedPath)
+	if err != nil {
+		t.Fatalf("read recorder_unsupported.go: %v", err)
+	}
+	unsupported := string(unsupportedData)
+	if !strings.Contains(unsupported, "//go:build !darwin && !windows") {
+		t.Fatalf("expected recorder_unsupported.go to exclude windows explicitly")
+	}
+
+	windowsPath := filepath.Join(root, "internal", "core", "audio", "recorder_windows.go")
+	windowsData, err := os.ReadFile(windowsPath)
+	if err != nil {
+		t.Fatalf("read recorder_windows.go: %v", err)
+	}
+	source := string(windowsData)
+	for _, required := range []string{
+		"//go:build windows",
+		"ListInputDeviceSnapshots",
+		"ListInputDevices",
+		"InitAudio",
+		"TerminateAudio",
+	} {
+		if !strings.Contains(source, required) {
+			t.Fatalf("expected recorder_windows.go to contain %q", required)
+		}
+	}
+}
+
+func TestWindowsPackagingSource_StagesNativeWhisperRuntime(t *testing.T) {
+	root := repoRoot(t)
+
+	makefileData, err := os.ReadFile(filepath.Join(root, "Makefile"))
+	if err != nil {
+		t.Fatalf("read Makefile: %v", err)
+	}
+	makefile := string(makefileData)
+	for _, required := range []string{
+		"WINDOWS_RUNTIME_DIR :=",
+		"WINDOWS_RUNTIME_DLLS :=",
+		"build-windows-amd64:",
+	} {
+		if !strings.Contains(makefile, required) {
+			t.Fatalf("expected Makefile to contain %q", required)
+		}
+	}
+
+	issData, err := os.ReadFile(filepath.Join(root, "packaging", "windows", "joicetyper.iss"))
+	if err != nil {
+		t.Fatalf("read packaging/windows/joicetyper.iss: %v", err)
+	}
+	iss := string(issData)
+	for _, required := range []string{
+		`Source: "{#MyAppSourceDir}\whisper.dll"; DestDir: "{app}"; Flags: ignoreversion`,
+		`Source: "{#MyAppSourceDir}\ggml.dll"; DestDir: "{app}"; Flags: ignoreversion`,
+		`Source: "{#MyAppSourceDir}\ggml-base.dll"; DestDir: "{app}"; Flags: ignoreversion`,
+		`Source: "{#MyAppSourceDir}\ggml-cpu.dll"; DestDir: "{app}"; Flags: ignoreversion`,
+	} {
+		if !strings.Contains(iss, required) {
+			t.Fatalf("expected Windows installer to stage %q", required)
+		}
+	}
+}
+
+func TestWindowsTranscriptionSource_UsesDedicatedWindowsCGOPath(t *testing.T) {
+	root := repoRoot(t)
+
+	unsupportedPath := filepath.Join(root, "internal", "core", "transcription", "transcriber_unsupported.go")
+	unsupportedData, err := os.ReadFile(unsupportedPath)
+	if err != nil {
+		t.Fatalf("read transcriber_unsupported.go: %v", err)
+	}
+	unsupported := string(unsupportedData)
+	if !strings.Contains(unsupported, "//go:build !darwin && (!windows || !cgo)") {
+		t.Fatalf("expected transcriber_unsupported.go to exclude windows+cgo explicitly")
+	}
+
+	windowsPath := filepath.Join(root, "internal", "core", "transcription", "transcriber_windows.go")
+	windowsData, err := os.ReadFile(windowsPath)
+	if err != nil {
+		t.Fatalf("read transcriber_windows.go: %v", err)
+	}
+	source := string(windowsData)
+	for _, required := range []string{
+		"//go:build windows && cgo",
+		"#cgo windows CFLAGS:",
+		"#cgo windows LDFLAGS:",
+	} {
+		if !strings.Contains(source, required) {
+			t.Fatalf("expected transcriber_windows.go to contain %q", required)
+		}
+	}
+
+	commonPath := filepath.Join(root, "internal", "core", "transcription", "transcriber_cgo_common.go")
+	commonData, err := os.ReadFile(commonPath)
+	if err != nil {
+		t.Fatalf("read transcriber_cgo_common.go: %v", err)
+	}
+	common := string(commonData)
+	for _, required := range []string{
+		"//go:build darwin || (windows && cgo)",
+		"#include <whisper.h>",
+		"whisper_init_from_file_with_params",
+		"whisper_full",
+		"whisper_free",
+	} {
+		if !strings.Contains(common, required) {
+			t.Fatalf("expected transcriber_cgo_common.go to contain %q", required)
+		}
+	}
+
+	makefileData, err := os.ReadFile(filepath.Join(root, "Makefile"))
+	if err != nil {
+		t.Fatalf("read Makefile: %v", err)
+	}
+	makefile := string(makefileData)
+	for _, required := range []string{
+		"build-windows-runtime-amd64:",
+		"package-windows-runtime:",
+		"CGO_ENABLED=1",
+		"WINDOWS_CC ?=",
+		"WINDOWS_CXX ?=",
+		"CC=$(WINDOWS_CC)",
+		"CXX=$(WINDOWS_CXX)",
+		"WINDOWS_RUNTIME_IMPORT_DIR :=",
+		"windows-runtime-prereqs:",
+		"windows-runtime-stage-check:",
+		"fatal: missing Windows runtime payload",
+		"fatal: missing staged Windows runtime artifact",
+	} {
+		if !strings.Contains(makefile, required) {
+			t.Fatalf("expected Makefile to contain %q", required)
+		}
+	}
+}
+
+func TestWindowsRecorderSource_UsesDedicatedWindowsCGOPath(t *testing.T) {
+	root := repoRoot(t)
+
+	recorderData, err := os.ReadFile(filepath.Join(root, "internal", "core", "audio", "recorder.go"))
+	if err != nil {
+		t.Fatalf("read recorder.go: %v", err)
+	}
+	if !strings.Contains(string(recorderData), "//go:build darwin || (windows && cgo)") {
+		t.Fatalf("expected recorder.go to include windows+cgo build tag")
+	}
+
+	stubData, err := os.ReadFile(filepath.Join(root, "internal", "core", "audio", "recorder_windows.go"))
+	if err != nil {
+		t.Fatalf("read recorder_windows.go: %v", err)
+	}
+	if !strings.Contains(string(stubData), "//go:build windows && !cgo") {
+		t.Fatalf("expected recorder_windows.go to be the windows !cgo stub")
+	}
+
+	devicesPath := filepath.Join(root, "internal", "core", "audio", "audio_devices_windows.go")
+	devicesData, err := os.ReadFile(devicesPath)
+	if err != nil {
+		t.Fatalf("read audio_devices_windows.go: %v", err)
+	}
+	devicesSource := string(devicesData)
+	for _, required := range []string{
+		"//go:build windows",
+		"func ListInputDeviceSnapshots() ([]bridgepkg.DeviceSnapshot, error) {",
+		"wca.CLSID_MMDeviceEnumerator",
+		"wca.PKEY_Device_FriendlyName",
+	} {
+		if !strings.Contains(devicesSource, required) {
+			t.Fatalf("expected audio_devices_windows.go to contain %q", required)
+		}
+	}
+}
+
+func TestDarwinSettingsSource_UsesSharedAudioDeviceSnapshots(t *testing.T) {
+	root := repoRoot(t)
+	data, err := os.ReadFile(filepath.Join(root, "internal", "platform", "darwin", "settings.go"))
+	if err != nil {
+		t.Fatalf("read darwin/settings.go: %v", err)
+	}
+	source := string(data)
+	if !strings.Contains(source, `listAudioDevices = audiopkg.ListInputDeviceSnapshots`) {
+		t.Fatalf("expected darwin/settings.go to use shared core audio device snapshots")
+	}
+
+	recorderData, err := os.ReadFile(filepath.Join(root, "internal", "core", "audio", "recorder.go"))
+	if err != nil {
+		t.Fatalf("read core/audio/recorder.go: %v", err)
+	}
+	if !strings.Contains(string(recorderData), `func ListInputDeviceSnapshots() ([]bridgepkg.DeviceSnapshot, error) {`) {
+		t.Fatalf("expected core/audio/recorder.go to define ListInputDeviceSnapshots")
+	}
+}
+
 func TestWindowsWebviewTransportSource_LogsNativeFailures(t *testing.T) {
 	root := repoRoot(t)
 	data, err := os.ReadFile(filepath.Join(root, "internal", "platform", "windows", "webview_host_windows.go"))
@@ -302,6 +536,10 @@ func TestWindowsSettingsBridgeSource_ProvidesExplicitAdapterHooks(t *testing.T) 
 		`return bridgepkg.PermissionsSnapshot{Accessibility: true, InputMonitoring: true}`,
 		`ListDevices: func(context.Context) ([]bridgepkg.DeviceSnapshot, error) {`,
 		`RefreshDevices: func(context.Context) ([]bridgepkg.DeviceSnapshot, error) {`,
+		`func openPreferences() error {`,
+		`showWindowsPreferencesUnavailable(err.Error())`,
+		`showWindowsMessageBox("JoiceTyper Preferences unavailable", message)`,
+		`return fmt.Errorf("failed to start the Windows preferences host: %w", err)`,
 		`DownloadModel: func(ctx context.Context, size string) error {`,
 		`DeleteModel: func(ctx context.Context, size string) error {`,
 		`UseModel: func(ctx context.Context, size string) error {`,
@@ -313,7 +551,7 @@ func TestWindowsSettingsBridgeSource_ProvidesExplicitAdapterHooks(t *testing.T) 
 		`publishModelChanged(snapshot)`,
 		`return webSettingsStartHotkeyCapture()`,
 		`return webSettingsConfirmHotkeyCapture()`,
-		`listAudioDevices = listWindowsCaptureDevices`,
+		`audiopkg.ListInputDeviceSnapshots`,
 		`publishDevicesChanged(devices)`,
 	} {
 		if !strings.Contains(source, required) {
@@ -730,8 +968,10 @@ func TestSettingsScreenSource_UsesRuntimeStateSubscription(t *testing.T) {
 		`subscribeConfigSaved`,
 		`subscribeDevicesChanged`,
 		`subscribeHotkeyCaptureChanged`,
-		`"accessibility", "Accessibility"`,
-		`"input_monitoring", "Input Monitoring"`,
+		`permissionsPaneVisible`,
+		`options.permissions`,
+		`item.key`,
+		`item.label`,
 		`handleRefreshDevices`,
 		`handleDownloadModel`,
 		`handleDeleteModel`,

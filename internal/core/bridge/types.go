@@ -49,11 +49,22 @@ type OptionSnapshot struct {
 }
 
 type SettingsOptionsSnapshot struct {
-	Models           []OptionSnapshot `json:"models"`
-	Languages        []OptionSnapshot `json:"languages"`
-	DecodeModes      []OptionSnapshot `json:"decodeModes"`
-	PunctuationModes []OptionSnapshot `json:"punctuationModes"`
-	Hotkey           HotkeyOptions    `json:"hotkey"`
+	Models           []OptionSnapshot  `json:"models"`
+	Languages        []OptionSnapshot  `json:"languages"`
+	DecodeModes      []OptionSnapshot  `json:"decodeModes"`
+	PunctuationModes []OptionSnapshot  `json:"punctuationModes"`
+	Permissions      PermissionOptions `json:"permissions"`
+	Hotkey           HotkeyOptions     `json:"hotkey"`
+}
+
+type PermissionOptions struct {
+	Accessibility   PermissionRequirement `json:"accessibility"`
+	InputMonitoring PermissionRequirement `json:"inputMonitoring"`
+}
+
+type PermissionRequirement struct {
+	Required   bool `json:"required"`
+	Actionable bool `json:"actionable"`
 }
 
 type HotkeyOptions struct {

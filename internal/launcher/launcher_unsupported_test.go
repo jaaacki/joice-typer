@@ -12,7 +12,7 @@ func TestRunUnsupportedVersionFlag(t *testing.T) {
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 
-	code := runUnsupported([]string{"--version"}, &stdout, &stderr, "windows", "amd64")
+	code := runUnsupported([]string{"--version"}, &stdout, &stderr, "linux", "amd64")
 
 	if code != 0 {
 		t.Fatalf("expected exit code 0, got %d", code)
@@ -29,7 +29,7 @@ func TestRunUnsupportedListDevicesFlag(t *testing.T) {
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 
-	code := runUnsupported([]string{"--list-devices"}, &stdout, &stderr, "windows", "amd64")
+	code := runUnsupported([]string{"--list-devices"}, &stdout, &stderr, "linux", "amd64")
 
 	if code != 1 {
 		t.Fatalf("expected exit code 1, got %d", code)
@@ -46,7 +46,7 @@ func TestRunUnsupportedDefaultMentionsBootstrapOnly(t *testing.T) {
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 
-	code := runUnsupported(nil, &stdout, &stderr, "windows", "amd64")
+	code := runUnsupported(nil, &stdout, &stderr, "linux", "amd64")
 
 	if code != 1 {
 		t.Fatalf("expected exit code 1, got %d", code)

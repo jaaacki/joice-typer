@@ -624,6 +624,12 @@ func TestRouterHandleRequest_OptionsGet(t *testing.T) {
 	if options.Hotkey.Modifiers[0] != "fn" {
 		t.Fatalf("expected Darwin host modifiers to start with fn, got %#v", options.Hotkey.Modifiers)
 	}
+	if !options.Permissions.Accessibility.Required || !options.Permissions.Accessibility.Actionable {
+		t.Fatalf("expected Darwin accessibility permission to be required/actionable, got %#v", options.Permissions.Accessibility)
+	}
+	if !options.Permissions.InputMonitoring.Required || !options.Permissions.InputMonitoring.Actionable {
+		t.Fatalf("expected Darwin input monitoring permission to be required/actionable, got %#v", options.Permissions.InputMonitoring)
+	}
 }
 
 func TestBridgeContractIncludesLogsMethods(t *testing.T) {

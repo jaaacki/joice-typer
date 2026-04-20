@@ -1,55 +1,67 @@
-import type { PermissionsSnapshot } from "../../bridge";
+import type { PermissionOptionsSnapshot, PermissionsSnapshot } from "../../bridge";
 import { Panel, StatusBadge, permissionsTone } from "../shared";
 
 type PermissionsPaneProps = {
+  options: PermissionOptionsSnapshot;
   permissions: PermissionsSnapshot;
   onOpenPermissionSettings: (target: "accessibility" | "input_monitoring", label: string) => void | Promise<void>;
 };
 
-export default function PermissionsPane({ permissions, onOpenPermissionSettings }: PermissionsPaneProps) {
+export default function PermissionsPane({ options, permissions, onOpenPermissionSettings }: PermissionsPaneProps) {
+  const items = [
+    {
+      key: "accessibility" as const,
+      label: "Accessibility",
+      description: "Required to type into whichever app currently has focus.",
+      requirement: options.accessibility,
+      granted: permissions.accessibility,
+      icon: <SparkleIcon />,
+    },
+    {
+      key: "input_monitoring" as const,
+      label: "Input Monitoring",
+      description: "Required to listen for the global hotkey while other apps are active.",
+      requirement: options.inputMonitoring,
+      granted: permissions.inputMonitoring,
+      icon: <CommandIcon />,
+    },
+  ].filter((item) => item.requirement.required || item.requirement.actionable);
+
+  if (items.length === 0) {
+    return (
+      <div className="pane-stack">
+        <Panel eyebrow="System access" title="Permissions">
+          <p className="settings-panel__hint">JoiceTyper does not require additional system permission steps on this platform.</p>
+        </Panel>
+      </div>
+    );
+  }
+
   return (
     <div className="pane-stack">
       <Panel eyebrow="System access" title="Permissions">
         <div className="permission-list">
-          <div className="permission-item">
-            <div className="permission-item__icon">
-              <SparkleIcon />
+          {items.map((item) => (
+            <div key={item.key} className="permission-item">
+              <div className="permission-item__icon">{item.icon}</div>
+              <div className="permission-item__copy">
+                <strong>{item.label}</strong>
+                <span>{item.description}</span>
+              </div>
+              <StatusBadge tone={permissionsTone(item.granted)}>
+                {item.granted ? "Granted" : "Needs attention"}
+              </StatusBadge>
+              {item.requirement.actionable ? (
+                <button
+                  className="ui-button ui-button--secondary"
+                  type="button"
+                  onClick={() => void onOpenPermissionSettings(item.key, item.label)}
+                >
+                  Open
+                </button>
+              ) : null}
             </div>
-            <div className="permission-item__copy">
-              <strong>Accessibility</strong>
-              <span>Required to type into whichever app currently has focus.</span>
-            </div>
-            <StatusBadge tone={permissionsTone(permissions.accessibility)}>
-              {permissions.accessibility ? "Granted" : "Needs attention"}
-            </StatusBadge>
-            <button
-              className="ui-button ui-button--secondary"
-              type="button"
-              onClick={() => void onOpenPermissionSettings("accessibility", "Accessibility")}
-            >
-              Open
-            </button>
-          </div>
-
-          <div className="permission-item">
-            <div className="permission-item__icon">
-              <CommandIcon />
-            </div>
-            <div className="permission-item__copy">
-              <strong>Input Monitoring</strong>
-              <span>Required to listen for the global hotkey while other apps are active.</span>
-            </div>
-            <StatusBadge tone={permissionsTone(permissions.inputMonitoring)}>
-              {permissions.inputMonitoring ? "Granted" : "Needs attention"}
-            </StatusBadge>
-            <button
-              className="ui-button ui-button--secondary"
-              type="button"
-              onClick={() => void onOpenPermissionSettings("input_monitoring", "Input Monitoring")}
-            >
-              Open
-            </button>
-          </div>
+          ))}
 
           {/* Future template slot: the preferences template also includes microphone, launch-at-login, and privacy controls.
           <div className="permission-item">
