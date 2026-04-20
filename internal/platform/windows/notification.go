@@ -9,9 +9,11 @@ import (
 )
 
 func PostNotification(title, body string) {
-	if err := spawnWindowsToast(title, body); err != nil {
-		currentSettingsLogger().Warn("failed to spawn windows toast", "operation", "PostNotification", "error", err)
-	}
+	go func() {
+		if err := showWindowsToast(title, body); err != nil {
+			currentSettingsLogger().Warn("failed to show windows toast", "operation", "PostNotification", "error", err)
+		}
+	}()
 }
 
 func escapeWindowsToastText(value string) string {
@@ -19,7 +21,7 @@ func escapeWindowsToastText(value string) string {
 	return strings.ReplaceAll(value, "'", "''")
 }
 
-func spawnWindowsToast(title, body string) error {
+func showWindowsToast(title, body string) error {
 	script := fmt.Sprintf(`
 [Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] > $null
 [Windows.Data.Xml.Dom.XmlDocument, Windows.Data.Xml.Dom.XmlDocument, ContentType = WindowsRuntime] > $null
@@ -39,5 +41,8 @@ $toast = [Windows.UI.Notifications.ToastNotification]::new($xml)
 `, escapeWindowsToastText(title), escapeWindowsToastText(body))
 
 	cmd := exec.Command("powershell", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", script)
-	return cmd.Start()
+	if output, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("powershell toast failed: %w: %s", err, strings.TrimSpace(string(output)))
+	}
+	return nil
 }

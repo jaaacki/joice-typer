@@ -15,6 +15,7 @@ type runtimeState struct {
 	settingsLogger   *slog.Logger
 	settingsRecorder Recorder
 	hotkeyRestartCh  chan struct{}
+	quitHandler      func()
 
 	prefsMu     sync.Mutex
 	prefsCtx    context.Context
@@ -83,6 +84,23 @@ func signalHotkeyRestartCh() {
 	}
 }
 
+func SetQuitHandler(fn func()) {
+	runtimeSingleton.mu.Lock()
+	runtimeSingleton.quitHandler = fn
+	runtimeSingleton.mu.Unlock()
+}
+
+func RequestQuit() {
+	runtimeSingleton.mu.Lock()
+	handler := runtimeSingleton.quitHandler
+	runtimeSingleton.mu.Unlock()
+	if handler == nil {
+		currentSettingsLogger().Warn("quit requested without registered handler", "operation", "RequestQuit")
+		return
+	}
+	handler()
+}
+
 func preferencesOpenCompareAndSwap(old, new int32) bool {
 	return atomic.CompareAndSwapInt32(&runtimeSingleton.prefsOpen, old, new)
 }
@@ -123,4 +141,11 @@ func currentAppState() AppState {
 	return AppState(atomic.LoadInt32(&runtimeSingleton.appState))
 }
 
-func ClearHotkeyEvents() {}
+func ClearHotkeyEvents() {
+	h := ActiveHotkey()
+	listener, ok := h.(*hotkeyListener)
+	if !ok || listener == nil {
+		return
+	}
+	listener.clearPendingEvents()
+}

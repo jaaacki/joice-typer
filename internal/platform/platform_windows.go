@@ -68,6 +68,10 @@ func SetSettingsRecorder(rec apppkg.Recorder) {
 	windowspkg.SetSettingsRecorder(rec)
 }
 
+func SetQuitHandler(fn func()) {
+	windowspkg.SetQuitHandler(fn)
+}
+
 func ClearHotkeyEvents() {
 	windowspkg.ClearHotkeyEvents()
 }

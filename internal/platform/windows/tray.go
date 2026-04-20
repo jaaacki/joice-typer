@@ -4,7 +4,6 @@ package windows
 
 import (
 	"fmt"
-	"os"
 	"runtime"
 	"sync"
 	"time"
@@ -325,7 +324,7 @@ func showWindowsTrayMenu(hwnd uintptr) {
 	case trayMenuPreferences:
 		go OpenPreferences()
 	case trayMenuQuit:
-		go os.Exit(0)
+		go RequestQuit()
 	}
 }
 

@@ -9,6 +9,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 	"unsafe"
 
@@ -105,7 +106,7 @@ func RunSetupWizard(ctx context.Context, logger *slog.Logger) (string, error) {
 func OpenPreferences() {
 	if err := openPreferences(); err != nil {
 		currentSettingsLogger().Error("failed to open preferences", "operation", "OpenPreferences", "error", err)
-		showWindowsPreferencesUnavailable(err.Error())
+		showWindowsPreferencesUnavailable(decorateWebView2UnavailableMessage(err))
 	}
 }
 
@@ -178,6 +179,20 @@ func showWindowsMessageBox(title string, message string) {
 	if ret, _, callErr := procMessageBoxW.Call(0, uintptr(unsafe.Pointer(messagePtr)), uintptr(unsafe.Pointer(titlePtr)), mbOK|mbIconError); ret == 0 && callErr != nil && callErr.Error() != "The operation completed successfully." {
 		currentSettingsLogger().Warn("failed to show native message box", "operation", "showWindowsMessageBox", "error", callErr)
 	}
+}
+
+func decorateWebView2UnavailableMessage(err error) string {
+	if err == nil {
+		return webView2RuntimeInstallHelpMessage
+	}
+	message := err.Error()
+	if !strings.Contains(message, webView2RuntimeError) {
+		return message
+	}
+	if strings.Contains(message, webView2RuntimeInstallHelpMessage) {
+		return message
+	}
+	return message + "\n\n" + webView2RuntimeInstallHelpMessage
 }
 
 func loadWebSettingsPermissionsSnapshot() bridgepkg.PermissionsSnapshot {

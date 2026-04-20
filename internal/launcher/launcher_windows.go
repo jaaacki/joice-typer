@@ -84,19 +84,28 @@ func runWindowsDesktopMode(configPath string) {
 	defer startupCancel()
 
 	var shutdownRequested atomic.Bool
+	requestShutdown := func(reason string) {
+		if shutdownRequested.Swap(true) {
+			return
+		}
+		logger.Info("shutdown requested", "component", "main", "operation", "runWindowsDesktopMode", "reason", reason)
+		startupCancel()
+		if h := platformpkg.ActiveHotkey(); h != nil {
+			if stopErr := h.Stop(); stopErr != nil {
+				logger.Error("failed to stop hotkey", "component", "main", "operation", "requestShutdown", "error", stopErr)
+			}
+		}
+	}
+	platformpkg.SetQuitHandler(func() {
+		requestShutdown("tray_quit")
+	})
+	defer platformpkg.SetQuitHandler(nil)
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 	go func() {
 		sig := <-sigCh
 		logger.Info("received signal", "component", "main", "operation", "signal", "signal", sig.String())
-		shutdownRequested.Store(true)
-		startupCancel()
-		h := platformpkg.ActiveHotkey()
-		if h != nil {
-			if stopErr := h.Stop(); stopErr != nil {
-				logger.Error("failed to stop hotkey", "component", "main", "operation", "signal", "error", stopErr)
-			}
-		}
+		requestShutdown("signal_" + sig.String())
 	}()
 
 	firstRun := platformpkg.IsFirstRun()
@@ -198,12 +207,12 @@ func startWindowsRuntimeCycle(startupCtx context.Context, cfg configpkg.Config, 
 	if err := audiopkg.InitAudio(); err != nil {
 		logger.Warn("audio backend unavailable", "component", "main", "operation", "startWindowsRuntimeCycle", "error", err)
 		return windowsRuntimeCycle{
-			hotkey:    hotkey,
-			recorder:  recorder,
-			err:       err,
-			events:    nil,
-			wg:        nil,
-			app:       nil,
+			hotkey:      hotkey,
+			recorder:    recorder,
+			err:         err,
+			events:      nil,
+			wg:          nil,
+			app:         nil,
 			transcriber: nil,
 		}
 	}

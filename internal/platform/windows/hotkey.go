@@ -52,7 +52,7 @@ type hotkeyListener struct {
 	pressed           map[uint32]bool
 
 	mu      sync.Mutex
-	events  chan<- HotkeyEvent
+	events  chan HotkeyEvent
 	thread  uint32
 	hook    windows.Handle
 	active  bool
@@ -110,7 +110,7 @@ func (h *hotkeyListener) RunMainLoopOnly() {
 	_ = h.runLoop(false, nil)
 }
 
-func (h *hotkeyListener) Start(events chan<- HotkeyEvent) error {
+func (h *hotkeyListener) Start(events chan HotkeyEvent) error {
 	return h.runLoop(true, events)
 }
 
@@ -128,7 +128,7 @@ func (h *hotkeyListener) Stop() error {
 	return nil
 }
 
-func (h *hotkeyListener) runLoop(withHook bool, events chan<- HotkeyEvent) error {
+func (h *hotkeyListener) runLoop(withHook bool, events chan HotkeyEvent) error {
 	if withHook {
 		if err := h.validateSupportedHotkey(); err != nil {
 			return err
@@ -306,6 +306,22 @@ func (h *hotkeyListener) emitLocked(event HotkeyEvent) {
 	case h.events <- event:
 	default:
 		h.logger.Warn("press event dropped, channel full", "operation", "handleKeyMessage", "event", hotkeyEventString(event))
+	}
+}
+
+func (h *hotkeyListener) clearPendingEvents() {
+	h.mu.Lock()
+	events := h.events
+	h.mu.Unlock()
+	if events == nil {
+		return
+	}
+	for {
+		select {
+		case <-events:
+		default:
+			return
+		}
 	}
 }
 

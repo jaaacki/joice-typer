@@ -19,7 +19,11 @@ var (
 	powerHandler   func(PowerEvent)
 )
 
-func InitPowerObserver() {}
+func InitPowerObserver() {
+	if err := sharedWindowsTrayHost.ensureStarted(); err != nil {
+		currentSettingsLogger().Warn("failed to initialize windows power observer", "operation", "InitPowerObserver", "error", err)
+	}
+}
 
 func SetPowerEventHandler(handler func(PowerEvent)) {
 	powerHandlerMu.Lock()

@@ -10,8 +10,8 @@ import (
 	"reflect"
 	"testing"
 
-	apppkg "voicetype/internal/core/runtime"
 	configpkg "voicetype/internal/core/config"
+	apppkg "voicetype/internal/core/runtime"
 )
 
 type fakeReloadHotkey struct{ id string }
@@ -19,9 +19,9 @@ type fakeReloadHotkey struct{ id string }
 func (h *fakeReloadHotkey) WaitForPermissions(ctx context.Context, onUpdate func(bool, bool)) error {
 	return nil
 }
-func (h *fakeReloadHotkey) RunMainLoopOnly()                             {}
-func (h *fakeReloadHotkey) Start(events chan<- apppkg.HotkeyEvent) error { return nil }
-func (h *fakeReloadHotkey) Stop() error                                  { return nil }
+func (h *fakeReloadHotkey) RunMainLoopOnly()                           {}
+func (h *fakeReloadHotkey) Start(events chan apppkg.HotkeyEvent) error { return nil }
+func (h *fakeReloadHotkey) Stop() error                                { return nil }
 
 type fakeReloadRecorder struct {
 	id         string

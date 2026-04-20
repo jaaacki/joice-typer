@@ -519,6 +519,10 @@ func TestWindowsWebviewTransportSource_LogsNativeFailures(t *testing.T) {
 		`webSettingsNativeTransportWarning("focusWindowsWebView2Host", err.Error())`,
 		`webSettingsNativeTransportWarning("dispatchWindowsWebView2Envelope", err.Error())`,
 		`webSettingsNativeTransportWarning("windowsWebView2Host", err.Error())`,
+		`detectInstalledWebView2Version()`,
+		`Install Microsoft Edge WebView2 Runtime`,
+		`webView2RuntimeRegistryGUID`,
+		`Software\Microsoft\EdgeUpdate\Clients\`,
 	} {
 		if !strings.Contains(source, required) {
 			t.Fatalf("expected webview_host_windows.go to contain %q", required)
@@ -540,7 +544,7 @@ func TestWindowsSettingsBridgeSource_ProvidesExplicitAdapterHooks(t *testing.T) 
 		`prefsCtx := currentPreferencesContext()`,
 		`preferences context unavailable after opening setup`,
 		`func openPreferences() error {`,
-		`showWindowsPreferencesUnavailable(err.Error())`,
+		`decorateWebView2UnavailableMessage(err)`,
 		`showWindowsMessageBox("JoiceTyper Preferences unavailable", message)`,
 		`return fmt.Errorf("failed to start the Windows preferences host: %w", err)`,
 		`DownloadModel: func(ctx context.Context, size string) error {`,
@@ -623,7 +627,7 @@ func TestWindowsTraySource_UsesShellNotifyIconAndMenuActions(t *testing.T) {
 		`procCreatePopupMenu`,
 		`procTrackPopupMenu`,
 		`go OpenPreferences()`,
-		`go os.Exit(0)`,
+		`go RequestQuit()`,
 		`publishRuntimeStateChanged(state)`,
 		`wmPowerBroadcast`,
 		`dispatchPowerEvent(PowerEventWake)`,
@@ -647,6 +651,8 @@ func TestWindowsPowerSource_RefreshesDevicesAfterWake(t *testing.T) {
 		`rec.RefreshDevices()`,
 		`publishDevicesChanged(devices)`,
 		`UpdateStatusBar(StateReady)`,
+		`sharedWindowsTrayHost.ensureStarted()`,
+		`failed to initialize windows power observer`,
 		`dispatchPowerEvent(event PowerEvent)`,
 	} {
 		if !strings.Contains(source, required) {
@@ -672,9 +678,64 @@ func TestWindowsPasterSource_UsesClipboardAndTypingFallback(t *testing.T) {
 		`clipboard paste failed, falling back to unicode typing`,
 		`paste shortcut failed, falling back to unicode typing`,
 		`keyeventfUnicode`,
+		`windowsPasterReadClipboardText`,
+		`windowsPasterRestoreClipboardText`,
+		`restore clipboard failed after paste`,
 	} {
 		if !strings.Contains(source, required) {
 			t.Fatalf("expected windows/paster.go to contain %q", required)
+		}
+	}
+}
+
+func TestWindowsInstallerSource_HandlesWebView2RuntimePrerequisite(t *testing.T) {
+	root := repoRoot(t)
+	data, err := os.ReadFile(filepath.Join(root, "packaging", "windows", "joicetyper.iss"))
+	if err != nil {
+		t.Fatalf("read packaging/windows/joicetyper.iss: %v", err)
+	}
+	source := string(data)
+	for _, required := range []string{
+		`MicrosoftEdgeWebview2Setup.exe`,
+		`{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}`,
+		`/silent /install`,
+		`function HasWebView2Runtime(): Boolean;`,
+		`function HasWebView2Bootstrapper(): Boolean;`,
+		`function InstallWebView2Runtime(): Boolean;`,
+		`Exec(ExpandConstant('{tmp}\MicrosoftEdgeWebview2Setup.exe')`,
+		`WebView2 Runtime installation did not complete successfully.`,
+	} {
+		if !strings.Contains(source, required) {
+			t.Fatalf("expected packaging/windows/joicetyper.iss to contain %q", required)
+		}
+	}
+}
+
+func TestWindowsRuntimeStateSource_ClearsPendingHotkeyEvents(t *testing.T) {
+	root := repoRoot(t)
+	data, err := os.ReadFile(filepath.Join(root, "internal", "platform", "windows", "runtime_state.go"))
+	if err != nil {
+		t.Fatalf("read windows/runtime_state.go: %v", err)
+	}
+	source := string(data)
+	for _, required := range []string{`listener.clearPendingEvents()`} {
+		if !strings.Contains(source, required) {
+			t.Fatalf("expected windows/runtime_state.go to contain %q", required)
+		}
+	}
+
+	hotkeyData, err := os.ReadFile(filepath.Join(root, "internal", "platform", "windows", "hotkey.go"))
+	if err != nil {
+		t.Fatalf("read windows/hotkey.go: %v", err)
+	}
+	hotkeySource := string(hotkeyData)
+	for _, required := range []string{
+		`func (h *hotkeyListener) clearPendingEvents() {`,
+		`case <-events:`,
+		`default:`,
+	} {
+		if !strings.Contains(hotkeySource, required) {
+			t.Fatalf("expected windows/hotkey.go to contain %q", required)
 		}
 	}
 }
@@ -690,7 +751,8 @@ func TestWindowsNotificationSource_UsesToastSpawner(t *testing.T) {
 		`powershell`,
 		`ToastNotificationManager`,
 		`CreateToastNotifier('JoiceTyper')`,
-		`failed to spawn windows toast`,
+		`CombinedOutput()`,
+		`failed to show windows toast`,
 	} {
 		if !strings.Contains(source, required) {
 			t.Fatalf("expected windows/notification.go to contain %q", required)

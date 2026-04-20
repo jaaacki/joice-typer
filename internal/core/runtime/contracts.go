@@ -31,7 +31,7 @@ type HotkeyListener interface {
 	// Returns error on context cancellation.
 	WaitForPermissions(ctx context.Context, onUpdate func(accessibility, inputMonitoring bool)) error
 	RunMainLoopOnly()
-	Start(events chan<- HotkeyEvent) error
+	Start(events chan HotkeyEvent) error
 	Stop() error
 }
 

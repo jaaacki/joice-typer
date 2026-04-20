@@ -14,6 +14,7 @@ import (
 
 	edgepkg "github.com/wailsapp/go-webview2/pkg/edge"
 	"golang.org/x/sys/windows"
+	"golang.org/x/sys/windows/registry"
 )
 
 const (
@@ -28,6 +29,11 @@ const (
 	windowClassName      = "JoiceTyperWebSettingsWindow"
 	windowTitle          = "JoiceTyper Preferences"
 	webView2RuntimeError = "WebView2 host unavailable"
+)
+
+const (
+	webView2RuntimeRegistryGUID       = `{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}`
+	webView2RuntimeInstallHelpMessage = "Install Microsoft Edge WebView2 Runtime and reopen JoiceTyper."
 )
 
 type windowsPoint struct {
@@ -206,6 +212,15 @@ func (h *windowsWebView2Host) initThread() error {
 	threadID, _, _ := procGetCurrentThreadID.Call()
 	h.threadID = uint32(threadID)
 
+	version, err := detectInstalledWebView2Version()
+	if err != nil {
+		return fmt.Errorf("%s: detect runtime: %w", webView2RuntimeError, err)
+	}
+	if version == "" {
+		return fmt.Errorf("%s: missing Microsoft Edge WebView2 Runtime. %s", webView2RuntimeError, webView2RuntimeInstallHelpMessage)
+	}
+	webSettingsNativeTransportInfo("initWindowsWebView2Host", "detected WebView2 runtime "+version)
+
 	className, err := windows.UTF16PtrFromString(windowClassName)
 	if err != nil {
 		return fmt.Errorf("%s: class name: %w", webView2RuntimeError, err)
@@ -230,6 +245,41 @@ func (h *windowsWebView2Host) initThread() error {
 	}
 	h.classRegistered = true
 	return nil
+}
+
+func detectInstalledWebView2Version() (string, error) {
+	paths := []struct {
+		root registry.Key
+		path string
+	}{
+		{root: registry.LOCAL_MACHINE, path: `Software\WOW6432Node\Microsoft\EdgeUpdate\Clients\` + webView2RuntimeRegistryGUID},
+		{root: registry.CURRENT_USER, path: `Software\Microsoft\EdgeUpdate\Clients\` + webView2RuntimeRegistryGUID},
+		{root: registry.LOCAL_MACHINE, path: `Software\Microsoft\EdgeUpdate\Clients\` + webView2RuntimeRegistryGUID},
+	}
+
+	for _, candidate := range paths {
+		key, err := registry.OpenKey(candidate.root, candidate.path, registry.QUERY_VALUE)
+		if err != nil {
+			if err == registry.ErrNotExist {
+				continue
+			}
+			return "", err
+		}
+		version, _, err := key.GetStringValue("pv")
+		key.Close()
+		if err != nil {
+			if err == registry.ErrNotExist {
+				continue
+			}
+			return "", err
+		}
+		version = strings.TrimSpace(version)
+		if version != "" && version != "0.0.0.0" {
+			return version, nil
+		}
+	}
+
+	return "", nil
 }
 
 func (h *windowsWebView2Host) invoke(fn func(*windowsWebView2Host) error) error {

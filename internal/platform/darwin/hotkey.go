@@ -251,7 +251,7 @@ func (h *cgEventHotkeyListener) RunMainLoopOnly() {
 	C.runMainLoop()
 }
 
-func (h *cgEventHotkeyListener) Start(events chan<- HotkeyEvent) error {
+func (h *cgEventHotkeyListener) Start(events chan HotkeyEvent) error {
 	hotkeyLogger = h.logger
 	h.logger.Info("starting", "operation", "Start", "trigger_keys", h.triggerKeys)
 

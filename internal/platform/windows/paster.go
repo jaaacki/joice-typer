@@ -40,20 +40,23 @@ type windowsKeybdInput struct {
 }
 
 var (
-	user32Paster                     = windows.NewLazySystemDLL("user32.dll")
-	kernel32Paster                   = windows.NewLazySystemDLL("kernel32.dll")
-	procOpenClipboard                = user32Paster.NewProc("OpenClipboard")
-	procCloseClipboard               = user32Paster.NewProc("CloseClipboard")
-	procEmptyClipboard               = user32Paster.NewProc("EmptyClipboard")
-	procSetClipboardData             = user32Paster.NewProc("SetClipboardData")
-	procSendInput                    = user32Paster.NewProc("SendInput")
-	procGlobalAlloc                  = kernel32Paster.NewProc("GlobalAlloc")
-	procGlobalLock                   = kernel32Paster.NewProc("GlobalLock")
-	procGlobalUnlock                 = kernel32Paster.NewProc("GlobalUnlock")
-	procGlobalFree                   = kernel32Paster.NewProc("GlobalFree")
-	windowsPasterClipboardText       = setWindowsClipboardText
-	windowsPasterSendPasteShortcut   = sendWindowsPasteShortcut
-	windowsPasterTypeUnicodeFallback = typeWindowsUnicodeFallback
+	user32Paster                      = windows.NewLazySystemDLL("user32.dll")
+	kernel32Paster                    = windows.NewLazySystemDLL("kernel32.dll")
+	procOpenClipboard                 = user32Paster.NewProc("OpenClipboard")
+	procCloseClipboard                = user32Paster.NewProc("CloseClipboard")
+	procEmptyClipboard                = user32Paster.NewProc("EmptyClipboard")
+	procGetClipboardData              = user32Paster.NewProc("GetClipboardData")
+	procSetClipboardData              = user32Paster.NewProc("SetClipboardData")
+	procSendInput                     = user32Paster.NewProc("SendInput")
+	procGlobalAlloc                   = kernel32Paster.NewProc("GlobalAlloc")
+	procGlobalLock                    = kernel32Paster.NewProc("GlobalLock")
+	procGlobalUnlock                  = kernel32Paster.NewProc("GlobalUnlock")
+	procGlobalFree                    = kernel32Paster.NewProc("GlobalFree")
+	windowsPasterClipboardText        = setWindowsClipboardText
+	windowsPasterSendPasteShortcut    = sendWindowsPasteShortcut
+	windowsPasterTypeUnicodeFallback  = typeWindowsUnicodeFallback
+	windowsPasterReadClipboardText    = readWindowsClipboardText
+	windowsPasterRestoreClipboardText = restoreWindowsClipboardText
 )
 
 func NewPaster(logger *slog.Logger) Paster {
@@ -68,12 +71,24 @@ func NewPaster(logger *slog.Logger) Paster {
 func (p *windowsClipboardPaster) Paste(text string) error {
 	p.logger.Debug("pasting", "operation", "Paste", "text_length", len(text))
 
+	previousClipboardText, hadClipboardText, snapshotErr := windowsPasterReadClipboardText()
+	if snapshotErr != nil {
+		p.logger.Warn("clipboard snapshot failed before paste", "operation", "Paste", "error", snapshotErr)
+	}
+
 	clipboardErr := windowsPasterClipboardText(text)
 	if clipboardErr == nil {
+		restoreClipboard := func() {
+			if restoreErr := windowsPasterRestoreClipboardText(previousClipboardText, hadClipboardText); restoreErr != nil {
+				p.logger.Warn("restore clipboard failed after paste", "operation", "Paste", "error", restoreErr)
+			}
+		}
 		if shortcutErr := windowsPasterSendPasteShortcut(); shortcutErr == nil {
+			restoreClipboard()
 			p.logger.Debug("pasted via clipboard shortcut", "operation", "Paste")
 			return nil
 		} else {
+			restoreClipboard()
 			p.logger.Warn("paste shortcut failed, falling back to unicode typing", "operation", "Paste", "error", shortcutErr)
 		}
 	} else {
@@ -122,6 +137,36 @@ func setWindowsClipboardText(text string) error {
 		return fmt.Errorf("set clipboard data: %w", callErr)
 	}
 	return nil
+}
+
+func readWindowsClipboardText() (string, bool, error) {
+	if ok, _, callErr := procOpenClipboard.Call(0); ok == 0 {
+		return "", false, fmt.Errorf("open clipboard: %w", callErr)
+	}
+	defer procCloseClipboard.Call()
+
+	handle, _, callErr := procGetClipboardData.Call(cfUnicodeText)
+	if handle == 0 {
+		if callErr != nil && callErr.Error() != "The operation completed successfully." {
+			return "", false, fmt.Errorf("get clipboard data: %w", callErr)
+		}
+		return "", false, nil
+	}
+
+	lock, _, callErr := procGlobalLock.Call(handle)
+	if lock == 0 {
+		return "", false, fmt.Errorf("global lock: %w", callErr)
+	}
+	defer procGlobalUnlock.Call(handle)
+
+	return windows.UTF16PtrToString((*uint16)(unsafe.Pointer(lock))), true, nil
+}
+
+func restoreWindowsClipboardText(text string, hadClipboardText bool) error {
+	if !hadClipboardText {
+		return nil
+	}
+	return setWindowsClipboardText(text)
 }
 
 func sendWindowsPasteShortcut() error {
