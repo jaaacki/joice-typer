@@ -39,6 +39,32 @@ function describeError(error: unknown, fallback: string): string {
   return fallback;
 }
 
+async function copyTextToClipboard(text: string) {
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+
+  const buffer = document.createElement("textarea");
+  buffer.value = text;
+  buffer.readOnly = true;
+  buffer.setAttribute("aria-hidden", "true");
+  buffer.style.position = "fixed";
+  buffer.style.left = "-9999px";
+  buffer.style.top = "0";
+  buffer.style.opacity = "0";
+  document.body.appendChild(buffer);
+  buffer.select();
+
+  try {
+    if (!document.execCommand("copy")) {
+      throw new Error("Clipboard copy failed");
+    }
+  } finally {
+    document.body.removeChild(buffer);
+  }
+}
+
 export default function LogsPane({ fetchLogs, copyFullLog, subscribeLogsUpdated }: LogsPaneProps) {
   const [tail, setTail] = useState<LogTailSnapshot | null>(null);
   const [loading, setLoading] = useState(true);
@@ -82,7 +108,7 @@ export default function LogsPane({ fetchLogs, copyFullLog, subscribeLogsUpdated 
     setCopying(true);
     try {
       const fullLog = await copyFullLog();
-      await navigator.clipboard.writeText(fullLog);
+      await copyTextToClipboard(fullLog);
       setStatus("Full log copied to clipboard.");
     } catch (error) {
       setStatus(describeError(error, "Failed to copy full log"));
