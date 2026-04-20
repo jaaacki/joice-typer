@@ -3,6 +3,7 @@
 package windows
 
 import (
+	"context"
 	"log/slog"
 	"sync"
 	"sync/atomic"
@@ -14,6 +15,11 @@ type runtimeState struct {
 	settingsLogger   *slog.Logger
 	settingsRecorder Recorder
 	hotkeyRestartCh  chan struct{}
+
+	prefsMu     sync.Mutex
+	prefsCtx    context.Context
+	prefsCancel context.CancelFunc
+	prefsOpen   int32
 
 	appState int32
 }
@@ -75,6 +81,38 @@ func signalHotkeyRestartCh() {
 	case runtimeSingleton.hotkeyRestartCh <- struct{}{}:
 	default:
 	}
+}
+
+func preferencesOpenCompareAndSwap(old, new int32) bool {
+	return atomic.CompareAndSwapInt32(&runtimeSingleton.prefsOpen, old, new)
+}
+
+func preferencesOpenStore(v int32) {
+	atomic.StoreInt32(&runtimeSingleton.prefsOpen, v)
+}
+
+func setPreferencesContext(ctx context.Context, cancel context.CancelFunc) {
+	runtimeSingleton.prefsMu.Lock()
+	if runtimeSingleton.prefsCancel != nil {
+		runtimeSingleton.prefsCancel()
+	}
+	runtimeSingleton.prefsCtx = ctx
+	runtimeSingleton.prefsCancel = cancel
+	runtimeSingleton.prefsMu.Unlock()
+}
+
+func currentPreferencesContext() context.Context {
+	runtimeSingleton.prefsMu.Lock()
+	defer runtimeSingleton.prefsMu.Unlock()
+	return runtimeSingleton.prefsCtx
+}
+
+func cancelPreferencesContext() {
+	runtimeSingleton.prefsMu.Lock()
+	if runtimeSingleton.prefsCancel != nil {
+		runtimeSingleton.prefsCancel()
+	}
+	runtimeSingleton.prefsMu.Unlock()
 }
 
 func storeCurrentAppState(state AppState) {
