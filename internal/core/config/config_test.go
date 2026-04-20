@@ -25,6 +25,9 @@ func (s stubFileInfo) Sys() any           { return nil }
 func TestLoadConfig_CreatesDefault(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.yaml")
+	originalGOOS := runtimeGOOS
+	defer func() { runtimeGOOS = originalGOOS }()
+	runtimeGOOS = "darwin"
 
 	cfg, err := LoadConfig(path)
 	if err != nil {
@@ -51,6 +54,23 @@ func TestLoadConfig_CreatesDefault(t *testing.T) {
 	// Verify file was created
 	if _, err := os.Stat(path); os.IsNotExist(err) {
 		t.Fatalf("config file not created at %s", path)
+	}
+}
+
+func TestLoadConfig_CreatesWindowsDefaultTriggerKey(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	originalGOOS := runtimeGOOS
+	defer func() { runtimeGOOS = originalGOOS }()
+	runtimeGOOS = "windows"
+
+	cfg, err := LoadConfig(path)
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+
+	if len(cfg.TriggerKey) != 2 || cfg.TriggerKey[0] != "ctrl" || cfg.TriggerKey[1] != "shift" {
+		t.Errorf("expected windows trigger_key [ctrl shift], got %v", cfg.TriggerKey)
 	}
 }
 
@@ -269,6 +289,15 @@ func TestSupportedHotkeyModifiersForGOOS(t *testing.T) {
 	}
 	if got := SupportedHotkeyModifiersForGOOS("darwin"); strings.Join(got, ",") != "fn,shift,ctrl,option,cmd" {
 		t.Fatalf("SupportedHotkeyModifiersForGOOS(darwin) = %#v, want [fn shift ctrl option cmd]", got)
+	}
+}
+
+func TestDefaultTriggerKeysForGOOS(t *testing.T) {
+	if got := DefaultTriggerKeysForGOOS("windows"); strings.Join(got, ",") != "ctrl,shift" {
+		t.Fatalf("DefaultTriggerKeysForGOOS(windows) = %#v, want [ctrl shift]", got)
+	}
+	if got := DefaultTriggerKeysForGOOS("darwin"); strings.Join(got, ",") != "fn,shift" {
+		t.Fatalf("DefaultTriggerKeysForGOOS(darwin) = %#v, want [fn shift]", got)
 	}
 }
 

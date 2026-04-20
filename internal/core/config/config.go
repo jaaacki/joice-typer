@@ -64,6 +64,11 @@ var hotkeyModifiersByGOOS = map[string][]string{
 	"windows": {"shift", "ctrl"},
 }
 
+var defaultTriggerKeysByGOOS = map[string][]string{
+	"darwin":  {"fn", "shift"},
+	"windows": {"ctrl", "shift"},
+}
+
 var validDecodeModes = map[string]bool{
 	"greedy": true,
 	"beam":   true,
@@ -106,6 +111,18 @@ func SupportedHotkeyKeys() []string {
 	keys := keys.Names()
 	slices.Sort(keys)
 	return keys
+}
+
+func DefaultTriggerKeysForGOOS(goos string) []string {
+	keys, ok := defaultTriggerKeysByGOOS[goos]
+	if !ok {
+		keys = defaultTriggerKeysByGOOS["darwin"]
+	}
+	return append([]string(nil), keys...)
+}
+
+func DefaultTriggerKeys() []string {
+	return DefaultTriggerKeysForGOOS(runtimeGOOS)
 }
 
 var validLanguages = map[string]bool{
@@ -199,7 +216,15 @@ func LoadConfig(path string) (Config, error) {
 		if err := os.MkdirAll(dir, 0755); err != nil {
 			return Config{}, fmt.Errorf("config.LoadConfig: create dir: %w", err)
 		}
-		if err := atomicWriteFile(path, defaultConfigYAML, 0644); err != nil {
+		defaultConfig, err := platformDefaultConfig()
+		if err != nil {
+			return Config{}, fmt.Errorf("config.LoadConfig: prepare default: %w", err)
+		}
+		data, err := yaml.Marshal(&defaultConfig)
+		if err != nil {
+			return Config{}, fmt.Errorf("config.LoadConfig: marshal default: %w", err)
+		}
+		if err := atomicWriteFile(path, data, 0644); err != nil {
 			return Config{}, fmt.Errorf("config.LoadConfig: write default: %w", err)
 		}
 	}
@@ -236,6 +261,17 @@ func LoadConfig(path string) (Config, error) {
 		return Config{}, err
 	}
 
+	return cfg, nil
+}
+
+func platformDefaultConfig() (Config, error) {
+	var cfg Config
+	dec := yaml.NewDecoder(bytes.NewReader(defaultConfigYAML))
+	dec.KnownFields(true)
+	if err := dec.Decode(&cfg); err != nil {
+		return Config{}, fmt.Errorf("parse embedded default config: %w", err)
+	}
+	cfg.TriggerKey = DefaultTriggerKeys()
 	return cfg, nil
 }
 

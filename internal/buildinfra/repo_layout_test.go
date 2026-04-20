@@ -315,6 +315,68 @@ func TestWindowsSettingsBridgeSource_ProvidesExplicitAdapterHooks(t *testing.T) 
 	}
 }
 
+func TestWindowsPasterSource_UsesClipboardAndTypingFallback(t *testing.T) {
+	root := repoRoot(t)
+	data, err := os.ReadFile(filepath.Join(root, "internal", "platform", "windows", "paster.go"))
+	if err != nil {
+		t.Fatalf("read windows/paster.go: %v", err)
+	}
+	source := string(data)
+	for _, required := range []string{
+		`procOpenClipboard`,
+		`procSetClipboardData`,
+		`procSendInput`,
+		`clipboard paste failed, falling back to unicode typing`,
+		`paste shortcut failed, falling back to unicode typing`,
+		`keyeventfUnicode`,
+	} {
+		if !strings.Contains(source, required) {
+			t.Fatalf("expected windows/paster.go to contain %q", required)
+		}
+	}
+}
+
+func TestWindowsNotificationSource_UsesToastSpawner(t *testing.T) {
+	root := repoRoot(t)
+	data, err := os.ReadFile(filepath.Join(root, "internal", "platform", "windows", "notification.go"))
+	if err != nil {
+		t.Fatalf("read windows/notification.go: %v", err)
+	}
+	source := string(data)
+	for _, required := range []string{
+		`powershell`,
+		`ToastNotificationManager`,
+		`CreateToastNotifier('JoiceTyper')`,
+		`failed to spawn windows toast`,
+	} {
+		if !strings.Contains(source, required) {
+			t.Fatalf("expected windows/notification.go to contain %q", required)
+		}
+	}
+}
+
+func TestWindowsHotkeySource_UsesLowLevelKeyboardHook(t *testing.T) {
+	root := repoRoot(t)
+	data, err := os.ReadFile(filepath.Join(root, "internal", "platform", "windows", "hotkey.go"))
+	if err != nil {
+		t.Fatalf("read windows/hotkey.go: %v", err)
+	}
+	source := string(data)
+	for _, required := range []string{
+		`SetWindowsHookExW`,
+		`UnhookWindowsHookEx`,
+		`CallNextHookEx`,
+		`PostThreadMessageW`,
+		`windowsLowLevelKeyboardProc`,
+		`TriggerPressed`,
+		`TriggerReleased`,
+	} {
+		if !strings.Contains(source, required) {
+			t.Fatalf("expected windows/hotkey.go to contain %q", required)
+		}
+	}
+}
+
 func TestDarwinWebviewTransportSource_LogsWindowLifecycle(t *testing.T) {
 	root := repoRoot(t)
 	data, err := os.ReadFile(filepath.Join(root, "internal", "platform", "darwin", "webview_darwin.m"))
