@@ -18,7 +18,7 @@ func ReadLogTail(path string, maxLines int) (string, bool, error) {
 	}
 
 	if maxLines <= 0 {
-		return "", true, nil
+		return "", false, nil
 	}
 
 	trailingNewline := content[len(content)-1] == '\n'

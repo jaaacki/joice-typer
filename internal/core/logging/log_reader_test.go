@@ -91,3 +91,12 @@ func TestReadLogTail_MissingFileIsClean(t *testing.T) {
 		t.Fatal("expected truncated=false for missing file")
 	}
 }
+func TestReadFullLog_MissingFileIsClean(t *testing.T) {
+	content, err := ReadFullLog(filepath.Join(t.TempDir(), "missing.log"))
+	if err != nil {
+		t.Fatalf("ReadFullLog: %v", err)
+	}
+	if content != "" {
+		t.Fatalf("content = %q, want empty", content)
+	}
+}
