@@ -14,3 +14,4 @@ The root `Makefile` remains the packaging entrypoint:
 Runtime packaging is fail-closed:
 - `build-windows-runtime-amd64` requires a Windows CGO toolchain and staged whisper/ggml runtime DLLs
 - missing `whisper.dll`, `ggml.dll`, `ggml-base.dll`, or `ggml-cpu.dll` now fails the build before installer generation
+- `package-windows` now packages only the runtime build path; `build-windows-amd64` remains a bootstrap/non-CGO shell build

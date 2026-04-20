@@ -141,11 +141,6 @@ release-check:
 build-windows-amd64: bridge-contract frontend-build
 	mkdir -p $(WINDOWS_BUILD_DIR)
 	GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -ldflags "$(GO_LDFLAGS)" -o $(WINDOWS_BIN_PATH) ./cmd/joicetyper
-	@for dll in $(WINDOWS_RUNTIME_DLLS); do \
-		if [ -f "$(WINDOWS_RUNTIME_DIR)/$$dll" ]; then \
-			cp "$(WINDOWS_RUNTIME_DIR)/$$dll" "$(WINDOWS_BUILD_DIR)/$$dll"; \
-		fi; \
-	done
 
 windows-runtime-prereqs:
 	@command -v $(WINDOWS_CC) >/dev/null 2>&1 || (echo "fatal: missing Windows C compiler $(WINDOWS_CC)" && exit 1)
@@ -169,10 +164,8 @@ build-windows-runtime-amd64: bridge-contract frontend-build windows-runtime-prer
 	done
 	@$(MAKE) windows-runtime-stage-check
 
-package-windows: build-windows-amd64
+package-windows: build-windows-runtime-amd64 windows-runtime-stage-check
 	@test -f "$(WINDOWS_INSTALLER_SCRIPT)" || (echo "fatal: missing $(WINDOWS_INSTALLER_SCRIPT)" && exit 1)
 	$(ISCC) /DAppVersion=$(VERSION) /DRepoRoot="$(CURDIR)" /DOutputDir="$(CURDIR)/$(WINDOWS_BUILD_DIR)" "$(WINDOWS_INSTALLER_SCRIPT)"
 
-package-windows-runtime: build-windows-runtime-amd64 windows-runtime-stage-check
-	@test -f "$(WINDOWS_INSTALLER_SCRIPT)" || (echo "fatal: missing $(WINDOWS_INSTALLER_SCRIPT)" && exit 1)
-	$(ISCC) /DAppVersion=$(VERSION) /DRepoRoot="$(CURDIR)" /DOutputDir="$(CURDIR)/$(WINDOWS_BUILD_DIR)" "$(WINDOWS_INSTALLER_SCRIPT)"
+package-windows-runtime: package-windows

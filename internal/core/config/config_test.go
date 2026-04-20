@@ -284,8 +284,8 @@ func TestValidate_InvalidLanguage(t *testing.T) {
 }
 
 func TestSupportedHotkeyModifiersForGOOS(t *testing.T) {
-	if got := SupportedHotkeyModifiersForGOOS("windows"); strings.Join(got, ",") != "shift,ctrl" {
-		t.Fatalf("SupportedHotkeyModifiersForGOOS(windows) = %#v, want [shift ctrl]", got)
+	if got := SupportedHotkeyModifiersForGOOS("windows"); strings.Join(got, ",") != "shift,ctrl,option,cmd" {
+		t.Fatalf("SupportedHotkeyModifiersForGOOS(windows) = %#v, want [shift ctrl option cmd]", got)
 	}
 	if got := SupportedHotkeyModifiersForGOOS("darwin"); strings.Join(got, ",") != "fn,shift,ctrl,option,cmd" {
 		t.Fatalf("SupportedHotkeyModifiersForGOOS(darwin) = %#v, want [fn shift ctrl option cmd]", got)

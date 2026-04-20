@@ -354,6 +354,7 @@ func TestWindowsPackagingSource_StagesNativeWhisperRuntime(t *testing.T) {
 		"WINDOWS_RUNTIME_DIR :=",
 		"WINDOWS_RUNTIME_DLLS :=",
 		"build-windows-amd64:",
+		"package-windows: build-windows-runtime-amd64 windows-runtime-stage-check",
 	} {
 		if !strings.Contains(makefile, required) {
 			t.Fatalf("expected Makefile to contain %q", required)
@@ -536,6 +537,8 @@ func TestWindowsSettingsBridgeSource_ProvidesExplicitAdapterHooks(t *testing.T) 
 		`return bridgepkg.PermissionsSnapshot{Accessibility: true, InputMonitoring: true}`,
 		`ListDevices: func(context.Context) ([]bridgepkg.DeviceSnapshot, error) {`,
 		`RefreshDevices: func(context.Context) ([]bridgepkg.DeviceSnapshot, error) {`,
+		`prefsCtx := currentPreferencesContext()`,
+		`preferences context unavailable after opening setup`,
 		`func openPreferences() error {`,
 		`showWindowsPreferencesUnavailable(err.Error())`,
 		`showWindowsMessageBox("JoiceTyper Preferences unavailable", message)`,
@@ -575,6 +578,10 @@ func TestWindowsHotkeyCaptureSource_UsesDedicatedLowLevelHook(t *testing.T) {
 		`bridgepkg.ErrorCodeHotkeyCaptureConfirmFailed`,
 		`bridgepkg.ErrorCodeHotkeyCaptureCancelFailed`,
 		`stopWindowsHotkeyCaptureListener()`,
+		`windowsModifierPressed(pressed, vkMenu, vkLMenu, vkRMenu)`,
+		`windowsModifierPressed(pressed, vkLWin, vkRWin)`,
+		`return "option"`,
+		`return "cmd"`,
 	} {
 		if !strings.Contains(source, required) {
 			t.Fatalf("expected windows/hotkey_capture.go to contain %q", required)
@@ -706,6 +713,12 @@ func TestWindowsHotkeySource_UsesLowLevelKeyboardHook(t *testing.T) {
 		`windowsLowLevelKeyboardProc`,
 		`TriggerPressed`,
 		`TriggerReleased`,
+		`modifier != "option"`,
+		`modifier != "cmd"`,
+		`windowsModifierPressed(h.pressed, vkMenu, vkLMenu, vkRMenu)`,
+		`windowsModifierPressed(h.pressed, vkLWin, vkRWin)`,
+		`display = append(display, "Alt")`,
+		`display = append(display, "Win")`,
 	} {
 		if !strings.Contains(source, required) {
 			t.Fatalf("expected windows/hotkey.go to contain %q", required)

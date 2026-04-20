@@ -64,7 +64,13 @@ make build-windows-runtime-amd64
 make package-windows-runtime
 ```
 
-This produces a Windows build at `build/windows-amd64/joicetyper.exe` and, when `iscc` (Inno Setup) is available, packages it with `packaging/windows/joicetyper.iss`.
+This produces a bootstrap Windows build at `build/windows-amd64/joicetyper.exe`.
+The installer path packages only the runtime build:
+
+```bash
+make build-windows-runtime-amd64
+make package-windows
+```
 
 `build-windows-amd64` is the non-CGO Windows shell build.
 `build-windows-runtime-amd64` is the native Windows runtime build path for whisper-backed transcription and recorder support, and requires a Windows CGO toolchain plus staged whisper/ggml runtime artifacts.

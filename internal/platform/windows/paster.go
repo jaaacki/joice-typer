@@ -12,14 +12,13 @@ import (
 )
 
 const (
-	cfUnicodeText  = 13
-	gmemMoveable   = 0x0002
-	gmemZeroInit   = 0x0040
-	inputKeyboard  = 1
-	keyeventfKeyUp = 0x0002
+	cfUnicodeText    = 13
+	gmemMoveable     = 0x0002
+	gmemZeroInit     = 0x0040
+	inputKeyboard    = 1
+	keyeventfKeyUp   = 0x0002
 	keyeventfUnicode = 0x0004
-	vkControl      = 0x11
-	vkV            = 0x56
+	vkV              = 0x56
 )
 
 type windowsClipboardPaster struct {

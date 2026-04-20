@@ -22,6 +22,18 @@ const (
 	wmSysKeyDown = 0x0104
 	wmSysKeyUp   = 0x0105
 	wmQuit       = 0x0012
+
+	vkShift    = 0x10
+	vkControl  = 0x11
+	vkMenu     = 0x12
+	vkLWin     = 0x5B
+	vkRWin     = 0x5C
+	vkLShift   = 0xA0
+	vkRShift   = 0xA1
+	vkLControl = 0xA2
+	vkRControl = 0xA3
+	vkLMenu    = 0xA4
+	vkRMenu    = 0xA5
 )
 
 type windowsKBDLLHookStruct struct {
@@ -68,7 +80,7 @@ func NewHotkeyListener(triggerKeys []string, logger *slog.Logger) HotkeyListener
 	requiredKey := uint32(0)
 	for _, key := range triggerKeys {
 		switch key {
-		case "ctrl", "shift":
+		case "ctrl", "shift", "option", "cmd":
 			requiredModifiers[key] = true
 		default:
 			requiredKey = windowsVKForKey(key)
@@ -201,7 +213,7 @@ func (h *hotkeyListener) validateSupportedHotkey() error {
 		return fmt.Errorf("hotkey.Start: at least one key required")
 	}
 	for modifier := range h.requiredModifiers {
-		if modifier != "ctrl" && modifier != "shift" {
+		if modifier != "ctrl" && modifier != "shift" && modifier != "option" && modifier != "cmd" {
 			return fmt.Errorf("hotkey.Start: modifier %q is not supported on Windows", modifier)
 		}
 	}
@@ -251,16 +263,31 @@ func (h *hotkeyListener) handleKeyMessage(message uint32, vkCode uint32) {
 }
 
 func (h *hotkeyListener) triggerSatisfied() bool {
-	if h.requiredModifiers["ctrl"] && !h.pressed[vkControl] {
+	if h.requiredModifiers["ctrl"] && !windowsModifierPressed(h.pressed, vkControl, vkLControl, vkRControl) {
 		return false
 	}
-	if h.requiredModifiers["shift"] && !h.pressed[0x10] {
+	if h.requiredModifiers["shift"] && !windowsModifierPressed(h.pressed, vkShift, vkLShift, vkRShift) {
+		return false
+	}
+	if h.requiredModifiers["option"] && !windowsModifierPressed(h.pressed, vkMenu, vkLMenu, vkRMenu) {
+		return false
+	}
+	if h.requiredModifiers["cmd"] && !windowsModifierPressed(h.pressed, vkLWin, vkRWin) {
 		return false
 	}
 	if h.requiredKey != 0 && !h.pressed[h.requiredKey] {
 		return false
 	}
 	return len(h.requiredModifiers) > 0 || h.requiredKey != 0
+}
+
+func windowsModifierPressed(pressed map[uint32]bool, variants ...uint32) bool {
+	for _, vk := range variants {
+		if pressed[vk] {
+			return true
+		}
+	}
+	return false
 }
 
 func (h *hotkeyListener) emitLocked(event HotkeyEvent) {
@@ -334,7 +361,32 @@ func windowsVKForKey(name string) uint32 {
 }
 
 func FormatHotkeyDisplay(keys []string) string {
-	return strings.Join(keys, " + ")
+	display := make([]string, 0, len(keys))
+	for _, key := range keys {
+		switch key {
+		case "ctrl":
+			display = append(display, "Ctrl")
+		case "shift":
+			display = append(display, "Shift")
+		case "option":
+			display = append(display, "Alt")
+		case "cmd":
+			display = append(display, "Win")
+		case "space":
+			display = append(display, "Space")
+		case "tab":
+			display = append(display, "Tab")
+		case "return":
+			display = append(display, "Return")
+		case "escape":
+			display = append(display, "Escape")
+		case "delete":
+			display = append(display, "Delete")
+		default:
+			display = append(display, strings.ToUpper(key))
+		}
+	}
+	return strings.Join(display, " + ")
 }
 
 func hotkeyEventString(e HotkeyEvent) string {

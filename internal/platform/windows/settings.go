@@ -82,9 +82,22 @@ func IsFirstRun() bool {
 	return os.IsNotExist(err)
 }
 
-func RunSetupWizard(context.Context, *slog.Logger) (string, error) {
+func RunSetupWizard(ctx context.Context, logger *slog.Logger) (string, error) {
 	if err := openPreferences(); err != nil {
 		return "", err
+	}
+	prefsCtx := currentPreferencesContext()
+	if prefsCtx == nil {
+		return "", fmt.Errorf("preferences context unavailable after opening setup")
+	}
+	select {
+	case <-prefsCtx.Done():
+		if logger != nil {
+			logger.Info("first-run preferences closed", "operation", "RunSetupWizard")
+		}
+	case <-ctx.Done():
+		cancelPreferencesContext()
+		return "", ctx.Err()
 	}
 	return "", nil
 }

@@ -268,16 +268,22 @@ func hotkeyCaptureSnapshotEqual(a, b bridgepkg.HotkeyCaptureSnapshot) bool {
 }
 
 func hotkeyKeysForPressed(pressed map[uint32]bool) []string {
-	keys := make([]string, 0, 3)
-	if pressed[vkControl] {
+	keys := make([]string, 0, 5)
+	if windowsModifierPressed(pressed, vkControl, vkLControl, vkRControl) {
 		keys = append(keys, "ctrl")
 	}
-	if pressed[0x10] {
+	if windowsModifierPressed(pressed, vkShift, vkLShift, vkRShift) {
 		keys = append(keys, "shift")
+	}
+	if windowsModifierPressed(pressed, vkMenu, vkLMenu, vkRMenu) {
+		keys = append(keys, "option")
+	}
+	if windowsModifierPressed(pressed, vkLWin, vkRWin) {
+		keys = append(keys, "cmd")
 	}
 	for vk := range pressed {
 		name := keyNameForWindowsVK(vk)
-		if name == "" || name == "ctrl" || name == "shift" {
+		if name == "" || name == "ctrl" || name == "shift" || name == "option" || name == "cmd" {
 			continue
 		}
 		keys = append(keys, name)
@@ -288,10 +294,14 @@ func hotkeyKeysForPressed(pressed map[uint32]bool) []string {
 
 func keyNameForWindowsVK(vk uint32) string {
 	switch vk {
-	case vkControl:
+	case vkControl, vkLControl, vkRControl:
 		return "ctrl"
-	case 0x10:
+	case vkShift, vkLShift, vkRShift:
 		return "shift"
+	case vkMenu, vkLMenu, vkRMenu:
+		return "option"
+	case vkLWin, vkRWin:
+		return "cmd"
 	case 0x20:
 		return "space"
 	case 0x09:

@@ -61,7 +61,7 @@ var validModifiers = map[string]bool{
 
 var hotkeyModifiersByGOOS = map[string][]string{
 	"darwin":  {"fn", "shift", "ctrl", "option", "cmd"},
-	"windows": {"shift", "ctrl"},
+	"windows": {"shift", "ctrl", "option", "cmd"},
 }
 
 var defaultTriggerKeysByGOOS = map[string][]string{
