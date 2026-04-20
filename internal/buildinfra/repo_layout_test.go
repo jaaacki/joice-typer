@@ -254,6 +254,25 @@ func TestDarwinWebviewTransportSource_LogsNativeFailures(t *testing.T) {
 	}
 }
 
+func TestWindowsWebviewTransportSource_LogsNativeFailures(t *testing.T) {
+	root := repoRoot(t)
+	data, err := os.ReadFile(filepath.Join(root, "internal", "platform", "windows", "webview_host_windows.go"))
+	if err != nil {
+		t.Fatalf("read webview_host_windows.go: %v", err)
+	}
+	source := string(data)
+	for _, required := range []string{
+		`webSettingsNativeTransportWarning("showWindowsWebView2Host", err.Error())`,
+		`webSettingsNativeTransportWarning("focusWindowsWebView2Host", err.Error())`,
+		`webSettingsNativeTransportWarning("dispatchWindowsWebView2Envelope", err.Error())`,
+		`webSettingsNativeTransportWarning("windowsWebView2Host", err.Error())`,
+	} {
+		if !strings.Contains(source, required) {
+			t.Fatalf("expected webview_host_windows.go to contain %q", required)
+		}
+	}
+}
+
 func TestDarwinWebviewTransportSource_LogsWindowLifecycle(t *testing.T) {
 	root := repoRoot(t)
 	data, err := os.ReadFile(filepath.Join(root, "internal", "platform", "darwin", "webview_darwin.m"))

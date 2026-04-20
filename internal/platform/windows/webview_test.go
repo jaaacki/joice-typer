@@ -8,6 +8,8 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -244,5 +246,38 @@ func TestDispatchWebSettingsEvent_LogsMarshalFailure(t *testing.T) {
 
 	if !strings.Contains(logs.String(), "failed to marshal bridge event") {
 		t.Fatalf("expected marshal failure to be logged, got %q", logs.String())
+	}
+}
+
+func TestWebView2DocumentCreatedScript_ProvidesSharedBridgeShim(t *testing.T) {
+	script := webView2DocumentCreatedScript()
+	for _, snippet := range []string{
+		"window.webkit.messageHandlers.joicetyper.postMessage",
+		"chrome.webview.postMessage(JSON.stringify(payload))",
+		"chrome.webview.addEventListener('message'",
+		bridgepkg.BridgeEventName,
+	} {
+		if !strings.Contains(script, snippet) {
+			t.Fatalf("expected document-created script to contain %q, got %q", snippet, script)
+		}
+	}
+}
+
+func TestDefaultWebSettingsHostHooks_UseNamedWebView2Shim(t *testing.T) {
+	tests := []struct {
+		name     string
+		fn       any
+		expected string
+	}{
+		{name: "show", fn: webSettingsShowWindow, expected: "showWindowsWebView2Host"},
+		{name: "focus", fn: webSettingsFocusWindow, expected: "focusWindowsWebView2Host"},
+		{name: "dispatch", fn: webSettingsDispatchEnvelope, expected: "dispatchWindowsWebView2Envelope"},
+	}
+
+	for _, tc := range tests {
+		fnName := runtime.FuncForPC(reflect.ValueOf(tc.fn).Pointer()).Name()
+		if !strings.Contains(fnName, tc.expected) {
+			t.Fatalf("%s hook = %q, want name containing %q", tc.name, fnName, tc.expected)
+		}
 	}
 }

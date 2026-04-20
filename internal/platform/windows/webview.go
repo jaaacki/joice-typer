@@ -19,22 +19,9 @@ import (
 )
 
 var (
-	webSettingsDispatchEnvelope = func(payloadJSON string, closeWindow bool) {
-		_ = closeWindow
-		currentSettingsLogger().Error("web settings native transport unavailable", "operation", "dispatchWebSettingsEnvelope", "payload_length", len(payloadJSON))
-	}
-	webSettingsShowWindow = func(html string) error {
-		currentSettingsLogger().Error("web settings native transport unavailable", "operation", "ShowWebSettingsWindowWithBridge", "html_length", len(html))
-		return bridgepkg.NewContractError(
-			bridgepkg.ErrorCodeInternal,
-			"WebView2 host unavailable",
-			false,
-			nil,
-		)
-	}
-	webSettingsFocusWindow = func() {
-		currentSettingsLogger().Info("web settings native transport unavailable", "operation", "FocusWebSettingsWindow")
-	}
+	webSettingsDispatchEnvelope = dispatchWindowsWebView2Envelope
+	webSettingsShowWindow       = showWindowsWebView2Host
+	webSettingsFocusWindow      = focusWindowsWebView2Host
 
 	embeddedWebUIHTMLMu       sync.Mutex
 	embeddedWebUIHTMLTemplate []byte

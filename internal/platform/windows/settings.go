@@ -32,6 +32,12 @@ var (
 	webSettingsPostError         = func(message string) {
 		currentSettingsLogger().Warn("web settings bridge request failed", "operation", "webSettingsPostError", "message", message)
 	}
+	webSettingsNativeTransportInfo = func(operation, message string) {
+		currentSettingsLogger().Info(message, "operation", operation)
+	}
+	webSettingsNativeTransportWarning = func(operation, message string) {
+		currentSettingsLogger().Warn(message, "operation", operation)
+	}
 	webSettingsLoadPermissions = loadWebSettingsPermissionsSnapshot
 	webSettingsLogPath         = func() (string, error) {
 		dir, err := configpkg.DefaultConfigDir()
