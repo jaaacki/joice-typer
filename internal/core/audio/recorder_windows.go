@@ -4,7 +4,6 @@ package audio
 
 import (
 	"context"
-	"fmt"
 	"log/slog"
 	"runtime"
 
@@ -29,23 +28,6 @@ func InitAudio() error {
 }
 
 func TerminateAudio() error {
-	return nil
-}
-
-func ListInputDevices() error {
-	devices, err := ListInputDeviceSnapshots()
-	if err != nil {
-		return fmt.Errorf("recorder.ListInputDevices: %w", err)
-	}
-	fmt.Println("Available input devices:")
-	for _, device := range devices {
-		defaultSuffix := ""
-		if device.IsDefault {
-			defaultSuffix = " (default)"
-		}
-		fmt.Printf("  %s%s\n", device.Name, defaultSuffix)
-	}
-	fmt.Printf("\nSet input_device in %s to use a specific device.\n", listDevicesConfigHint())
 	return nil
 }
 

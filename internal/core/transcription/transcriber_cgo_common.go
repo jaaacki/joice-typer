@@ -164,7 +164,15 @@ func (t *whisperTranscriber) transcribeBlocking(audio []float32) (string, error)
 		return "", fmt.Errorf("transcriber.Transcribe: transcriber is closed")
 	}
 
-	t.logger.Info("transcribing", "operation", "Transcribe", "samples", len(audio))
+	var sumSq float64
+	for _, s := range audio {
+		sumSq += float64(s) * float64(s)
+	}
+	rms := 0.0
+	if len(audio) > 0 {
+		rms = sumSq / float64(len(audio))
+	}
+	t.logger.Info("transcribing", "operation", "Transcribe", "samples", len(audio), "audio_rms_sq", rms)
 
 	decodeCfg := decodeConfigForMode(t.decodeMode)
 	params := C.whisper_full_default_params(C.WHISPER_SAMPLING_GREEDY)

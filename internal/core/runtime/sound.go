@@ -4,25 +4,26 @@ import (
 	"context"
 	"log/slog"
 	"os/exec"
+	"runtime"
 	"time"
 )
 
 type Sound struct {
 	enabled bool
 	logger  *slog.Logger
-	sem     chan struct{} // limits concurrent afplay processes
+	sem     chan struct{} // limits concurrent playback processes
 }
 
 func NewSound(enabled bool, logger *slog.Logger) *Sound {
 	return &Sound{
 		enabled: enabled,
 		logger:  logger.With("component", "sound"),
-		sem:     make(chan struct{}, 3), // max 3 concurrent sounds
+		sem:     make(chan struct{}, 3),
 	}
 }
 
 func (s *Sound) Play(name string) {
-	if !s.enabled {
+	if !s.enabled || runtime.GOOS != "darwin" {
 		return
 	}
 	select {

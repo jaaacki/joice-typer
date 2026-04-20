@@ -17,7 +17,8 @@ import (
 )
 
 type portaudioRecorder struct {
-	sampleRate   float64
+	sampleRate   float64 // target sample rate for whisper (e.g. 16000)
+	captureRate  float64 // actual capture rate used by the open stream
 	deviceName   string
 	stream       *portaudio.Stream
 	activeStream *portaudio.Stream // guarded by mu; used by Stop to force-abort on timeout
@@ -36,11 +37,37 @@ type portaudioRecorder struct {
 
 func NewRecorder(sampleRate int, deviceName string, logger *slog.Logger) apppkg.Recorder {
 	return &portaudioRecorder{
-		sampleRate: float64(sampleRate),
-		deviceName: deviceName,
-		logger:     logger.With("component", "recorder"),
-		maxSamples: int(float64(sampleRate) * 90.0),
+		sampleRate:  float64(sampleRate),
+		captureRate: float64(sampleRate), // updated when stream opens; may differ from sampleRate
+		deviceName:  deviceName,
+		logger:      logger.With("component", "recorder"),
+		maxSamples:  sampleRate * 90, // updated at stream-open time if captureRate differs
 	}
+}
+
+// resampleLinear resamples audio from srcRate to dstRate using linear interpolation.
+func resampleLinear(src []float32, srcRate, dstRate float64) []float32 {
+	if srcRate == dstRate || len(src) == 0 {
+		return src
+	}
+	ratio := srcRate / dstRate
+	outLen := int(float64(len(src)) / ratio)
+	if outLen == 0 {
+		return nil
+	}
+	out := make([]float32, outLen)
+	for i := range out {
+		pos := float64(i) * ratio
+		lo := int(pos)
+		hi := lo + 1
+		frac := float32(pos - float64(lo))
+		if hi >= len(src) {
+			out[i] = src[lo]
+		} else {
+			out[i] = src[lo]*(1-frac) + src[hi]*frac
+		}
+	}
+	return out
 }
 
 func InitAudio() error {
@@ -150,14 +177,22 @@ func findInputDevice(name string) (*portaudio.DeviceInfo, error) {
 }
 
 // openStream creates and returns a PortAudio stream for the configured device.
-func (r *portaudioRecorder) openStream(buf []float32) (*portaudio.Stream, error) {
-	if r.deviceName != "" {
-		device, devErr := findInputDevice(r.deviceName)
-		if devErr != nil {
-			r.logger.Warn("configured device not found, using default input",
-				"operation", "openStream",
-				"device", r.deviceName, "error", devErr)
-			return portaudio.OpenDefaultStream(1, 0, r.sampleRate, len(buf), buf)
+// Returns the stream and the actual sample rate used (may differ from r.sampleRate
+// if the device does not support the requested rate and a fallback was used).
+func (r *portaudioRecorder) openStream(buf []float32) (*portaudio.Stream, float64, error) {
+	device, devErr := r.resolveDevice()
+	if devErr != nil {
+		// No device info — try requested rate directly.
+		stream, err := portaudio.OpenDefaultStream(1, 0, r.sampleRate, len(buf), buf)
+		if err != nil {
+			return nil, 0, err
+		}
+		return stream, r.sampleRate, nil
+	}
+
+	for _, rate := range []float64{r.sampleRate, device.DefaultSampleRate} {
+		if rate <= 0 {
+			continue
 		}
 		params := portaudio.StreamParameters{
 			Input: portaudio.StreamDeviceParameters{
@@ -165,12 +200,37 @@ func (r *portaudioRecorder) openStream(buf []float32) (*portaudio.Stream, error)
 				Channels: 1,
 				Latency:  device.DefaultLowInputLatency,
 			},
-			SampleRate:      r.sampleRate,
+			SampleRate:      rate,
 			FramesPerBuffer: len(buf),
 		}
-		return portaudio.OpenStream(params, buf)
+		stream, err := portaudio.OpenStream(params, buf)
+		if err == nil {
+			if rate != r.sampleRate {
+				r.logger.Info("opened audio stream at native device rate",
+					"operation", "openStream",
+					"requested_rate", r.sampleRate,
+					"actual_rate", rate)
+			}
+			return stream, rate, nil
+		}
+		r.logger.Debug("openStream rate not supported, trying next",
+			"operation", "openStream", "rate", rate, "error", err)
 	}
-	return portaudio.OpenDefaultStream(1, 0, r.sampleRate, len(buf), buf)
+	return nil, 0, fmt.Errorf("device does not support rates %v or %v", r.sampleRate, device.DefaultSampleRate)
+}
+
+func (r *portaudioRecorder) resolveDevice() (*portaudio.DeviceInfo, error) {
+	if r.deviceName != "" {
+		device, err := findInputDevice(r.deviceName)
+		if err != nil {
+			r.logger.Warn("configured device not found, using default input",
+				"operation", "openStream",
+				"device", r.deviceName, "error", err)
+		} else {
+			return device, nil
+		}
+	}
+	return portaudio.DefaultInputDevice()
 }
 
 // Warm pre-opens the audio stream so Start() is near-instant.
@@ -189,13 +249,15 @@ func (r *portaudioRecorder) Warm() {
 	}
 
 	buf := make([]float32, 256)
-	stream, err := r.openStream(buf)
+	stream, actualRate, err := r.openStream(buf)
 	if err != nil {
 		r.logger.Warn("failed to pre-warm audio stream",
 			"operation", "Warm", "error", err)
 		return
 	}
 	r.warmStream = stream
+	r.captureRate = actualRate
+	r.maxSamples = int(actualRate * 90.0)
 	r.buffer = buf
 	r.logger.Info("audio stream pre-warmed", "operation", "Warm")
 }
@@ -270,12 +332,15 @@ func (r *portaudioRecorder) Start(ctx context.Context) error {
 		// Cold path: open stream now (slow — can take 1-2 seconds)
 		coldStart := time.Now()
 		r.buffer = make([]float32, 256)
-		stream, err = r.openStream(r.buffer)
+		var actualRate float64
+		stream, actualRate, err = r.openStream(r.buffer)
 		if err != nil {
 			r.recording = false
 			r.unhealthy = true
 			return &apppkg.ErrDependencyUnavailable{Component: "recorder", Operation: "Start", Wrapped: fmt.Errorf("open stream: %w", err)}
 		}
+		r.captureRate = actualRate
+		r.maxSamples = int(actualRate * 90.0)
 		r.logger.Debug("cold stream opened", "operation", "Start",
 			"open_ms", time.Since(coldStart).Milliseconds())
 	}
@@ -459,6 +524,21 @@ func (r *portaudioRecorder) Stop() ([]float32, error) {
 	for _, chunk := range chunks {
 		audio = append(audio, chunk...)
 	}
+
+	captureRate := r.sampleRate
+	r.mu.Lock()
+	if r.captureRate > 0 {
+		captureRate = r.captureRate
+	}
+	r.mu.Unlock()
+
+	if captureRate != r.sampleRate && captureRate > 0 {
+		audio = resampleLinear(audio, captureRate, r.sampleRate)
+		r.logger.Debug("resampled audio", "operation", "Stop",
+			"from_rate", captureRate, "to_rate", r.sampleRate,
+			"input_samples", total, "output_samples", len(audio))
+	}
+
 	r.logger.Debug("recording stopped", "operation", "Stop",
 		"samples", len(audio),
 		"duration_sec", float64(len(audio))/r.sampleRate)

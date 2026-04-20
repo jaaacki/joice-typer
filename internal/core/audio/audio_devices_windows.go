@@ -36,10 +36,15 @@ func ListInputDeviceSnapshots() ([]bridgepkg.DeviceSnapshot, error) {
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
 
-	if err := ole.CoInitializeEx(0, ole.COINIT_APARTMENTTHREADED); err != nil {
-		return nil, err
+	// S_FALSE (0x1) means COM is already initialized on this thread — not a real error.
+	err := ole.CoInitializeEx(0, ole.COINIT_APARTMENTTHREADED)
+	if err != nil {
+		if oleErr, ok := err.(*ole.OleError); !ok || oleErr.Code() != 0x00000001 {
+			return nil, err
+		}
+	} else {
+		defer ole.CoUninitialize()
 	}
-	defer ole.CoUninitialize()
 
 	var enumerator *wca.IMMDeviceEnumerator
 	if err := wca.CoCreateInstance(

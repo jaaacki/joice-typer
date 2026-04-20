@@ -296,6 +296,9 @@ func (h *windowsWebView2Host) show(html string) error {
 	if err := h.ensureWindow(); err != nil {
 		return err
 	}
+	if err := h.chromium.Show(); err != nil {
+		return fmt.Errorf("%s: show controller: %w", webView2RuntimeError, err)
+	}
 	h.chromium.NavigateToString(html)
 	procShowWindow.Call(h.hwnd, swShow)
 	procUpdateWindow.Call(h.hwnd)

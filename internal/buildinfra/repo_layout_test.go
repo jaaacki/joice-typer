@@ -64,8 +64,7 @@ func TestRepoLayout_FrontendToolchainFilesExist(t *testing.T) {
 
 func TestFrontendBuild_ProducesDistIndex(t *testing.T) {
 	root := repoRoot(t)
-	cmd := exec.Command("make", "frontend-build")
-	cmd.Dir = root
+	cmd := makeCommand(root, "frontend-build")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("make frontend-build: %v\n%s", err, out)
@@ -413,11 +412,11 @@ func TestWindowsAudioSource_UsesDedicatedWindowsSurfaceAndExcludesUnsupportedShi
 	}
 	source := string(windowsData)
 	for _, required := range []string{
-		"//go:build windows",
-		"ListInputDeviceSnapshots",
-		"ListInputDevices",
+		"//go:build windows && !cgo",
 		"InitAudio",
 		"TerminateAudio",
+		"NewRecorder",
+		"unsupportedAudioError",
 	} {
 		if !strings.Contains(source, required) {
 			t.Fatalf("expected recorder_windows.go to contain %q", required)
@@ -428,7 +427,7 @@ func TestWindowsAudioSource_UsesDedicatedWindowsSurfaceAndExcludesUnsupportedShi
 func TestWindowsPackagingSource_StagesNativeWhisperRuntime(t *testing.T) {
 	root := repoRoot(t)
 
-	makefileData, err := os.ReadFile(filepath.Join(root, "Makefile"))
+	makefileData, err := os.ReadFile(filepath.Join(root, "scripts", "make", "windows.mk"))
 	if err != nil {
 		t.Fatalf("read Makefile: %v", err)
 	}
@@ -508,7 +507,7 @@ func TestWindowsTranscriptionSource_UsesDedicatedWindowsCGOPath(t *testing.T) {
 		}
 	}
 
-	makefileData, err := os.ReadFile(filepath.Join(root, "Makefile"))
+	makefileData, err := os.ReadFile(filepath.Join(root, "scripts", "make", "windows.mk"))
 	if err != nil {
 		t.Fatalf("read Makefile: %v", err)
 	}
@@ -517,9 +516,6 @@ func TestWindowsTranscriptionSource_UsesDedicatedWindowsCGOPath(t *testing.T) {
 		"build-windows-runtime-amd64:",
 		"package-windows-runtime:",
 		"CGO_ENABLED=1",
-		"WINDOWS_GO_LDFLAGS :=",
-		"-H=windowsgui",
-		"--subsystem,windows",
 		"WINDOWS_CC ?=",
 		"WINDOWS_CXX ?=",
 		"WINDOWS_PORTAUDIO_STATIC_LIB :=",
@@ -529,6 +525,7 @@ func TestWindowsTranscriptionSource_UsesDedicatedWindowsCGOPath(t *testing.T) {
 		"PKG_CONFIG_LIBDIR=",
 		"WINDOWS_RUNTIME_IMPORT_DIR :=",
 		"windows-portaudio-static:",
+		"windows-whisper-runtime-stage:",
 		"windows-runtime-prereqs:",
 		"windows-runtime-stage-check:",
 		"fatal: missing static PortAudio library",

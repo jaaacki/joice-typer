@@ -10,6 +10,19 @@ import (
 	"time"
 )
 
+func makeCommand(root string, args ...string) *exec.Cmd {
+	makeBin := "make"
+	if _, err := exec.LookPath(makeBin); err != nil {
+		fallback := `C:\Program Files (x86)\GnuWin32\bin\make.exe`
+		if _, statErr := os.Stat(fallback); statErr == nil {
+			makeBin = fallback
+		}
+	}
+	cmd := exec.Command(makeBin, args...)
+	cmd.Dir = root
+	return cmd
+}
+
 func repoRoot(t *testing.T) string {
 	t.Helper()
 	_, file, _, ok := runtime.Caller(0)
@@ -23,8 +36,7 @@ func TestMakeDownloadModelUsesRuntimeModelDir(t *testing.T) {
 	root := repoRoot(t)
 	home := t.TempDir()
 
-	cmd := exec.Command("make", "-n", "download-model")
-	cmd.Dir = root
+	cmd := makeCommand(root, "-n", "download-model")
 	cmd.Env = append(os.Environ(), "HOME="+home)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
@@ -42,8 +54,7 @@ func TestMakeDownloadModelUsesXDGModelDirOnLinux(t *testing.T) {
 	home := t.TempDir()
 	xdgConfigHome := filepath.Join(home, ".config-alt")
 
-	cmd := exec.Command("make", "-n", "download-model", "HOST_GOOS=linux")
-	cmd.Dir = root
+	cmd := makeCommand(root, "-n", "download-model", "HOST_GOOS=linux")
 	cmd.Env = append(os.Environ(), "HOME="+home, "XDG_CONFIG_HOME="+xdgConfigHome)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
@@ -68,8 +79,7 @@ func TestMakeDownloadModelSkipsExistingFile(t *testing.T) {
 		t.Fatalf("write model file: %v", err)
 	}
 
-	cmd := exec.Command("make", "download-model", "CURL=false")
-	cmd.Dir = root
+	cmd := makeCommand(root, "download-model", "CURL=false")
 	cmd.Env = append(os.Environ(), "HOME="+home)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
@@ -81,8 +91,7 @@ func TestMakeAppUsesConfiguredPortaudioPrefix(t *testing.T) {
 	root := repoRoot(t)
 	const portaudioPrefix = "/usr/local/opt/portaudio"
 
-	cmd := exec.Command("make", "-n", "app", "PORTAUDIO_PREFIX="+portaudioPrefix)
-	cmd.Dir = root
+	cmd := makeCommand(root, "-n", "app", "PORTAUDIO_PREFIX="+portaudioPrefix)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("make -n app: %v\n%s", err, out)
@@ -97,8 +106,7 @@ func TestMakeAppUsesConfiguredPortaudioPrefix(t *testing.T) {
 func TestMakeAppUsesAssetPaths(t *testing.T) {
 	root := repoRoot(t)
 
-	cmd := exec.Command("make", "-n", "app")
-	cmd.Dir = root
+	cmd := makeCommand(root, "-n", "app")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("make -n app: %v\n%s", err, out)
@@ -116,8 +124,7 @@ func TestMakeAppUsesAssetPaths(t *testing.T) {
 func TestMakeBuildRunsFrontendBuild(t *testing.T) {
 	root := repoRoot(t)
 
-	cmd := exec.Command("make", "-n", "build")
-	cmd.Dir = root
+	cmd := makeCommand(root, "-n", "build")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("make -n build: %v\n%s", err, out)
@@ -132,8 +139,7 @@ func TestMakeBuildRunsFrontendBuild(t *testing.T) {
 func TestMakeWindowsBuildRunsFrontendBuild(t *testing.T) {
 	root := repoRoot(t)
 
-	cmd := exec.Command("make", "-n", "build-windows-amd64")
-	cmd.Dir = root
+	cmd := makeCommand(root, "-n", "build-windows-amd64")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("make -n build-windows-amd64: %v\n%s", err, out)
@@ -154,8 +160,7 @@ func TestMakeWindowsBuildRunsFrontendBuild(t *testing.T) {
 func TestMakePackageWindowsUsesInstallerScript(t *testing.T) {
 	root := repoRoot(t)
 
-	cmd := exec.Command("make", "-n", "package-windows")
-	cmd.Dir = root
+	cmd := makeCommand(root, "-n", "package-windows")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("make -n package-windows: %v\n%s", err, out)
@@ -218,8 +223,7 @@ func TestMakeBuildSkipsFrontendInstallWhenStampPresent(t *testing.T) {
 	}
 	defer os.Remove(stampPath)
 
-	cmd := exec.Command("make", "-n", "build")
-	cmd.Dir = root
+	cmd := makeCommand(root, "-n", "build")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("make -n build: %v\n%s", err, out)
@@ -258,8 +262,7 @@ func TestMakeBuildReinstallsFrontendWhenViteBinaryMissing(t *testing.T) {
 	}
 	defer os.Remove(stampPath)
 
-	cmd := exec.Command("make", "-n", "build")
-	cmd.Dir = root
+	cmd := makeCommand(root, "-n", "build")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("make -n build: %v\n%s", err, out)

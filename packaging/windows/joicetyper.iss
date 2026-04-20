@@ -42,9 +42,15 @@ PrivilegesRequired=lowest
 [Files]
 Source: "{#MyAppSourceDir}\{#MyAppExeName}"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#MyAppSourceDir}\whisper.dll"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#MyAppSourceDir}\libwhisper.dll"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#MyAppSourceDir}\ggml.dll"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#MyAppSourceDir}\ggml-base.dll"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#MyAppSourceDir}\ggml-cpu.dll"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#MyAppSourceDir}\libgcc_s_seh-1.dll"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#MyAppSourceDir}\libstdc++-6.dll"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#MyAppSourceDir}\libgomp-1.dll"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#MyAppSourceDir}\libdl.dll"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#MyAppSourceDir}\libwinpthread-1.dll"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
 Source: "{#MyWebView2Bootstrapper}"; DestDir: "{tmp}"; DestName: "MicrosoftEdgeWebview2Setup.exe"; Flags: deleteafterinstall skipifsourcedoesntexist
 
 [Icons]

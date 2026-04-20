@@ -73,8 +73,9 @@ make package-windows
 ```
 
 `build-windows-amd64` is the non-CGO Windows shell build.
-`build-windows-runtime-amd64` is the native Windows runtime build path for whisper-backed transcription and recorder support, and requires a Windows CGO toolchain plus staged whisper/ggml runtime artifacts.
-Missing runtime DLLs or the Windows CGO toolchain now fail that target immediately instead of producing a partial package.
+`build-windows-runtime-amd64` is the native Windows runtime build path for whisper-backed transcription and recorder support, and requires a Windows CGO toolchain plus a local `third_party/portaudio-windows-src` checkout.
+That target now builds/stages the Windows whisper runtime automatically (AVX2-enabled ggml/whisper DLLs), generates static Windows PortAudio metadata, and bundles the extra MinGW support DLLs needed at runtime.
+Missing runtime DLLs, the PortAudio source checkout, or the Windows CGO toolchain now fail that target immediately instead of producing a partial package.
 
 Frontend-only rebuild:
 

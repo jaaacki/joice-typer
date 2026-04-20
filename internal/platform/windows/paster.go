@@ -5,6 +5,7 @@ package windows
 import (
 	"fmt"
 	"log/slog"
+	"time"
 	"unicode/utf16"
 	"unsafe"
 
@@ -46,6 +47,7 @@ type windowsKeybdInput struct {
 	DwFlags     uint32
 	Time        uint32
 	DwExtraInfo uintptr
+	_           [8]byte // pad union to match MOUSEINPUT size: INPUT = 40 bytes on 64-bit
 }
 
 var (
@@ -104,7 +106,13 @@ func (p *windowsClipboardPaster) Paste(text string) error {
 			}
 		}
 		if shortcutErr := windowsPasterSendPasteShortcut(); shortcutErr == nil {
-			restoreClipboard()
+			// Restore asynchronously: SendInput queues events but returns before
+			// the target app processes Ctrl+V. Restore too early and the old
+			// clipboard content replaces the transcription before paste fires.
+			go func() {
+				time.Sleep(50 * time.Millisecond)
+				restoreClipboard()
+			}()
 			p.logger.Debug("pasted via clipboard shortcut", "operation", "Paste")
 			return nil
 		} else {

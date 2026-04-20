@@ -15,6 +15,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"syscall"
+	"unsafe"
 
 	audiopkg "voicetype/internal/core/audio"
 	configpkg "voicetype/internal/core/config"
@@ -23,7 +24,28 @@ import (
 	transcriptionpkg "voicetype/internal/core/transcription"
 	versionpkg "voicetype/internal/core/version"
 	platformpkg "voicetype/internal/platform"
+
+	"golang.org/x/sys/windows"
 )
+
+// singleInstanceMutex holds the named Windows mutex that prevents multiple
+// JoiceTyper instances from running simultaneously.
+var singleInstanceMutex windows.Handle
+
+func acquireSingleInstanceMutex() bool {
+	name, _ := windows.UTF16PtrFromString("Global\\JoiceTyper-SingleInstance")
+	h, err := windows.CreateMutex(nil, false, name)
+	if err != nil {
+		return false
+	}
+	if windows.GetLastError() == windows.ERROR_ALREADY_EXISTS {
+		windows.CloseHandle(h)
+		return false
+	}
+	_ = unsafe.Pointer(h) // keep h from being collected before program exit
+	singleInstanceMutex = h
+	return true
+}
 
 func Main() {
 	runtime.LockOSThread()
@@ -64,6 +86,11 @@ func Main() {
 }
 
 func runWindowsDesktopMode(configPath string) {
+	if !acquireSingleInstanceMutex() {
+		// Another instance is already running — exit silently.
+		os.Exit(0)
+	}
+
 	logDir, err := configpkg.DefaultConfigDir()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "fatal: %v\n", err)
