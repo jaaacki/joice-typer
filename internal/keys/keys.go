@@ -4,6 +4,8 @@
 // keycode tables stay in the platform implementations.
 package keys
 
+import "slices"
+
 var validKeys = map[string]bool{
 	"a": true, "s": true, "d": true, "f": true, "h": true,
 	"g": true, "z": true, "x": true, "c": true, "v": true,
@@ -21,4 +23,13 @@ var validKeys = map[string]bool{
 
 func IsKey(name string) bool {
 	return validKeys[name]
+}
+
+func Names() []string {
+	names := make([]string, 0, len(validKeys))
+	for name := range validKeys {
+		names = append(names, name)
+	}
+	slices.Sort(names)
+	return names
 }

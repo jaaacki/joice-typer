@@ -356,5 +356,9 @@ func settingsOptionsSnapshot() SettingsOptionsSnapshot {
 		Languages:        languages,
 		DecodeModes:      decodeModes,
 		PunctuationModes: punctuationModes,
+		Hotkey: HotkeyOptions{
+			Modifiers: configpkg.SupportedHotkeyModifiers(),
+			Keys:      configpkg.SupportedHotkeyKeys(),
+		},
 	}
 }

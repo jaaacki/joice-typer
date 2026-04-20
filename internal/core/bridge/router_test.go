@@ -618,6 +618,12 @@ func TestRouterHandleRequest_OptionsGet(t *testing.T) {
 	if len(options.Models) == 0 || len(options.DecodeModes) == 0 || len(options.PunctuationModes) == 0 || len(options.Languages) == 0 {
 		t.Fatalf("expected non-empty options sets, got %#v", options)
 	}
+	if len(options.Hotkey.Modifiers) == 0 || len(options.Hotkey.Keys) == 0 {
+		t.Fatalf("expected hotkey capability options, got %#v", options.Hotkey)
+	}
+	if options.Hotkey.Modifiers[0] != "fn" {
+		t.Fatalf("expected Darwin host modifiers to start with fn, got %#v", options.Hotkey.Modifiers)
+	}
 }
 
 func TestBridgeContractIncludesLogsMethods(t *testing.T) {

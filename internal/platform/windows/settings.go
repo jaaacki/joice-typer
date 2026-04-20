@@ -4,6 +4,7 @@ package windows
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -38,7 +39,15 @@ var (
 	webSettingsNativeTransportWarning = func(operation, message string) {
 		currentSettingsLogger().Warn(message, "operation", operation)
 	}
-	webSettingsLoadPermissions = loadWebSettingsPermissionsSnapshot
+	webSettingsLoadPermissions      = loadWebSettingsPermissionsSnapshot
+	webSettingsListInputDevices     = listWebSettingsInputDevices
+	webSettingsRefreshDevices       = refreshWebSettingsDevices
+	webSettingsDownloadModel        = downloadWebSettingsModel
+	webSettingsDeleteModel          = deleteWebSettingsModel
+	webSettingsUseModel             = useWebSettingsModel
+	webSettingsStartHotkeyCapture   = startWebSettingsHotkeyCapture
+	webSettingsCancelHotkeyCapture  = cancelWebSettingsHotkeyCapture
+	webSettingsConfirmHotkeyCapture = confirmWebSettingsHotkeyCapture
 	webSettingsLogPath         = func() (string, error) {
 		dir, err := configpkg.DefaultConfigDir()
 		if err != nil {
@@ -120,7 +129,7 @@ func signalHotkeyRestart() {
 }
 
 func loadWebSettingsPermissionsSnapshot() bridgepkg.PermissionsSnapshot {
-	return bridgepkg.PermissionsSnapshot{}
+	return bridgepkg.PermissionsSnapshot{Accessibility: true, InputMonitoring: true}
 }
 
 func buildSettingsBridgeService(_ configpkg.Config) *bridgepkg.Service {
@@ -186,8 +195,27 @@ func buildSettingsBridgeService(_ configpkg.Config) *bridgepkg.Service {
 		LoadPermissions: func(context.Context) (bridgepkg.PermissionsSnapshot, error) {
 			return webSettingsLoadPermissions(), nil
 		},
+		OpenPermissionSettings: func(context.Context, string) error {
+			// Windows does not require the macOS-specific accessibility/input-monitoring grants.
+			return nil
+		},
+		ListDevices: func(context.Context) ([]bridgepkg.DeviceSnapshot, error) {
+			return webSettingsListInputDevices()
+		},
+		RefreshDevices: func(context.Context) ([]bridgepkg.DeviceSnapshot, error) {
+			return webSettingsRefreshDevices()
+		},
 		LoadModel: func(context.Context) (bridgepkg.ModelSnapshot, error) {
 			return loadActiveWebSettingsModelSnapshot()
+		},
+		DownloadModel: func(ctx context.Context, size string) error {
+			return webSettingsDownloadModel(ctx, size)
+		},
+		DeleteModel: func(ctx context.Context, size string) error {
+			return webSettingsDeleteModel(ctx, size)
+		},
+		UseModel: func(ctx context.Context, size string) error {
+			return webSettingsUseModel(ctx, size)
 		},
 		LoadLogsTail: func(context.Context) (bridgepkg.LogTailSnapshot, error) {
 			return loadWebSettingsLogTailSnapshot()
@@ -195,7 +223,61 @@ func buildSettingsBridgeService(_ configpkg.Config) *bridgepkg.Service {
 		LoadLogsFull: func(context.Context) (string, error) {
 			return loadWebSettingsLogFullText()
 		},
+		StartHotkeyCapture: func(context.Context) (bridgepkg.HotkeyCaptureSnapshot, error) {
+			return webSettingsStartHotkeyCapture()
+		},
+		CancelHotkeyCapture: func(context.Context) error {
+			return webSettingsCancelHotkeyCapture()
+		},
+		ConfirmHotkeyCapture: func(context.Context) (bridgepkg.HotkeyCaptureSnapshot, error) {
+			return webSettingsConfirmHotkeyCapture()
+		},
 	})
+}
+
+func listWebSettingsInputDevices() ([]bridgepkg.DeviceSnapshot, error) {
+	return []bridgepkg.DeviceSnapshot{
+		{Name: "System default", IsDefault: true},
+	}, nil
+}
+
+func refreshWebSettingsDevices() ([]bridgepkg.DeviceSnapshot, error) {
+	return listWebSettingsInputDevices()
+}
+
+func unsupportedWindowsBridgeAction(code, action string, retriable bool, details map[string]any) error {
+	if details == nil {
+		details = map[string]any{}
+	}
+	details["platform"] = "windows"
+	return bridgepkg.NewContractError(code, fmt.Sprintf("%s is not implemented on Windows yet", action), retriable, details)
+}
+
+func downloadWebSettingsModel(ctx context.Context, size string) error {
+	_ = ctx
+	return unsupportedWindowsBridgeAction(bridgepkg.ErrorCodeModelDownloadFailed, "Model download", true, map[string]any{"size": size})
+}
+
+func deleteWebSettingsModel(ctx context.Context, size string) error {
+	_ = ctx
+	return unsupportedWindowsBridgeAction(bridgepkg.ErrorCodeModelDeleteFailed, "Model delete", false, map[string]any{"size": size})
+}
+
+func useWebSettingsModel(ctx context.Context, size string) error {
+	_ = ctx
+	return unsupportedWindowsBridgeAction(bridgepkg.ErrorCodeModelUseFailed, "Model selection", false, map[string]any{"size": size})
+}
+
+func startWebSettingsHotkeyCapture() (bridgepkg.HotkeyCaptureSnapshot, error) {
+	return bridgepkg.HotkeyCaptureSnapshot{}, unsupportedWindowsBridgeAction(bridgepkg.ErrorCodeHotkeyCaptureStartFailed, "Hotkey capture", false, nil)
+}
+
+func cancelWebSettingsHotkeyCapture() error {
+	return unsupportedWindowsBridgeAction(bridgepkg.ErrorCodeHotkeyCaptureCancelFailed, "Hotkey capture cancel", false, nil)
+}
+
+func confirmWebSettingsHotkeyCapture() (bridgepkg.HotkeyCaptureSnapshot, error) {
+	return bridgepkg.HotkeyCaptureSnapshot{}, unsupportedWindowsBridgeAction(bridgepkg.ErrorCodeHotkeyCaptureConfirmFailed, "Hotkey capture confirm", false, nil)
 }
 
 func loadWebSettingsModelSnapshot(modelSize string) (bridgepkg.ModelSnapshot, error) {

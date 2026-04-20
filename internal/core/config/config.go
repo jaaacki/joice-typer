@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 
 	"gopkg.in/yaml.v3"
 	"voicetype/internal/keys"
@@ -58,6 +59,11 @@ var validModifiers = map[string]bool{
 	"fn": true, "shift": true, "ctrl": true, "option": true, "cmd": true,
 }
 
+var hotkeyModifiersByGOOS = map[string][]string{
+	"darwin":  {"fn", "shift", "ctrl", "option", "cmd"},
+	"windows": {"shift", "ctrl"},
+}
+
 var validDecodeModes = map[string]bool{
 	"greedy": true,
 	"beam":   true,
@@ -82,6 +88,24 @@ func isValidKey(k string) bool {
 		return true
 	}
 	return keys.IsKey(k)
+}
+
+func SupportedHotkeyModifiersForGOOS(goos string) []string {
+	mods, ok := hotkeyModifiersByGOOS[goos]
+	if !ok {
+		mods = hotkeyModifiersByGOOS["darwin"]
+	}
+	return append([]string(nil), mods...)
+}
+
+func SupportedHotkeyModifiers() []string {
+	return SupportedHotkeyModifiersForGOOS(runtimeGOOS)
+}
+
+func SupportedHotkeyKeys() []string {
+	keys := keys.Names()
+	slices.Sort(keys)
+	return keys
 }
 
 var validLanguages = map[string]bool{

@@ -74,6 +74,12 @@ export type SettingsOptionsSnapshot = {
   languages: OptionSnapshot[];
   decodeModes: OptionSnapshot[];
   punctuationModes: OptionSnapshot[];
+  hotkey: HotkeyOptionsSnapshot;
+};
+
+export type HotkeyOptionsSnapshot = {
+  modifiers: string[];
+  keys: string[];
 };
 
 export type HotkeyCaptureSnapshot = {

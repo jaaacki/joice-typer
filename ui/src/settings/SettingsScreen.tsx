@@ -144,6 +144,18 @@ export function SettingsScreen({ bootstrap }: SettingsScreenProps) {
   const modelActionSize = draft.modelSize;
   const modelMatchesTarget = model.size === modelActionSize;
   const triggerKeyDisplay = hotkeyCapture?.display || formatTriggerKeyDisplay(draft.triggerKey);
+  const supportedHotkeyModifiers = useMemo(() => new Set(options.hotkey.modifiers), [options.hotkey.modifiers]);
+  const supportedHotkeyKeys = useMemo(() => new Set(options.hotkey.keys), [options.hotkey.keys]);
+  const unsupportedTriggerKeys = useMemo(
+    () =>
+      draft.triggerKey.filter((key) => {
+        if (supportedHotkeyModifiers.has(key)) {
+          return false;
+        }
+        return !supportedHotkeyKeys.has(key);
+      }),
+    [draft.triggerKey, supportedHotkeyKeys, supportedHotkeyModifiers],
+  );
   const runtimeStatus = currentAppState.state || "Unknown";
   const selectedPane = NAV_ITEMS.find((item) => item.id === activePane) ?? NAV_ITEMS[0];
   const selectedModelName = modelOptionsByCode.get(modelActionSize)?.name ?? modelActionSize;
@@ -465,6 +477,12 @@ export function SettingsScreen({ bootstrap }: SettingsScreenProps) {
                   )}
                 </div>
               </div>
+
+              {unsupportedTriggerKeys.length > 0 ? (
+                <p className="settings-inline-warning">
+                  This platform does not support the current hotkey: {unsupportedTriggerKeys.map((key) => formatTriggerKeyDisplay([key])).join(", ")}.
+                </p>
+              ) : null}
 
               <div className="settings-inline-toggle">
                 <label className="switch">

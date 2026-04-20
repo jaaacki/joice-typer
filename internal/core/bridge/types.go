@@ -53,6 +53,12 @@ type SettingsOptionsSnapshot struct {
 	Languages        []OptionSnapshot `json:"languages"`
 	DecodeModes      []OptionSnapshot `json:"decodeModes"`
 	PunctuationModes []OptionSnapshot `json:"punctuationModes"`
+	Hotkey           HotkeyOptions    `json:"hotkey"`
+}
+
+type HotkeyOptions struct {
+	Modifiers []string `json:"modifiers"`
+	Keys      []string `json:"keys"`
 }
 
 type DevicesRefreshResult struct {

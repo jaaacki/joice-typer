@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -258,6 +259,27 @@ func TestValidate_InvalidLanguage(t *testing.T) {
 		}
 		if !tt.wantErr && err != nil {
 			t.Errorf("expected no error for language %q, got: %v", tt.lang, err)
+		}
+	}
+}
+
+func TestSupportedHotkeyModifiersForGOOS(t *testing.T) {
+	if got := SupportedHotkeyModifiersForGOOS("windows"); strings.Join(got, ",") != "shift,ctrl" {
+		t.Fatalf("SupportedHotkeyModifiersForGOOS(windows) = %#v, want [shift ctrl]", got)
+	}
+	if got := SupportedHotkeyModifiersForGOOS("darwin"); strings.Join(got, ",") != "fn,shift,ctrl,option,cmd" {
+		t.Fatalf("SupportedHotkeyModifiersForGOOS(darwin) = %#v, want [fn shift ctrl option cmd]", got)
+	}
+}
+
+func TestSupportedHotkeyKeys_ReturnsSharedKeyNames(t *testing.T) {
+	keys := SupportedHotkeyKeys()
+	if len(keys) == 0 {
+		t.Fatal("expected shared hotkey keys")
+	}
+	for _, required := range []string{"a", "space", "return", "f12"} {
+		if !slices.Contains(keys, required) {
+			t.Fatalf("expected SupportedHotkeyKeys to contain %q, got %#v", required, keys)
 		}
 	}
 }

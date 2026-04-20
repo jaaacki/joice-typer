@@ -638,6 +638,13 @@ svg {
   min-width: 180px;
 }
 
+.settings-inline-warning {
+  margin: -4px 0 0;
+  color: var(--accent-ink);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
 .key-cap {
   min-width: 28px;
   min-height: 28px;

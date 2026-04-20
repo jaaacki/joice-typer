@@ -155,6 +155,24 @@ func TestSettingsScreenSource_PollsPermissionsUntilGranted(t *testing.T) {
 	}
 }
 
+func TestSettingsScreenSource_UsesSharedHotkeyCapabilities(t *testing.T) {
+	root := repoRoot(t)
+	data, err := os.ReadFile(filepath.Join(root, "ui", "src", "settings", "SettingsScreen.tsx"))
+	if err != nil {
+		t.Fatalf("read SettingsScreen.tsx: %v", err)
+	}
+	source := string(data)
+	for _, required := range []string{
+		`options.hotkey.modifiers`,
+		`options.hotkey.keys`,
+		`This platform does not support the current hotkey`,
+	} {
+		if !strings.Contains(source, required) {
+			t.Fatalf("expected SettingsScreen.tsx to contain %q", required)
+		}
+	}
+}
+
 func TestSettingsScreenSource_PutsVersionChipInHeader(t *testing.T) {
 	root := repoRoot(t)
 	data, err := os.ReadFile(filepath.Join(root, "ui", "src", "settings", "SettingsScreen.tsx"))
@@ -269,6 +287,30 @@ func TestWindowsWebviewTransportSource_LogsNativeFailures(t *testing.T) {
 	} {
 		if !strings.Contains(source, required) {
 			t.Fatalf("expected webview_host_windows.go to contain %q", required)
+		}
+	}
+}
+
+func TestWindowsSettingsBridgeSource_ProvidesExplicitAdapterHooks(t *testing.T) {
+	root := repoRoot(t)
+	data, err := os.ReadFile(filepath.Join(root, "internal", "platform", "windows", "settings.go"))
+	if err != nil {
+		t.Fatalf("read windows/settings.go: %v", err)
+	}
+	source := string(data)
+	for _, required := range []string{
+		`return bridgepkg.PermissionsSnapshot{Accessibility: true, InputMonitoring: true}`,
+		`ListDevices: func(context.Context) ([]bridgepkg.DeviceSnapshot, error) {`,
+		`RefreshDevices: func(context.Context) ([]bridgepkg.DeviceSnapshot, error) {`,
+		`DownloadModel: func(ctx context.Context, size string) error {`,
+		`DeleteModel: func(ctx context.Context, size string) error {`,
+		`UseModel: func(ctx context.Context, size string) error {`,
+		`StartHotkeyCapture: func(context.Context) (bridgepkg.HotkeyCaptureSnapshot, error) {`,
+		`ConfirmHotkeyCapture: func(context.Context) (bridgepkg.HotkeyCaptureSnapshot, error) {`,
+		`unsupportedWindowsBridgeAction(`,
+	} {
+		if !strings.Contains(source, required) {
+			t.Fatalf("expected windows/settings.go to contain %q", required)
 		}
 	}
 }
