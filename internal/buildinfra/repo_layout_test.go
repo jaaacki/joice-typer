@@ -366,6 +366,28 @@ func TestWindowsAudioDevicesSource_UsesCoreAudioEnumeration(t *testing.T) {
 	}
 }
 
+func TestWindowsTraySource_UsesShellNotifyIconAndMenuActions(t *testing.T) {
+	root := repoRoot(t)
+	data, err := os.ReadFile(filepath.Join(root, "internal", "platform", "windows", "tray.go"))
+	if err != nil {
+		t.Fatalf("read windows/tray.go: %v", err)
+	}
+	source := string(data)
+	for _, required := range []string{
+		`shell32.NewProc("Shell_NotifyIconW")`,
+		`procCreatePopupMenu`,
+		`procTrackPopupMenu`,
+		`go OpenPreferences()`,
+		`go os.Exit(0)`,
+		`publishRuntimeStateChanged(state)`,
+		`SetStatusBarHotkeyText`,
+	} {
+		if !strings.Contains(source, required) {
+			t.Fatalf("expected windows/tray.go to contain %q", required)
+		}
+	}
+}
+
 func TestWindowsPasterSource_UsesClipboardAndTypingFallback(t *testing.T) {
 	root := repoRoot(t)
 	data, err := os.ReadFile(filepath.Join(root, "internal", "platform", "windows", "paster.go"))
