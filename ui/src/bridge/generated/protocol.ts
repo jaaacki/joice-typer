@@ -27,6 +27,8 @@ export const METHODS = {
   hotkeyCaptureConfirm: "hotkey.capture_confirm",
   runtimeGet: "runtime.get",
   optionsGet: "options.get",
+  logsGet: "logs.get",
+  logsCopyAll: "logs.copy_all",
 } as const;
 export type BridgeMethod = (typeof METHODS)[keyof typeof METHODS];
 
@@ -37,6 +39,7 @@ export const EVENTS = {
   modelChanged: "model.changed",
   modelDownloadProgress: "model.download_progress",
   configSaved: "config.saved",
+  logsUpdated: "logs.updated",
   hotkeyCaptureChanged: "hotkey.capture_changed",
 } as const;
 export type BridgeEventName = (typeof EVENTS)[keyof typeof EVENTS];
@@ -60,6 +63,7 @@ export const ERROR_CODES = {
   hotkeyCaptureStartFailed: "hotkey.capture_start_failed",
   hotkeyCaptureCancelFailed: "hotkey.capture_cancel_failed",
   hotkeyCaptureConfirmFailed: "hotkey.capture_confirm_failed",
+  logsUnavailable: "logs.unavailable",
   runtimeUnavailable: "runtime.unavailable",
 } as const;
 export type BridgeErrorCode = (typeof ERROR_CODES)[keyof typeof ERROR_CODES];

@@ -15,6 +15,8 @@ Initial `v1` method surface:
 - `model.use`
 - `runtime.get`
 - `options.get`
+- `logs.get`
+- `logs.copy_all`
 
 Method rules:
 
@@ -22,3 +24,8 @@ Method rules:
 2. Queries return current state only.
 3. Commands may mutate state and may emit follow-up events.
 4. Every request must produce exactly one response.
+
+Logs methods:
+
+- `logs.get` returns the current tail view for the shared logs page.
+- `logs.copy_all` returns the full log text for copy/export flows.

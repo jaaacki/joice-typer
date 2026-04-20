@@ -22,7 +22,9 @@
     { "goName": "HotkeyCaptureCancelMethod", "tsName": "hotkeyCaptureCancel", "value": "hotkey.capture_cancel" },
     { "goName": "HotkeyCaptureConfirmMethod", "tsName": "hotkeyCaptureConfirm", "value": "hotkey.capture_confirm" },
     { "goName": "RuntimeGetMethod", "tsName": "runtimeGet", "value": "runtime.get" },
-    { "goName": "OptionsGetMethod", "tsName": "optionsGet", "value": "options.get" }
+    { "goName": "OptionsGetMethod", "tsName": "optionsGet", "value": "options.get" },
+    { "goName": "LogsGetMethod", "tsName": "logsGet", "value": "logs.get" },
+    { "goName": "LogsCopyAllMethod", "tsName": "logsCopyAll", "value": "logs.copy_all" }
   ],
   "events": [
     { "goName": "RuntimeStateChangedEvent", "tsName": "runtimeStateChanged", "value": "runtime.state_changed" },
@@ -31,6 +33,7 @@
     { "goName": "ModelChangedEvent", "tsName": "modelChanged", "value": "model.changed" },
     { "goName": "ModelDownloadProgressEvent", "tsName": "modelDownloadProgress", "value": "model.download_progress" },
     { "goName": "ConfigSavedEvent", "tsName": "configSaved", "value": "config.saved" },
+    { "goName": "LogsUpdatedEvent", "tsName": "logsUpdated", "value": "logs.updated" },
     { "goName": "HotkeyCaptureChangedEvent", "tsName": "hotkeyCaptureChanged", "value": "hotkey.capture_changed" }
   ],
   "errors": [
@@ -52,6 +55,7 @@
     { "goName": "ErrorCodeHotkeyCaptureStartFailed", "tsName": "hotkeyCaptureStartFailed", "value": "hotkey.capture_start_failed" },
     { "goName": "ErrorCodeHotkeyCaptureCancelFailed", "tsName": "hotkeyCaptureCancelFailed", "value": "hotkey.capture_cancel_failed" },
     { "goName": "ErrorCodeHotkeyCaptureConfirmFailed", "tsName": "hotkeyCaptureConfirmFailed", "value": "hotkey.capture_confirm_failed" },
+    { "goName": "ErrorCodeLogsUnavailable", "tsName": "logsUnavailable", "value": "logs.unavailable" },
     { "goName": "ErrorCodeRuntimeUnavailable", "tsName": "runtimeUnavailable", "value": "runtime.unavailable" }
   ]
 }

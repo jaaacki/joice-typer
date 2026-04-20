@@ -33,3 +33,9 @@ func TestNewErrorResponseFromError_PreservesContractError(t *testing.T) {
 		t.Fatalf("Details[source] = %#v, want portaudio", got)
 	}
 }
+
+func TestBridgeContractIncludesLogsErrorCode(t *testing.T) {
+	if ErrorCodeLogsUnavailable != "logs.unavailable" {
+		t.Fatalf("ErrorCodeLogsUnavailable = %q, want logs.unavailable", ErrorCodeLogsUnavailable)
+	}
+}

@@ -15,3 +15,5 @@ Contents:
 - `methods/`: request/response method documentation
 - `events/`: async event documentation
 - `errors/`: machine-readable error catalog
+
+Shared `v1` additions are documented in the per-topic READMEs, including the logs surface used by both macOS and Windows.

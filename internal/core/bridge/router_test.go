@@ -541,3 +541,12 @@ func TestRouterHandleRequest_OptionsGet(t *testing.T) {
 		t.Fatalf("expected non-empty options sets, got %#v", options)
 	}
 }
+
+func TestBridgeContractIncludesLogsMethods(t *testing.T) {
+	if LogsGetMethod != "logs.get" {
+		t.Fatalf("LogsGetMethod = %q, want logs.get", LogsGetMethod)
+	}
+	if LogsCopyAllMethod != "logs.copy_all" {
+		t.Fatalf("LogsCopyAllMethod = %q, want logs.copy_all", LogsCopyAllMethod)
+	}
+}

@@ -24,6 +24,7 @@ Examples:
 - `model.download_failed`
 - `model.delete_failed`
 - `model.use_failed`
+- `logs.unavailable`
 - `runtime.unavailable`
 - `bridge.unsupported_method`
 
@@ -34,3 +35,7 @@ Rules:
 3. `message` is user-readable.
 4. `details` is for structured context.
 5. `retriable` tells the UI whether retry affordances should be offered.
+
+Logs errors:
+
+- `logs.unavailable` reports that the shared log source could not be read or is not available.
