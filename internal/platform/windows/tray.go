@@ -3,11 +3,6 @@
 package windows
 
 func InitStatusBar() {
-	storeCurrentAppState(StateLoading)
-}
-
-func InitStatusBarAsync() {
-	InitStatusBar()
 }
 
 func UpdateStatusBar(state AppState) {

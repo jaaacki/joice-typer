@@ -9,8 +9,8 @@ import (
 	apppkg "voicetype/internal/core/runtime"
 )
 
-func TestBuildSettingsBridgeService_ConstructsFromWindowsDependencies(t *testing.T) {
-	svc := buildSettingsBridgeService(configpkg.Config{}, &bridgepkg.Dependencies{
+func TestBridgeService_ConstructsFromWindowsDependencies(t *testing.T) {
+	svc := bridgepkg.NewService(&bridgepkg.Dependencies{
 		LoadConfig: func(context.Context) (configpkg.Config, error) {
 			return configpkg.Config{}, nil
 		},
