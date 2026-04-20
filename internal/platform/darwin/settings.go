@@ -284,7 +284,6 @@ func notifyWebSettingsLogsUpdated() {
 	snapshot, err := loadWebSettingsLogTailSnapshot()
 	if err != nil {
 		currentSettingsLogger().Warn("failed to refresh logs", "operation", "notifyWebSettingsLogsUpdated", "error", err)
-		return
 	}
 	publishLogsUpdated(snapshot)
 }

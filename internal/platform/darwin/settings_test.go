@@ -3,7 +3,9 @@
 package darwin
 
 import (
+	"bytes"
 	"context"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -378,13 +380,43 @@ func TestLoadWebSettingsLogTailSnapshot_UnreadableFileReturnsContractError(t *te
 	}
 }
 
-func TestSettingsSource_PublishesLogsUpdatedFromPreferencesRuntime(t *testing.T) {
-	data, err := os.ReadFile(filepath.Join(".", "settings.go"))
-	if err != nil {
-		t.Fatalf("read settings.go: %v", err)
+func TestNotifyWebSettingsLogsUpdated_PublishesBridgeEventOnTailLoadFailure(t *testing.T) {
+	originalLogPath := webSettingsLogPath
+	originalDispatch := webSettingsDispatchEnvelope
+	originalLogger := currentSettingsLogger()
+	defer func() {
+		webSettingsLogPath = originalLogPath
+		webSettingsDispatchEnvelope = originalDispatch
+		SetSettingsLogger(originalLogger)
+	}()
+
+	webSettingsLogPath = func() (string, error) {
+		return t.TempDir(), nil
 	}
-	source := string(data)
-	if !strings.Contains(source, "notifyWebSettingsLogsUpdated()") {
-		t.Fatal("expected settings.go to call notifyWebSettingsLogsUpdated() from preferences runtime plumbing")
+
+	var payload string
+	webSettingsDispatchEnvelope = func(s string, _ bool) {
+		payload = s
+	}
+
+	var logs bytes.Buffer
+	SetSettingsLogger(slog.New(slog.NewJSONHandler(&logs, nil)))
+
+	notifyWebSettingsLogsUpdated()
+
+	if !strings.Contains(logs.String(), "failed to refresh logs") {
+		t.Fatalf("expected warning log when tail load fails, got %q", logs.String())
+	}
+	for _, snippet := range []string{
+		`"kind":"event"`,
+		`"event":"logs.updated"`,
+		`"text":""`,
+		`"truncated":false`,
+		`"byteSize":0`,
+		`"updatedAt":""`,
+	} {
+		if !strings.Contains(payload, snippet) {
+			t.Fatalf("expected logs.updated payload to contain %q, got %q", snippet, payload)
+		}
 	}
 }
