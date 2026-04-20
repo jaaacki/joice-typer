@@ -305,6 +305,7 @@ func publishHotkeyCaptureChanged(snapshot bridgepkg.HotkeyCaptureSnapshot) {
 }
 
 func webSettingsWindowClosed() {
+	resetWebSettingsHotkeyCapture()
 	cancelPreferencesContext()
 	clearActiveWebSettingsBridgeService()
 	preferencesOpenStore(0)

@@ -22,7 +22,6 @@ func TestUnsupportedTranscriberSource_PreservesPerMethodOperationMetadata(t *tes
 
 	for _, op := range []string{
 		"NewTranscriber",
-		"DownloadModelWithProgress",
 		"Transcribe",
 		"Close",
 	} {

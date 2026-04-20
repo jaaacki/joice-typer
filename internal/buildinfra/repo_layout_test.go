@@ -307,10 +307,37 @@ func TestWindowsSettingsBridgeSource_ProvidesExplicitAdapterHooks(t *testing.T) 
 		`UseModel: func(ctx context.Context, size string) error {`,
 		`StartHotkeyCapture: func(context.Context) (bridgepkg.HotkeyCaptureSnapshot, error) {`,
 		`ConfirmHotkeyCapture: func(context.Context) (bridgepkg.HotkeyCaptureSnapshot, error) {`,
-		`unsupportedWindowsBridgeAction(`,
+		`transcriptionpkg.DownloadModelWithProgress`,
+		`publishModelDownloadProgress(size, progress, downloaded, total)`,
+		`"Cannot delete the active model"`,
+		`publishModelChanged(snapshot)`,
+		`return webSettingsStartHotkeyCapture()`,
+		`return webSettingsConfirmHotkeyCapture()`,
 	} {
 		if !strings.Contains(source, required) {
 			t.Fatalf("expected windows/settings.go to contain %q", required)
+		}
+	}
+}
+
+func TestWindowsHotkeyCaptureSource_UsesDedicatedLowLevelHook(t *testing.T) {
+	root := repoRoot(t)
+	data, err := os.ReadFile(filepath.Join(root, "internal", "platform", "windows", "hotkey_capture.go"))
+	if err != nil {
+		t.Fatalf("read windows/hotkey_capture.go: %v", err)
+	}
+	source := string(data)
+	for _, required := range []string{
+		`windowsHotkeyCaptureCallback = windows.NewCallback(windowsLowLevelHotkeyCaptureProc)`,
+		`procSetWindowsHookExW.Call(`,
+		`publishHotkeyCaptureChanged(snapshot)`,
+		`bridgepkg.ErrorCodeHotkeyCaptureStartFailed`,
+		`bridgepkg.ErrorCodeHotkeyCaptureConfirmFailed`,
+		`bridgepkg.ErrorCodeHotkeyCaptureCancelFailed`,
+		`stopWindowsHotkeyCaptureListener()`,
+	} {
+		if !strings.Contains(source, required) {
+			t.Fatalf("expected windows/hotkey_capture.go to contain %q", required)
 		}
 	}
 }

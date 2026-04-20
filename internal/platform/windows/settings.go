@@ -4,8 +4,8 @@ package windows
 
 import (
 	"context"
-	"fmt"
 	"log/slog"
+	"math"
 	"os"
 	"path/filepath"
 	"time"
@@ -13,6 +13,7 @@ import (
 	bridgepkg "voicetype/internal/core/bridge"
 	configpkg "voicetype/internal/core/config"
 	loggingpkg "voicetype/internal/core/logging"
+	transcriptionpkg "voicetype/internal/core/transcription"
 )
 
 var webSettingsEnabled = func() bool {
@@ -48,7 +49,7 @@ var (
 	webSettingsStartHotkeyCapture   = startWebSettingsHotkeyCapture
 	webSettingsCancelHotkeyCapture  = cancelWebSettingsHotkeyCapture
 	webSettingsConfirmHotkeyCapture = confirmWebSettingsHotkeyCapture
-	webSettingsLogPath         = func() (string, error) {
+	webSettingsLogPath              = func() (string, error) {
 		dir, err := configpkg.DefaultConfigDir()
 		if err != nil {
 			return "", err
@@ -235,6 +236,11 @@ func buildSettingsBridgeService(_ configpkg.Config) *bridgepkg.Service {
 	})
 }
 
+// prefsActiveModel tracks the in-use model for the current preferences session.
+// It may differ from the saved config while the user is previewing a different
+// model in the current runtime.
+var prefsActiveModel string
+
 func listWebSettingsInputDevices() ([]bridgepkg.DeviceSnapshot, error) {
 	return []bridgepkg.DeviceSnapshot{
 		{Name: "System default", IsDefault: true},
@@ -245,39 +251,134 @@ func refreshWebSettingsDevices() ([]bridgepkg.DeviceSnapshot, error) {
 	return listWebSettingsInputDevices()
 }
 
-func unsupportedWindowsBridgeAction(code, action string, retriable bool, details map[string]any) error {
-	if details == nil {
-		details = map[string]any{}
-	}
-	details["platform"] = "windows"
-	return bridgepkg.NewContractError(code, fmt.Sprintf("%s is not implemented on Windows yet", action), retriable, details)
-}
-
 func downloadWebSettingsModel(ctx context.Context, size string) error {
-	_ = ctx
-	return unsupportedWindowsBridgeAction(bridgepkg.ErrorCodeModelDownloadFailed, "Model download", true, map[string]any{"size": size})
+	modelPath, err := defaultModelPath(size)
+	if err != nil {
+		return bridgepkg.WrapContractError(
+			bridgepkg.ErrorCodeModelDownloadFailed,
+			"Failed to resolve model download path",
+			false,
+			map[string]any{"size": size},
+			err,
+		)
+	}
+
+	if ctx == nil {
+		ctx = currentPreferencesContext()
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	lastPublishedAt := time.Time{}
+	lastPublishedPercent := -1
+	if err := transcriptionpkg.DownloadModelWithProgress(ctx, modelPath, size, func(progress float64, downloaded, total int64) {
+		now := time.Now()
+		percent := int(math.Round(progress * 100))
+		shouldPublish := downloaded == 0 || downloaded == total || lastPublishedPercent == -1
+		if !shouldPublish {
+			shouldPublish = percent != lastPublishedPercent && percent%5 == 0
+		}
+		if !shouldPublish && now.Sub(lastPublishedAt) >= 200*time.Millisecond {
+			shouldPublish = true
+		}
+		if !shouldPublish {
+			return
+		}
+		lastPublishedAt = now
+		lastPublishedPercent = percent
+		publishModelDownloadProgress(size, progress, downloaded, total)
+	}, currentSettingsLogger()); err != nil {
+		return bridgepkg.WrapContractError(
+			bridgepkg.ErrorCodeModelDownloadFailed,
+			"Failed to download model",
+			true,
+			map[string]any{"size": size},
+			err,
+		)
+	}
+
+	if prefsActiveModel == size {
+		snapshot, err := loadWebSettingsModelSnapshot(size)
+		if err != nil {
+			return err
+		}
+		publishModelChanged(snapshot)
+	}
+	return nil
 }
 
 func deleteWebSettingsModel(ctx context.Context, size string) error {
 	_ = ctx
-	return unsupportedWindowsBridgeAction(bridgepkg.ErrorCodeModelDeleteFailed, "Model delete", false, map[string]any{"size": size})
+	if prefsActiveModel == size {
+		return bridgepkg.NewContractError(
+			bridgepkg.ErrorCodeModelDeleteFailed,
+			"Cannot delete the active model",
+			false,
+			map[string]any{"size": size},
+		)
+	}
+
+	modelPath, err := defaultModelPath(size)
+	if err != nil {
+		return bridgepkg.WrapContractError(
+			bridgepkg.ErrorCodeModelDeleteFailed,
+			"Failed to resolve model path",
+			false,
+			map[string]any{"size": size},
+			err,
+		)
+	}
+	if removeErr := removeFile(modelPath); removeErr != nil {
+		return bridgepkg.WrapContractError(
+			bridgepkg.ErrorCodeModelDeleteFailed,
+			"Failed to delete model",
+			false,
+			map[string]any{"size": size},
+			removeErr,
+		)
+	}
+	if removeErr := removeFile(modelPath + ".sha256"); removeErr != nil && !os.IsNotExist(removeErr) {
+		return bridgepkg.WrapContractError(
+			bridgepkg.ErrorCodeModelDeleteFailed,
+			"Failed to delete model hash cache",
+			false,
+			map[string]any{"size": size},
+			removeErr,
+		)
+	}
+	return nil
 }
 
 func useWebSettingsModel(ctx context.Context, size string) error {
 	_ = ctx
-	return unsupportedWindowsBridgeAction(bridgepkg.ErrorCodeModelUseFailed, "Model selection", false, map[string]any{"size": size})
-}
+	modelPath, err := defaultModelPath(size)
+	if err != nil {
+		return bridgepkg.WrapContractError(
+			bridgepkg.ErrorCodeModelUseFailed,
+			"Failed to resolve model path",
+			false,
+			map[string]any{"size": size},
+			err,
+		)
+	}
+	if _, statErr := os.Stat(modelPath); statErr != nil {
+		return bridgepkg.WrapContractError(
+			bridgepkg.ErrorCodeModelUseFailed,
+			"Model is not available to use",
+			false,
+			map[string]any{"size": size},
+			statErr,
+		)
+	}
 
-func startWebSettingsHotkeyCapture() (bridgepkg.HotkeyCaptureSnapshot, error) {
-	return bridgepkg.HotkeyCaptureSnapshot{}, unsupportedWindowsBridgeAction(bridgepkg.ErrorCodeHotkeyCaptureStartFailed, "Hotkey capture", false, nil)
-}
-
-func cancelWebSettingsHotkeyCapture() error {
-	return unsupportedWindowsBridgeAction(bridgepkg.ErrorCodeHotkeyCaptureCancelFailed, "Hotkey capture cancel", false, nil)
-}
-
-func confirmWebSettingsHotkeyCapture() (bridgepkg.HotkeyCaptureSnapshot, error) {
-	return bridgepkg.HotkeyCaptureSnapshot{}, unsupportedWindowsBridgeAction(bridgepkg.ErrorCodeHotkeyCaptureConfirmFailed, "Hotkey capture confirm", false, nil)
+	prefsActiveModel = size
+	snapshot, err := loadWebSettingsModelSnapshot(size)
+	if err != nil {
+		return err
+	}
+	publishModelChanged(snapshot)
+	return nil
 }
 
 func loadWebSettingsModelSnapshot(modelSize string) (bridgepkg.ModelSnapshot, error) {
@@ -300,6 +401,11 @@ func loadWebSettingsModelSnapshot(modelSize string) (bridgepkg.ModelSnapshot, er
 }
 
 func loadActiveWebSettingsModelSnapshot() (bridgepkg.ModelSnapshot, error) {
+	activeModelSize := prefsActiveModel
+	if activeModelSize != "" {
+		return loadWebSettingsModelSnapshot(activeModelSize)
+	}
+
 	cfgPath, err := webSettingsDefaultConfigPath()
 	if err != nil {
 		return bridgepkg.ModelSnapshot{}, bridgepkg.WrapContractError(
@@ -320,7 +426,9 @@ func loadActiveWebSettingsModelSnapshot() (bridgepkg.ModelSnapshot, error) {
 			err,
 		)
 	}
-	return loadWebSettingsModelSnapshot(cfg.ModelSize)
+	activeModelSize = cfg.ModelSize
+	prefsActiveModel = activeModelSize
+	return loadWebSettingsModelSnapshot(activeModelSize)
 }
 
 func loadWebSettingsLogTailSnapshot() (bridgepkg.LogTailSnapshot, error) {
