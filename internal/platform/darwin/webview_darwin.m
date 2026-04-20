@@ -13,7 +13,6 @@ static id sWebHotkeyLocalMonitor = nil;
 static uint64_t sWebRecordedFlags = 0;
 static int sWebRecordedKeycode = -1;
 static NSString * const kJoiceTyperBridgeEventName = @"joicetyper-bridge-message";
-static NSString * const kJoiceTyperBridgeDispatchFunction = @"window.__JOICETYPER_NATIVE_BRIDGE_DISPATCH__";
 
 extern void webSettingsHotkeyCaptureChanged(unsigned long long flags, int keycode, int recording);
 extern void webSettingsNativeTransportInfo(char *operation, char *message);
@@ -65,14 +64,29 @@ static void dispatchBridgeEnvelopeJSON(NSString *payloadJSON, BOOL closeWindow) 
     if (payloadLiteral == nil) {
         return;
     }
-    NSString *script = [NSString stringWithFormat:@"%@(%@);",
-                        kJoiceTyperBridgeDispatchFunction,
-                        payloadLiteral];
+    NSString *script = [NSString stringWithFormat:
+                        @"(function(){"
+                        "try {"
+                        "  const detail = typeof %@ === 'string' ? JSON.parse(%@) : %@;"
+                        "  window.dispatchEvent(new CustomEvent('%@', { detail }));"
+                        "  return 'ok';"
+                        "} catch (error) {"
+                        "  return 'dispatch_error:' + (error && error.message ? error.message : String(error));"
+                        "}"
+                        "})();",
+                        payloadLiteral,
+                        payloadLiteral,
+                        payloadLiteral,
+                        kJoiceTyperBridgeEventName];
     [sWebSettingsView evaluateJavaScript:script completionHandler:^(id result, NSError *error) {
-        (void)result;
         if (error != nil) {
             reportWebSettingsNativeTransportWarning(@"failed to evaluate bridge envelope dispatch",
                                                     error.localizedDescription ?: @"unknown JavaScript evaluation error");
+            return;
+        }
+        if ([result isKindOfClass:[NSString class]] && [(NSString *)result hasPrefix:@"dispatch_error:"]) {
+            reportWebSettingsNativeTransportWarning(@"failed to dispatch bridge envelope in page",
+                                                    [(NSString *)result substringFromIndex:[@"dispatch_error:" length]]);
             return;
         }
         if (closeWindow && sWebSettingsWindow != nil) {
@@ -335,15 +349,6 @@ void showWebSettingsWindow(const char *htmlContent) {
             WKUserContentController *controller = [[WKUserContentController alloc] init];
             [controller addScriptMessageHandler:[[JoiceTyperWebSettingsHandler alloc] init] name:@"joicetyper"];
             [controller addScriptMessageHandler:[[JoiceTyperWebSettingsHandler alloc] init] name:@"joicetyperConsole"];
-            NSString *bridgeDispatchSource = [NSString stringWithFormat:
-                @"(function(){"
-                "window.__JOICETYPER_NATIVE_BRIDGE_DISPATCH__ = function(payloadJSON) {"
-                "  const detail = typeof payloadJSON === 'string' ? JSON.parse(payloadJSON) : payloadJSON;"
-                "  window.dispatchEvent(new CustomEvent('%@', { detail }));"
-                "  return true;"
-                "};"
-                "})();",
-                kJoiceTyperBridgeEventName];
             NSString *consoleBridgeSource =
                 @"(function(){"
                 "const native = window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.joicetyperConsole;"
@@ -371,10 +376,6 @@ void showWebSettingsWindow(const char *htmlContent) {
                 "  if (originalError) { originalError.apply(console, arguments); }"
                 "};"
                 "})();";
-            WKUserScript *bridgeDispatchScript = [[WKUserScript alloc] initWithSource:bridgeDispatchSource
-                                                                       injectionTime:WKUserScriptInjectionTimeAtDocumentStart
-                                                                    forMainFrameOnly:YES];
-            [controller addUserScript:bridgeDispatchScript];
             WKUserScript *consoleBridgeScript = [[WKUserScript alloc] initWithSource:consoleBridgeSource
                                                                        injectionTime:WKUserScriptInjectionTimeAtDocumentStart
                                                                     forMainFrameOnly:YES];

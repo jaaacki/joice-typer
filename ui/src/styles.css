@@ -605,18 +605,37 @@ svg {
   gap: 14px;
 }
 
+.hotkey-capture--row {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+}
+
 .hotkey-capture__keys {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
-  padding: 16px;
-  border: 1px dashed var(--border);
-  border-radius: 12px;
-  background: var(--surface-2);
+  align-items: center;
+  min-height: 38px;
+  padding: 4px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.55) inset, 0 1px 1px rgba(40, 30, 20, 0.02);
 }
 
 .hotkey-capture__keys.is-recording {
   background: var(--accent-wash);
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
+.hotkey-capture--row .button-row {
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.hotkey-capture--row .button-row .ui-button {
+  min-width: 180px;
 }
 
 .key-cap {
@@ -1010,6 +1029,12 @@ svg {
   .permission-item .status-badge,
   .permission-item .ui-button {
     grid-column: 2;
+  }
+
+  .model-actions,
+  .hotkey-capture--row,
+  .settings-footer {
+    grid-template-columns: 1fr;
   }
 
   .model-actions,

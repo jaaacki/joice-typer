@@ -135,6 +135,26 @@ func TestSettingsScreenSource_UsesAckAwareSaveStates(t *testing.T) {
 	}
 }
 
+func TestSettingsScreenSource_PollsPermissionsUntilGranted(t *testing.T) {
+	root := repoRoot(t)
+	data, err := os.ReadFile(filepath.Join(root, "ui", "src", "settings", "SettingsScreen.tsx"))
+	if err != nil {
+		t.Fatalf("read SettingsScreen.tsx: %v", err)
+	}
+	source := string(data)
+	for _, required := range []string{
+		`fetchPermissions,`,
+		`const refreshLivePermissions = async () => {`,
+		`window.setInterval(() => {`,
+		`window.addEventListener("focus", onAttention)`,
+		`document.addEventListener("visibilitychange", onAttention)`,
+	} {
+		if !strings.Contains(source, required) {
+			t.Fatalf("expected SettingsScreen.tsx to contain %q", required)
+		}
+	}
+}
+
 func TestSettingsScreenSource_PutsVersionChipInHeader(t *testing.T) {
 	root := repoRoot(t)
 	data, err := os.ReadFile(filepath.Join(root, "ui", "src", "settings", "SettingsScreen.tsx"))
@@ -173,6 +193,7 @@ func TestDarwinWebviewTransportSource_LogsNativeFailures(t *testing.T) {
 		`failed to decode web settings message`,
 		`failed to duplicate web settings request`,
 		`failed to evaluate bridge envelope dispatch`,
+		`failed to dispatch bridge envelope in page`,
 		`failed to encode bridge payload string literal`,
 	} {
 		if !strings.Contains(source, required) {
@@ -195,6 +216,8 @@ func TestDarwinWebviewTransportSource_LogsWindowLifecycle(t *testing.T) {
 		`window.addEventListener('error'`,
 		`window.addEventListener('unhandledrejection'`,
 		`console.error =`,
+		`window.dispatchEvent(new CustomEvent('`,
+		`dispatch_error:`,
 		`didFinishNavigation`,
 		`didFailNavigation`,
 		`didFailProvisionalNavigation`,
@@ -210,6 +233,9 @@ func TestDarwinWebviewTransportSource_LogsWindowLifecycle(t *testing.T) {
 		if !strings.Contains(source, required) {
 			t.Fatalf("expected webview_darwin.m to contain %q", required)
 		}
+	}
+	if strings.Contains(source, `window.__JOICETYPER_NATIVE_BRIDGE_DISPATCH__`) {
+		t.Fatal("expected native transport to stop depending on a page-owned bridge dispatch function")
 	}
 }
 

@@ -7,6 +7,7 @@ import {
   confirmHotkeyCapture,
   deleteModel,
   downloadModel,
+  fetchPermissions,
   openPermissionSettings,
   refreshDevices,
   saveConfig,
@@ -118,12 +119,13 @@ export function SettingsScreen({ bootstrap }: SettingsScreenProps) {
   const initialConfig = sanitizeConfigSnapshot(bootstrap.config);
   const [activePane, setActivePane] = useState<PaneId>("capture");
   const [draft, setDraft] = useState<ConfigSnapshot>(initialConfig);
+  const [savedConfig, setSavedConfig] = useState<ConfigSnapshot>(initialConfig);
   const [currentAppState, setCurrentAppState] = useState<AppStateSnapshot>(bootstrap.appState);
   const [permissions, setPermissions] = useState<PermissionsSnapshot>(bootstrap.permissions);
   const [devices, setDevices] = useState<DeviceSnapshot[]>([]);
   const [model, setModel] = useState<ModelSnapshot>(bootstrap.model);
   const [options, setOptions] = useState<SettingsOptionsSnapshot>(bootstrap.options);
-  const [status, setStatus] = useState<string>("Ready to save");
+  const [status, setStatus] = useState<string>("");
   const [saving, setSaving] = useState(false);
   const [confirmDeleteModelSize, setConfirmDeleteModelSize] = useState<string | null>(null);
   const [hotkeyCapture, setHotkeyCapture] = useState<HotkeyCaptureSnapshot | null>(null);
@@ -141,6 +143,11 @@ export function SettingsScreen({ bootstrap }: SettingsScreenProps) {
   const selectedPane = NAV_ITEMS.find((item) => item.id === activePane) ?? NAV_ITEMS[0];
   const selectedModelName = modelOptionsByCode.get(modelActionSize)?.name ?? modelActionSize;
   const activeModelName = modelOptionsByCode.get(model.size || modelActionSize)?.name ?? (model.size || modelActionSize);
+  const hasUnsavedChanges = useMemo(
+    () => JSON.stringify(draft) !== JSON.stringify(savedConfig),
+    [draft, savedConfig],
+  );
+  const footerStatus = status !== "" ? status : hasUnsavedChanges ? "Unsaved changes." : "No unsaved changes.";
 
   const selectedModelStatus = useMemo(() => {
     if (downloadProgress?.size === modelActionSize) {
@@ -168,6 +175,7 @@ export function SettingsScreen({ bootstrap }: SettingsScreenProps) {
   }, [downloadProgress, draft.modelSize, model.ready, model.size, modelActionSize, modelMatchesTarget]);
 
   function update<K extends keyof ConfigSnapshot>(key: K, value: ConfigSnapshot[K]) {
+    setStatus("");
     setDraft((current) => ({
       ...current,
       [key]: key === "vocabulary" ? sanitizeVocabulary(String(value)) : value,
@@ -203,6 +211,46 @@ export function SettingsScreen({ bootstrap }: SettingsScreenProps) {
   );
 
   useEffect(() => subscribePermissionsChanged((nextPermissions) => setPermissions(nextPermissions)), []);
+  useEffect(() => {
+    if (permissions.accessibility && permissions.inputMonitoring) {
+      return;
+    }
+
+    let cancelled = false;
+
+    const refreshLivePermissions = async () => {
+      try {
+        const nextPermissions = await fetchPermissions();
+        if (!cancelled) {
+          setPermissions((current) =>
+            current.accessibility === nextPermissions.accessibility &&
+            current.inputMonitoring === nextPermissions.inputMonitoring
+              ? current
+              : nextPermissions,
+          );
+        }
+      } catch {
+        // Native bridge event delivery remains the primary update path.
+      }
+    };
+
+    void refreshLivePermissions();
+    const intervalId = window.setInterval(() => {
+      void refreshLivePermissions();
+    }, 1500);
+    const onAttention = () => {
+      void refreshLivePermissions();
+    };
+    window.addEventListener("focus", onAttention);
+    document.addEventListener("visibilitychange", onAttention);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(intervalId);
+      window.removeEventListener("focus", onAttention);
+      document.removeEventListener("visibilitychange", onAttention);
+    };
+  }, [permissions.accessibility, permissions.inputMonitoring]);
   useEffect(
     () =>
       subscribeModelChanged((nextModel) => {
@@ -225,7 +273,9 @@ export function SettingsScreen({ bootstrap }: SettingsScreenProps) {
   useEffect(
     () =>
       subscribeConfigSaved((savedConfig) => {
-        setDraft(sanitizeConfigSnapshot(savedConfig));
+        const sanitized = sanitizeConfigSnapshot(savedConfig);
+        setDraft(sanitized);
+        setSavedConfig(sanitized);
         setStatus("Config saved. JoiceTyper is reloading the runtime.");
       }),
     [],
@@ -380,7 +430,7 @@ export function SettingsScreen({ bootstrap }: SettingsScreenProps) {
               title="Hotkey"
               right={<StatusBadge tone={hotkeyCapture?.recording ? "warn" : "ok"}>{hotkeyCapture?.recording ? "Listening" : "Active"}</StatusBadge>}
             >
-              <div className="hotkey-capture">
+              <div className="hotkey-capture hotkey-capture--row">
                 <div className={`hotkey-capture__keys${hotkeyCapture?.recording ? " is-recording" : ""}`} aria-live="polite">
                   {(hotkeyCapture?.recording ? triggerKeyDisplay.split(" + ") : draft.triggerKey.map((key) => formatTriggerKeyDisplay([key]))).map((part) => (
                     <span key={part} className="key-cap">
@@ -388,7 +438,7 @@ export function SettingsScreen({ bootstrap }: SettingsScreenProps) {
                     </span>
                   ))}
                 </div>
-                <div className="button-row button-row--wrap">
+                <div className="button-row">
                   {!hotkeyCapture?.recording ? (
                     <button className="ui-button ui-button--secondary" type="button" onClick={() => void handleStartHotkeyCapture()}>
                       Change Hotkey
@@ -563,7 +613,7 @@ export function SettingsScreen({ bootstrap }: SettingsScreenProps) {
 
             <div className="settings-sidebar__footer">
               <div className="settings-sidebar__hotkey">
-                <span>Idle · Press</span>
+                <span>Hotkey</span>
                 {draft.triggerKey.map((key) => (
                   <span key={key} className="key-cap key-cap--accent">
                     {formatTriggerKeyDisplay([key])}
@@ -583,7 +633,7 @@ export function SettingsScreen({ bootstrap }: SettingsScreenProps) {
             <div className="settings-content__body">{renderPane()}</div>
 
             <footer className="settings-footer">
-              <p className="settings-footer__status">{status}</p>
+              <p className="settings-footer__status">{footerStatus}</p>
               <button className="ui-button ui-button--primary ui-button--large" onClick={() => void handleSave()} disabled={!saveAvailable || saving}>
                 Save and Reload
               </button>
