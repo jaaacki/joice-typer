@@ -754,14 +754,38 @@ func TestWindowsNotificationSource_UsesToastSpawner(t *testing.T) {
 	}
 	source := string(data)
 	for _, required := range []string{
+		`showWindowsTrayNotification`,
+		`failed to show windows notification`,
+	} {
+		if !strings.Contains(source, required) {
+			t.Fatalf("expected windows/notification.go to contain %q", required)
+		}
+	}
+	for _, forbidden := range []string{
 		`powershell`,
 		`ToastNotificationManager`,
 		`CreateToastNotifier('JoiceTyper')`,
 		`CombinedOutput()`,
-		`failed to show windows toast`,
 	} {
-		if !strings.Contains(source, required) {
-			t.Fatalf("expected windows/notification.go to contain %q", required)
+		if strings.Contains(source, forbidden) {
+			t.Fatalf("expected windows/notification.go not to contain %q", forbidden)
+		}
+	}
+
+	trayData, err := os.ReadFile(filepath.Join(root, "internal", "platform", "windows", "tray.go"))
+	if err != nil {
+		t.Fatalf("read windows/tray.go: %v", err)
+	}
+	traySource := string(trayData)
+	for _, required := range []string{
+		`showNotification(title, body string)`,
+		`nifInfo`,
+		`niifInfo`,
+		`SzInfo`,
+		`SzInfoTitle`,
+	} {
+		if !strings.Contains(traySource, required) {
+			t.Fatalf("expected windows/tray.go to contain %q", required)
 		}
 	}
 }

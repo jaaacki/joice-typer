@@ -30,8 +30,10 @@ const (
 	nifMessage = 0x00000001
 	nifIcon    = 0x00000002
 	nifTip     = 0x00000004
+	nifInfo    = 0x00000010
 
 	idiApplication = 32512
+	niifInfo       = 0x00000001
 
 	tpmLeftAlign   = 0x0000
 	tpmRightButton = 0x0002
@@ -125,6 +127,13 @@ func SetStatusBarHotkeyText(text string) {
 		host.tooltip = windowsTrayTooltip(currentAppState(), text)
 		host.applyTooltip()
 	})
+}
+
+func showWindowsTrayNotification(title, body string) error {
+	if err := sharedWindowsTrayHost.ensureStarted(); err != nil {
+		return err
+	}
+	return sharedWindowsTrayHost.showNotification(title, body)
 }
 
 func (h *trayHost) ensureStarted() error {
@@ -243,6 +252,29 @@ func (h *trayHost) applyTooltip() {
 	if ret == 0 {
 		currentSettingsLogger().Warn("failed to update windows tray tooltip", "operation", "tray.applyTooltip", "error", callErr)
 	}
+}
+
+func (h *trayHost) showNotification(title, body string) error {
+	if err := h.ensureStarted(); err != nil {
+		return err
+	}
+	var invokeErr error
+	h.invoke(func(host *trayHost) {
+		if host.hwnd == 0 {
+			invokeErr = fmt.Errorf("windows tray host is not initialized")
+			return
+		}
+		data := host.notifyIconData()
+		data.UFlags = nifInfo
+		data.DwInfoFlags = niifInfo
+		copy(data.SzInfo[:], windows.StringToUTF16(body))
+		copy(data.SzInfoTitle[:], windows.StringToUTF16(title))
+		ret, _, callErr := procShellNotifyIconW.Call(nimModify, uintptr(unsafe.Pointer(&data)))
+		if ret == 0 {
+			invokeErr = fmt.Errorf("tray shell notify info: %w", callErr)
+		}
+	})
+	return invokeErr
 }
 
 func (h *trayHost) invoke(fn func(*trayHost)) {
