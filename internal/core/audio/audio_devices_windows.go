@@ -3,6 +3,7 @@
 package audio
 
 import (
+	"fmt"
 	"runtime"
 	"strings"
 
@@ -11,6 +12,25 @@ import (
 	"github.com/go-ole/go-ole"
 	"github.com/moutend/go-wca/pkg/wca"
 )
+
+// ListInputDevices prints available input devices to stdout.
+// This is intentional CLI output for --list-devices, not application logging.
+func ListInputDevices() error {
+	devices, err := ListInputDeviceSnapshots()
+	if err != nil {
+		return fmt.Errorf("recorder.ListInputDevices: %w", err)
+	}
+	fmt.Println("Available input devices:")
+	for _, device := range devices {
+		defaultSuffix := ""
+		if device.IsDefault {
+			defaultSuffix = " (default)"
+		}
+		fmt.Printf("  %s%s\n", device.Name, defaultSuffix)
+	}
+	fmt.Printf("\nSet input_device in %s to use a specific device.\n", listDevicesConfigHint())
+	return nil
+}
 
 func ListInputDeviceSnapshots() ([]bridgepkg.DeviceSnapshot, error) {
 	runtime.LockOSThread()

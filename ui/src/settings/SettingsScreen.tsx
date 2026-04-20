@@ -10,6 +10,7 @@ import {
   deleteModel,
   downloadModel,
   fetchPermissions,
+  fetchOptions,
   fetchLogs,
   openPermissionSettings,
   refreshDevices,
@@ -351,6 +352,41 @@ export function SettingsScreen({ bootstrap }: SettingsScreenProps) {
       }),
     [],
   );
+  useEffect(() => {
+    if (downloadProgress === null) {
+      return;
+    }
+
+    let cancelled = false;
+
+    const refreshDownloadState = async () => {
+      try {
+        const nextOptions = await fetchOptions();
+        if (cancelled) {
+          return;
+        }
+        setOptions(nextOptions);
+        const downloaded = nextOptions.models.find((option) => option.code === downloadProgress.size)?.installed === true;
+        if (!downloaded) {
+          return;
+        }
+        setDownloadProgress((current) => (current?.size === downloadProgress.size ? null : current));
+        setStatus(`Downloaded ${downloadProgress.size} model.`);
+      } catch {
+        // Completion events remain the primary update path.
+      }
+    };
+
+    void refreshDownloadState();
+    const intervalId = window.setInterval(() => {
+      void refreshDownloadState();
+    }, 1000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(intervalId);
+    };
+  }, [downloadProgress]);
   useEffect(
     () =>
       subscribeConfigSaved((savedConfig) => {

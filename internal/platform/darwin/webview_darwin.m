@@ -42,31 +42,17 @@ static void dispatchBridgeEnvelopeJSON(NSString *payloadJSON, BOOL closeWindow) 
     if (sWebSettingsView == nil || payloadJSON == nil) {
         return;
     }
-    NSData *payloadData = [payloadJSON dataUsingEncoding:NSUTF8StringEncoding allowLossyConversion:YES];
-    if (payloadData == nil) {
-        reportWebSettingsNativeTransportWarning(@"failed to encode bridge payload base64",
-                                                @"failed to encode UTF-8 bridge payload bytes");
-        return;
-    }
-    NSString *payloadBase64 = [payloadData base64EncodedStringWithOptions:0];
-    if (payloadBase64 == nil || payloadBase64.length == 0) {
-        reportWebSettingsNativeTransportWarning(@"failed to encode bridge payload base64",
-                                                @"failed to build base64 bridge payload string");
-        return;
-    }
     NSString *script = [NSString stringWithFormat:
                         @"(function(){"
                         "try {"
-                        "  const raw = atob('%@');"
-                        "  const bytes = Uint8Array.from(raw, function(ch){ return ch.charCodeAt(0); });"
-                        "  const detail = JSON.parse(new TextDecoder().decode(bytes));"
+                        "  const detail = %@;"
                         "  window.dispatchEvent(new CustomEvent('%@', { detail }));"
                         "  return 'ok';"
                         "} catch (error) {"
                         "  return 'dispatch_error:' + (error && error.message ? error.message : String(error));"
                         "}"
                         "})();",
-                        payloadBase64,
+                        payloadJSON,
                         kJoiceTyperBridgeEventName];
     [sWebSettingsView evaluateJavaScript:script completionHandler:^(id result, NSError *error) {
         if (error != nil) {

@@ -26,9 +26,14 @@ WINDOWS_BIN_PATH := $(WINDOWS_BUILD_DIR)/joicetyper.exe
 WINDOWS_RUNTIME_DIR := $(WHISPER_DIR)/build/bin/Release
 WINDOWS_RUNTIME_IMPORT_DIR := $(WHISPER_DIR)/build/src/Release
 WINDOWS_RUNTIME_DLLS := whisper.dll ggml.dll ggml-base.dll ggml-cpu.dll
-WINDOWS_RUNTIME_STAGE_FILES := joicetyper.exe $(WINDOWS_RUNTIME_DLLS)
 WINDOWS_CC ?= x86_64-w64-mingw32-gcc
 WINDOWS_CXX ?= x86_64-w64-mingw32-g++
+WINDOWS_PORTAUDIO_DLL ?= $(shell find "$(CURDIR)/third_party/portaudio-windows-src/lib/.libs" -name 'libportaudio-2.dll' -print -quit 2>/dev/null)
+WINDOWS_LIBGCC_DLL ?= $(shell $(WINDOWS_CC) -print-file-name=libgcc_s_seh-1.dll)
+WINDOWS_LIBSTDCXX_DLL ?= $(shell $(WINDOWS_CXX) -print-file-name=libstdc++-6.dll)
+WINDOWS_WINPTHREAD_DLL ?= $(shell find "$(dir $(WINDOWS_LIBGCC_DLL))/.." -name 'libwinpthread-1.dll' -print -quit 2>/dev/null)
+WINDOWS_EXTRA_RUNTIME_DLLS := libwhisper.dll libportaudio-2.dll libgcc_s_seh-1.dll libstdc++-6.dll
+WINDOWS_RUNTIME_STAGE_FILES := joicetyper.exe $(WINDOWS_RUNTIME_DLLS) $(WINDOWS_EXTRA_RUNTIME_DLLS)
 WINDOWS_INSTALLER_SCRIPT := packaging/windows/joicetyper.iss
 WINDOWS_INSTALLER_NAME := JoiceTyper-$(VERSION)-setup.exe
 WINDOWS_INSTALLER_PATH := $(WINDOWS_BUILD_DIR)/$(WINDOWS_INSTALLER_NAME)
@@ -147,6 +152,9 @@ windows-runtime-prereqs:
 	@command -v $(WINDOWS_CXX) >/dev/null 2>&1 || (echo "fatal: missing Windows C++ compiler $(WINDOWS_CXX)" && exit 1)
 	@test -d "$(WINDOWS_RUNTIME_DIR)" || (echo "fatal: missing Windows runtime directory $(WINDOWS_RUNTIME_DIR)" && exit 1)
 	@test -d "$(WINDOWS_RUNTIME_IMPORT_DIR)" || (echo "fatal: missing Windows import library directory $(WINDOWS_RUNTIME_IMPORT_DIR)" && exit 1)
+	@test -f "$(WINDOWS_PORTAUDIO_DLL)" || (echo "fatal: missing Windows PortAudio runtime $(WINDOWS_PORTAUDIO_DLL)" && exit 1)
+	@test -f "$(WINDOWS_LIBGCC_DLL)" || (echo "fatal: missing MinGW runtime $(WINDOWS_LIBGCC_DLL)" && exit 1)
+	@test -f "$(WINDOWS_LIBSTDCXX_DLL)" || (echo "fatal: missing MinGW runtime $(WINDOWS_LIBSTDCXX_DLL)" && exit 1)
 	@for dll in $(WINDOWS_RUNTIME_DLLS); do \
 		test -f "$(WINDOWS_RUNTIME_DIR)/$$dll" || (echo "fatal: missing Windows runtime payload $(WINDOWS_RUNTIME_DIR)/$$dll" && exit 1); \
 	done
@@ -162,6 +170,13 @@ build-windows-runtime-amd64: bridge-contract frontend-build windows-runtime-prer
 	@for dll in $(WINDOWS_RUNTIME_DLLS); do \
 		cp "$(WINDOWS_RUNTIME_DIR)/$$dll" "$(WINDOWS_BUILD_DIR)/$$dll"; \
 	done
+	cp "$(WINDOWS_RUNTIME_DIR)/whisper.dll" "$(WINDOWS_BUILD_DIR)/libwhisper.dll"
+	cp "$(WINDOWS_PORTAUDIO_DLL)" "$(WINDOWS_BUILD_DIR)/libportaudio-2.dll"
+	cp "$(WINDOWS_LIBGCC_DLL)" "$(WINDOWS_BUILD_DIR)/libgcc_s_seh-1.dll"
+	cp "$(WINDOWS_LIBSTDCXX_DLL)" "$(WINDOWS_BUILD_DIR)/libstdc++-6.dll"
+	@if [ -n "$(WINDOWS_WINPTHREAD_DLL)" ] && [ -f "$(WINDOWS_WINPTHREAD_DLL)" ]; then \
+		cp "$(WINDOWS_WINPTHREAD_DLL)" "$(WINDOWS_BUILD_DIR)/libwinpthread-1.dll"; \
+	fi
 	@$(MAKE) windows-runtime-stage-check
 
 package-windows: build-windows-runtime-amd64 windows-runtime-stage-check

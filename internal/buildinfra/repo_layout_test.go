@@ -271,6 +271,9 @@ func TestSettingsScreenSource_TracksModelDownloadCompletionAndFailure(t *testing
 	for _, required := range []string{
 		`subscribeModelDownloadCompleted`,
 		`subscribeModelDownloadFailed`,
+		`fetchOptions,`,
+		`const refreshDownloadState = async () => {`,
+		`window.setInterval(() => {`,
 		`Downloaded ${size} model.`,
 		`Failed to download ${snapshot.size} model`,
 	} {
@@ -334,12 +337,20 @@ func TestDarwinWebviewTransportSource_LogsNativeFailures(t *testing.T) {
 		`failed to duplicate web settings request`,
 		`failed to evaluate bridge envelope dispatch`,
 		`failed to dispatch bridge envelope in page`,
-		`failed to encode bridge payload base64`,
-		`TextDecoder().decode(bytes)`,
-		`atob('`,
+		`const detail = %@;`,
+		`window.dispatchEvent(new CustomEvent`,
 	} {
 		if !strings.Contains(source, required) {
 			t.Fatalf("expected webview_darwin.m to contain %q", required)
+		}
+	}
+	for _, forbidden := range []string{
+		`JSON.parse(new TextDecoder().decode(bytes))`,
+		`atob('`,
+		`failed to encode bridge payload base64`,
+	} {
+		if strings.Contains(source, forbidden) {
+			t.Fatalf("expected webview_darwin.m to avoid %q", forbidden)
 		}
 	}
 }
