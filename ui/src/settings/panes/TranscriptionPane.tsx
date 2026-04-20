@@ -23,6 +23,22 @@ type TranscriptionPaneProps = {
   onUseModel: (size: string) => void | Promise<void>;
 };
 
+function formatTransferSize(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes <= 0) {
+    return "0 B";
+  }
+  if (bytes >= 1_000_000_000) {
+    return `${(bytes / 1_000_000_000).toFixed(1)} GB`;
+  }
+  if (bytes >= 1_000_000) {
+    return `${(bytes / 1_000_000).toFixed(1)} MB`;
+  }
+  if (bytes >= 1_000) {
+    return `${(bytes / 1_000).toFixed(1)} KB`;
+  }
+  return `${Math.round(bytes)} B`;
+}
+
 export default function TranscriptionPane({
   confirmDeleteModelSize,
   downloadProgress,
@@ -41,6 +57,8 @@ export default function TranscriptionPane({
   onPunctuationModeChange,
   onUseModel,
 }: TranscriptionPaneProps) {
+  const activeDownloadPercent = downloadProgress ? Math.round(downloadProgress.progress * 100) : 0;
+
   return (
     <div className="pane-stack">
       <Panel eyebrow="Whisper engine" title="Model" right={<StatusBadge tone={selectedModelStatus.tone}>{selectedModelStatus.label}</StatusBadge>}>
@@ -55,12 +73,38 @@ export default function TranscriptionPane({
           </select>
         </Field>
         */}
+        {downloadProgress ? (
+          <div
+            className="model-download-progress"
+            role="progressbar"
+            aria-label={`Downloading ${downloadProgress.size} model`}
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-valuenow={activeDownloadPercent}
+          >
+            <div className="model-download-progress__header">
+              <strong>Downloading {downloadProgress.size} model</strong>
+              <span>{activeDownloadPercent}%</span>
+            </div>
+            <div className="model-download-progress__track">
+              <span className="model-download-progress__fill" style={{ width: `${activeDownloadPercent}%` }} />
+            </div>
+            <div className="model-download-progress__meta">
+              <span>
+                {formatTransferSize(downloadProgress.bytesDownloaded)}
+                {downloadProgress.bytesTotal > 0 ? ` / ${formatTransferSize(downloadProgress.bytesTotal)}` : ""}
+              </span>
+              <span>The app remains usable while the download finishes.</span>
+            </div>
+          </div>
+        ) : null}
         <div className="model-grid">
           {options.models.map((option) => {
             const details = parseModelOption(option);
             const active = option.code === modelActionSize;
             const inUse = model.size === option.code && model.ready;
             const downloading = downloadProgress?.size === option.code;
+            const anyDownloadActive = downloadProgress !== null;
             const installed = option.installed === true || inUse;
             return (
               <div
@@ -69,13 +113,13 @@ export default function TranscriptionPane({
                 role="button"
                 tabIndex={0}
                 onClick={() => {
-                  if (!installed || downloading) {
+                  if (!installed || anyDownloadActive) {
                     return;
                   }
                   void onUseModel(option.code);
                 }}
                 onKeyDown={(event) => {
-                  if ((event.key === "Enter" || event.key === " ") && installed && !downloading) {
+                  if ((event.key === "Enter" || event.key === " ") && installed && !anyDownloadActive) {
                     event.preventDefault();
                     void onUseModel(option.code);
                   }
@@ -108,7 +152,7 @@ export default function TranscriptionPane({
                         event.stopPropagation();
                         void onDownloadModel(option.code);
                       }}
-                      disabled={downloading}
+                      disabled={anyDownloadActive}
                     >
                       {downloading ? "Downloading..." : "Download"}
                     </button>
@@ -120,6 +164,7 @@ export default function TranscriptionPane({
                         event.stopPropagation();
                         void onDeleteModel(option.code);
                       }}
+                      disabled={anyDownloadActive}
                     >
                       Remove From Disk
                     </button>

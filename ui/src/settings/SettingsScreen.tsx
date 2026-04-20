@@ -110,6 +110,22 @@ function sanitizeConfigSnapshot(snapshot: ConfigSnapshot): ConfigSnapshot {
   };
 }
 
+function formatTransferSize(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes <= 0) {
+    return "0 B";
+  }
+  if (bytes >= 1_000_000_000) {
+    return `${(bytes / 1_000_000_000).toFixed(1)} GB`;
+  }
+  if (bytes >= 1_000_000) {
+    return `${(bytes / 1_000_000).toFixed(1)} MB`;
+  }
+  if (bytes >= 1_000) {
+    return `${(bytes / 1_000).toFixed(1)} KB`;
+  }
+  return `${Math.round(bytes)} B`;
+}
+
 function MicMeter() {
   return (
     <div className="mic-meter" aria-hidden="true">
@@ -170,7 +186,13 @@ export function SettingsScreen({ bootstrap }: SettingsScreenProps) {
     () => JSON.stringify(draft) !== JSON.stringify(savedConfig),
     [draft, savedConfig],
   );
-  const footerStatus = status !== "" ? status : hasUnsavedChanges ? "Unsaved changes." : "No unsaved changes.";
+  const footerStatus = downloadProgress
+    ? `Downloading ${downloadProgress.size} model... ${Math.round(downloadProgress.progress * 100)}%${downloadProgress.bytesTotal > 0 ? ` · ${formatTransferSize(downloadProgress.bytesDownloaded)} / ${formatTransferSize(downloadProgress.bytesTotal)}` : ""}`
+    : status !== ""
+      ? status
+      : hasUnsavedChanges
+        ? "Unsaved changes."
+        : "No unsaved changes.";
 
   const selectedModelStatus = useMemo(() => {
     if (downloadProgress?.size === modelActionSize) {
@@ -304,9 +326,7 @@ export function SettingsScreen({ bootstrap }: SettingsScreenProps) {
   useEffect(
     () =>
       subscribeModelDownloadProgress((progress: ModelDownloadProgressSnapshot) => {
-        const pct = Math.round(progress.progress * 100);
         setDownloadProgress(progress);
-        setStatus(`Downloading ${progress.size} model: ${pct}%`);
       }),
     [],
   );
@@ -417,7 +437,7 @@ export function SettingsScreen({ bootstrap }: SettingsScreenProps) {
     try {
       setConfirmDeleteModelSize(null);
       setDownloadProgress({ size, progress: 0, bytesDownloaded: 0, bytesTotal: 0 });
-      setStatus(`Starting ${size} model download...`);
+      setStatus("");
       await downloadModel(size);
       setDownloadProgress(null);
       setModelInstalled(size, true);
@@ -688,7 +708,17 @@ export function SettingsScreen({ bootstrap }: SettingsScreenProps) {
             <div className="settings-content__body">{renderPane()}</div>
 
             <footer className="settings-footer">
-              <p className="settings-footer__status">{footerStatus}</p>
+              <div className="settings-footer__status-wrap">
+                <p className="settings-footer__status">{footerStatus}</p>
+                {downloadProgress ? (
+                  <div className="settings-footer__progress" aria-hidden="true">
+                    <span
+                      className="settings-footer__progress-fill"
+                      style={{ width: `${Math.round(downloadProgress.progress * 100)}%` }}
+                    />
+                  </div>
+                ) : null}
+              </div>
               <button className="ui-button ui-button--primary ui-button--large" onClick={() => void handleSave()} disabled={!saveAvailable || saving}>
                 Save and Reload
               </button>

@@ -867,6 +867,55 @@ svg {
   margin-top: auto;
 }
 
+.model-download-progress {
+  display: grid;
+  gap: 10px;
+  margin-bottom: 18px;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--surface-2) 84%, white);
+}
+
+.model-download-progress__header,
+.model-download-progress__meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.model-download-progress__header strong {
+  color: var(--ink);
+  font-size: 13.5px;
+}
+
+.model-download-progress__header span,
+.model-download-progress__meta span {
+  color: var(--ink-2);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.model-download-progress__track,
+.settings-footer__progress {
+  overflow: hidden;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 10%, var(--surface-2));
+}
+
+.model-download-progress__track {
+  height: 8px;
+}
+
+.model-download-progress__fill,
+.settings-footer__progress-fill {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--accent), var(--accent-2));
+}
+
 .model-card__hint {
   color: var(--ink-3);
   font-size: 11.5px;
@@ -1057,11 +1106,23 @@ svg {
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.16), rgba(244, 239, 233, 0.5));
 }
 
+.settings-footer__status-wrap {
+  min-width: 0;
+  flex: 1;
+  display: grid;
+  gap: 8px;
+}
+
 .settings-footer__status {
   margin: 0;
   color: var(--ink-2);
   font-size: 13px;
   line-height: 1.5;
+}
+
+.settings-footer__progress {
+  width: min(420px, 100%);
+  height: 6px;
 }
 
 @media (max-width: 760px) {
