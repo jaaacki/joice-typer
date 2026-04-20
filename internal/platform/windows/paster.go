@@ -40,24 +40,35 @@ type windowsKeybdInput struct {
 }
 
 var (
-	user32Paster                      = windows.NewLazySystemDLL("user32.dll")
-	kernel32Paster                    = windows.NewLazySystemDLL("kernel32.dll")
-	procOpenClipboard                 = user32Paster.NewProc("OpenClipboard")
-	procCloseClipboard                = user32Paster.NewProc("CloseClipboard")
-	procEmptyClipboard                = user32Paster.NewProc("EmptyClipboard")
-	procGetClipboardData              = user32Paster.NewProc("GetClipboardData")
-	procSetClipboardData              = user32Paster.NewProc("SetClipboardData")
-	procSendInput                     = user32Paster.NewProc("SendInput")
-	procGlobalAlloc                   = kernel32Paster.NewProc("GlobalAlloc")
-	procGlobalLock                    = kernel32Paster.NewProc("GlobalLock")
-	procGlobalUnlock                  = kernel32Paster.NewProc("GlobalUnlock")
-	procGlobalFree                    = kernel32Paster.NewProc("GlobalFree")
-	windowsPasterClipboardText        = setWindowsClipboardText
-	windowsPasterSendPasteShortcut    = sendWindowsPasteShortcut
-	windowsPasterTypeUnicodeFallback  = typeWindowsUnicodeFallback
-	windowsPasterReadClipboardText    = readWindowsClipboardText
-	windowsPasterRestoreClipboardText = restoreWindowsClipboardText
+	user32Paster                          = windows.NewLazySystemDLL("user32.dll")
+	kernel32Paster                        = windows.NewLazySystemDLL("kernel32.dll")
+	procOpenClipboard                     = user32Paster.NewProc("OpenClipboard")
+	procCloseClipboard                    = user32Paster.NewProc("CloseClipboard")
+	procEnumClipboardFormats              = user32Paster.NewProc("EnumClipboardFormats")
+	procEmptyClipboard                    = user32Paster.NewProc("EmptyClipboard")
+	procGetClipboardData                  = user32Paster.NewProc("GetClipboardData")
+	procSetClipboardData                  = user32Paster.NewProc("SetClipboardData")
+	procSendInput                         = user32Paster.NewProc("SendInput")
+	procGlobalAlloc                       = kernel32Paster.NewProc("GlobalAlloc")
+	procGlobalLock                        = kernel32Paster.NewProc("GlobalLock")
+	procGlobalSize                        = kernel32Paster.NewProc("GlobalSize")
+	procGlobalUnlock                      = kernel32Paster.NewProc("GlobalUnlock")
+	procGlobalFree                        = kernel32Paster.NewProc("GlobalFree")
+	windowsPasterClipboardText            = setWindowsClipboardText
+	windowsPasterSendPasteShortcut        = sendWindowsPasteShortcut
+	windowsPasterTypeUnicodeFallback      = typeWindowsUnicodeFallback
+	windowsPasterReadClipboardSnapshot    = readWindowsClipboardSnapshot
+	windowsPasterRestoreClipboardSnapshot = restoreWindowsClipboardSnapshot
 )
+
+type windowsClipboardEntry struct {
+	format uint32
+	data   []byte
+}
+
+type windowsClipboardSnapshot struct {
+	entries []windowsClipboardEntry
+}
 
 func NewPaster(logger *slog.Logger) Paster {
 	if logger == nil {
@@ -71,7 +82,7 @@ func NewPaster(logger *slog.Logger) Paster {
 func (p *windowsClipboardPaster) Paste(text string) error {
 	p.logger.Debug("pasting", "operation", "Paste", "text_length", len(text))
 
-	previousClipboardText, hadClipboardText, snapshotErr := windowsPasterReadClipboardText()
+	previousClipboard, snapshotErr := windowsPasterReadClipboardSnapshot()
 	if snapshotErr != nil {
 		p.logger.Warn("clipboard snapshot failed before paste", "operation", "Paste", "error", snapshotErr)
 	}
@@ -79,7 +90,7 @@ func (p *windowsClipboardPaster) Paste(text string) error {
 	clipboardErr := windowsPasterClipboardText(text)
 	if clipboardErr == nil {
 		restoreClipboard := func() {
-			if restoreErr := windowsPasterRestoreClipboardText(previousClipboardText, hadClipboardText); restoreErr != nil {
+			if restoreErr := windowsPasterRestoreClipboardSnapshot(previousClipboard); restoreErr != nil {
 				p.logger.Warn("restore clipboard failed after paste", "operation", "Paste", "error", restoreErr)
 			}
 		}
@@ -139,34 +150,73 @@ func setWindowsClipboardText(text string) error {
 	return nil
 }
 
-func readWindowsClipboardText() (string, bool, error) {
+func readWindowsClipboardSnapshot() (windowsClipboardSnapshot, error) {
 	if ok, _, callErr := procOpenClipboard.Call(0); ok == 0 {
-		return "", false, fmt.Errorf("open clipboard: %w", callErr)
+		return windowsClipboardSnapshot{}, fmt.Errorf("open clipboard: %w", callErr)
 	}
 	defer procCloseClipboard.Call()
 
-	handle, _, callErr := procGetClipboardData.Call(cfUnicodeText)
-	if handle == 0 {
-		if callErr != nil && callErr.Error() != "The operation completed successfully." {
-			return "", false, fmt.Errorf("get clipboard data: %w", callErr)
+	snapshot := windowsClipboardSnapshot{}
+	for format, _, _ := procEnumClipboardFormats.Call(0); format != 0; format, _, _ = procEnumClipboardFormats.Call(format) {
+		handle, _, callErr := procGetClipboardData.Call(format)
+		if handle == 0 {
+			if callErr != nil && callErr.Error() != "The operation completed successfully." {
+				return windowsClipboardSnapshot{}, fmt.Errorf("get clipboard data for format %d: %w", format, callErr)
+			}
+			continue
 		}
-		return "", false, nil
+
+		size, _, callErr := procGlobalSize.Call(handle)
+		if size == 0 {
+			continue
+		}
+
+		lock, _, callErr := procGlobalLock.Call(handle)
+		if lock == 0 {
+			return windowsClipboardSnapshot{}, fmt.Errorf("global lock for format %d: %w", format, callErr)
+		}
+
+		data := append([]byte(nil), unsafe.Slice((*byte)(unsafe.Pointer(lock)), size)...)
+		procGlobalUnlock.Call(handle)
+		snapshot.entries = append(snapshot.entries, windowsClipboardEntry{
+			format: uint32(format),
+			data:   data,
+		})
 	}
 
-	lock, _, callErr := procGlobalLock.Call(handle)
-	if lock == 0 {
-		return "", false, fmt.Errorf("global lock: %w", callErr)
-	}
-	defer procGlobalUnlock.Call(handle)
-
-	return windows.UTF16PtrToString((*uint16)(unsafe.Pointer(lock))), true, nil
+	return snapshot, nil
 }
 
-func restoreWindowsClipboardText(text string, hadClipboardText bool) error {
-	if !hadClipboardText {
-		return nil
+func restoreWindowsClipboardSnapshot(snapshot windowsClipboardSnapshot) error {
+	if ok, _, callErr := procOpenClipboard.Call(0); ok == 0 {
+		return fmt.Errorf("open clipboard: %w", callErr)
 	}
-	return setWindowsClipboardText(text)
+	defer procCloseClipboard.Call()
+
+	if ok, _, callErr := procEmptyClipboard.Call(); ok == 0 {
+		return fmt.Errorf("empty clipboard: %w", callErr)
+	}
+
+	for _, entry := range snapshot.entries {
+		mem, _, callErr := procGlobalAlloc.Call(gmemMoveable|gmemZeroInit, uintptr(len(entry.data)))
+		if mem == 0 {
+			return fmt.Errorf("global alloc for format %d: %w", entry.format, callErr)
+		}
+
+		lock, _, callErr := procGlobalLock.Call(mem)
+		if lock == 0 {
+			procGlobalFree.Call(mem)
+			return fmt.Errorf("global lock for format %d: %w", entry.format, callErr)
+		}
+		copy(unsafe.Slice((*byte)(unsafe.Pointer(lock)), len(entry.data)), entry.data)
+		procGlobalUnlock.Call(mem)
+
+		if handle, _, callErr := procSetClipboardData.Call(uintptr(entry.format), mem); handle == 0 {
+			procGlobalFree.Call(mem)
+			return fmt.Errorf("set clipboard data for format %d: %w", entry.format, callErr)
+		}
+	}
+	return nil
 }
 
 func sendWindowsPasteShortcut() error {

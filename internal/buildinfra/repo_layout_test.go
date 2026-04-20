@@ -674,12 +674,18 @@ func TestWindowsPasterSource_UsesClipboardAndTypingFallback(t *testing.T) {
 	for _, required := range []string{
 		`procOpenClipboard`,
 		`procSetClipboardData`,
+		`procEnumClipboardFormats`,
+		`procGlobalSize`,
 		`procSendInput`,
 		`clipboard paste failed, falling back to unicode typing`,
 		`paste shortcut failed, falling back to unicode typing`,
 		`keyeventfUnicode`,
-		`windowsPasterReadClipboardText`,
-		`windowsPasterRestoreClipboardText`,
+		`type windowsClipboardSnapshot struct`,
+		`type windowsClipboardEntry struct`,
+		`readWindowsClipboardSnapshot()`,
+		`restoreWindowsClipboardSnapshot(snapshot windowsClipboardSnapshot)`,
+		`procEnumClipboardFormats.Call(0)`,
+		`procEnumClipboardFormats.Call(format)`,
 		`restore clipboard failed after paste`,
 	} {
 		if !strings.Contains(source, required) {
