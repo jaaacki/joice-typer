@@ -18,6 +18,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 	"unsafe"
 
@@ -33,6 +34,7 @@ var defaultModelPath = config.DefaultModelPath
 var removeFile = os.Remove
 var listAudioDevices = audiopkg.ListInputDeviceSnapshots
 var downloadModelWithProgress = transcriptionpkg.DownloadModelWithProgress
+var registerLogWriteObserver = loggingpkg.RegisterWriteObserver
 var webSettingsOpenPermissionSettings = openWebSettingsPermissionSettings
 var webSettingsLogPath = func() (string, error) {
 	dir, err := config.DefaultConfigDir()
@@ -52,6 +54,13 @@ var applyNativePermissionSnapshot = func(snapshot bridgepkg.PermissionsSnapshot)
 	C.updateSetupInputMonitoring(boolToCInt(snapshot.InputMonitoring))
 }
 var permissionPollingInterval = 2 * time.Second
+
+var (
+	webSettingsLogObserverOnce   sync.Once
+	webSettingsLogUpdateMu       sync.Mutex
+	webSettingsLogUpdateTimer    *time.Timer
+	webSettingsLogRefreshRunning bool
+)
 
 func loadWebSettingsPermissionsSnapshot() bridgepkg.PermissionsSnapshot {
 	return loadPermissionsSnapshot()
@@ -268,11 +277,60 @@ func loadWebSettingsLogFullText() (string, error) {
 }
 
 func notifyWebSettingsLogsUpdated() {
+	webSettingsLogUpdateMu.Lock()
+	if webSettingsLogRefreshRunning {
+		webSettingsLogUpdateMu.Unlock()
+		return
+	}
+	webSettingsLogRefreshRunning = true
+	webSettingsLogUpdateMu.Unlock()
+	defer func() {
+		webSettingsLogUpdateMu.Lock()
+		webSettingsLogRefreshRunning = false
+		webSettingsLogUpdateMu.Unlock()
+	}()
+
 	snapshot, err := loadWebSettingsLogTailSnapshot()
 	if err != nil {
 		currentSettingsLogger().Warn("failed to refresh logs", "operation", "notifyWebSettingsLogsUpdated", "error", err)
 	}
 	publishLogsUpdated(snapshot)
+}
+
+func ensureWebSettingsLogObserver() {
+	webSettingsLogObserverOnce.Do(func() {
+		registerLogWriteObserver(func(path string) {
+			if preferencesOpenLoad() == 0 {
+				return
+			}
+			webSettingsLogUpdateMu.Lock()
+			refreshRunning := webSettingsLogRefreshRunning
+			webSettingsLogUpdateMu.Unlock()
+			if refreshRunning {
+				return
+			}
+			expectedPath, err := webSettingsLogPath()
+			if err != nil || expectedPath == "" || path != expectedPath {
+				return
+			}
+			scheduleWebSettingsLogsUpdated()
+		})
+	})
+}
+
+func scheduleWebSettingsLogsUpdated() {
+	webSettingsLogUpdateMu.Lock()
+	defer webSettingsLogUpdateMu.Unlock()
+	if webSettingsLogUpdateTimer == nil {
+		webSettingsLogUpdateTimer = time.AfterFunc(150*time.Millisecond, func() {
+			notifyWebSettingsLogsUpdated()
+			webSettingsLogUpdateMu.Lock()
+			webSettingsLogUpdateTimer = nil
+			webSettingsLogUpdateMu.Unlock()
+		})
+		return
+	}
+	webSettingsLogUpdateTimer.Reset(150 * time.Millisecond)
 }
 
 func downloadWebSettingsModel(ctx context.Context, modelSize string) error {
@@ -868,6 +926,8 @@ func signalHotkeyRestart() {
 // Called from the main thread (statusbar callback). Sets up the UI on the
 // main thread, then moves to a goroutine so [NSApp run] stays responsive.
 func OpenPreferences() {
+	ensureWebSettingsLogObserver()
+
 	if !preferencesOpenCompareAndSwap(0, 1) {
 		currentSettingsLogger().Info("preferences already open, reactivating existing window",
 			"operation", "OpenPreferences")

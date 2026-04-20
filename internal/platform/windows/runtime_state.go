@@ -109,6 +109,10 @@ func preferencesOpenStore(v int32) {
 	atomic.StoreInt32(&runtimeSingleton.prefsOpen, v)
 }
 
+func preferencesOpenLoad() int32 {
+	return atomic.LoadInt32(&runtimeSingleton.prefsOpen)
+}
+
 func setPreferencesContext(ctx context.Context, cancel context.CancelFunc) {
 	runtimeSingleton.prefsMu.Lock()
 	if runtimeSingleton.prefsCancel != nil {

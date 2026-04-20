@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestSetupLogger_CreatesLogFile(t *testing.T) {
@@ -152,5 +153,63 @@ func TestTruncateIfNeeded_NonexistentFile(t *testing.T) {
 	err := truncateIfNeeded("/nonexistent/path/file.log", 1024)
 	if err != nil {
 		t.Fatalf("expected no error for nonexistent file, got: %v", err)
+	}
+}
+
+func TestSetupLogger_NotifiesWriteObservers(t *testing.T) {
+	dir := t.TempDir()
+	logPath := filepath.Join(dir, "voicetype.log")
+
+	paths := make(chan string, 1)
+	unregister := RegisterWriteObserver(func(path string) {
+		select {
+		case paths <- path:
+		default:
+		}
+	})
+	defer unregister()
+
+	logger, cleanup, err := SetupLogger(dir)
+	if err != nil {
+		t.Fatalf("SetupLogger: %v", err)
+	}
+	defer cleanup()
+
+	logger.Info("observer message")
+
+	select {
+	case got := <-paths:
+		if got != logPath {
+			t.Fatalf("observer path = %q, want %q", got, logPath)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for write observer")
+	}
+}
+
+func TestRegisterWriteObserver_UnregisterStopsNotifications(t *testing.T) {
+	dir := t.TempDir()
+	paths := make(chan string, 1)
+
+	unregister := RegisterWriteObserver(func(path string) {
+		select {
+		case paths <- path:
+		default:
+		}
+	})
+
+	logger, cleanup, err := SetupLogger(dir)
+	if err != nil {
+		t.Fatalf("SetupLogger: %v", err)
+	}
+	defer cleanup()
+
+	unregister()
+	logger.Info("message after unregister")
+
+	select {
+	case got := <-paths:
+		t.Fatalf("unexpected write notification after unregister: %q", got)
+	case <-time.After(150 * time.Millisecond):
 	}
 }

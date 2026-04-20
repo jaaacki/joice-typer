@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 	"unsafe"
 
@@ -68,6 +69,14 @@ var (
 	showWindowsPreferencesUnavailable = func(message string) {
 		showWindowsMessageBox("JoiceTyper Preferences unavailable", message)
 	}
+	registerLogWriteObserver = loggingpkg.RegisterWriteObserver
+)
+
+var (
+	webSettingsLogObserverOnce   sync.Once
+	webSettingsLogUpdateMu       sync.Mutex
+	webSettingsLogUpdateTimer    *time.Timer
+	webSettingsLogRefreshRunning bool
 )
 
 func shouldUseWebSettings() bool {
@@ -111,6 +120,7 @@ func OpenPreferences() {
 }
 
 func openPreferences() error {
+	ensureWebSettingsLogObserver()
 	if !preferencesOpenCompareAndSwap(0, 1) {
 		currentSettingsLogger().Info("preferences already open, reactivating existing window", "operation", "OpenPreferences")
 		FocusWebSettingsWindow()
@@ -604,9 +614,58 @@ func loadWebSettingsLogFullText() (string, error) {
 }
 
 func notifyWebSettingsLogsUpdated() {
+	webSettingsLogUpdateMu.Lock()
+	if webSettingsLogRefreshRunning {
+		webSettingsLogUpdateMu.Unlock()
+		return
+	}
+	webSettingsLogRefreshRunning = true
+	webSettingsLogUpdateMu.Unlock()
+	defer func() {
+		webSettingsLogUpdateMu.Lock()
+		webSettingsLogRefreshRunning = false
+		webSettingsLogUpdateMu.Unlock()
+	}()
+
 	snapshot, err := loadWebSettingsLogTailSnapshot()
 	if err != nil {
 		currentSettingsLogger().Warn("failed to refresh logs", "operation", "notifyWebSettingsLogsUpdated", "error", err)
 	}
 	publishLogsUpdated(snapshot)
+}
+
+func ensureWebSettingsLogObserver() {
+	webSettingsLogObserverOnce.Do(func() {
+		registerLogWriteObserver(func(path string) {
+			if preferencesOpenLoad() == 0 {
+				return
+			}
+			webSettingsLogUpdateMu.Lock()
+			refreshRunning := webSettingsLogRefreshRunning
+			webSettingsLogUpdateMu.Unlock()
+			if refreshRunning {
+				return
+			}
+			expectedPath, err := webSettingsLogPath()
+			if err != nil || expectedPath == "" || path != expectedPath {
+				return
+			}
+			scheduleWebSettingsLogsUpdated()
+		})
+	})
+}
+
+func scheduleWebSettingsLogsUpdated() {
+	webSettingsLogUpdateMu.Lock()
+	defer webSettingsLogUpdateMu.Unlock()
+	if webSettingsLogUpdateTimer == nil {
+		webSettingsLogUpdateTimer = time.AfterFunc(150*time.Millisecond, func() {
+			notifyWebSettingsLogsUpdated()
+			webSettingsLogUpdateMu.Lock()
+			webSettingsLogUpdateTimer = nil
+			webSettingsLogUpdateMu.Unlock()
+		})
+		return
+	}
+	webSettingsLogUpdateTimer.Reset(150 * time.Millisecond)
 }

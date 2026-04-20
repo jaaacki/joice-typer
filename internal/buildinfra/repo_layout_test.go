@@ -523,9 +523,38 @@ func TestWindowsWebviewTransportSource_LogsNativeFailures(t *testing.T) {
 		`Install Microsoft Edge WebView2 Runtime`,
 		`webView2RuntimeRegistryGUID`,
 		`Software\Microsoft\EdgeUpdate\Clients\`,
+		`window.dispatchEvent(new CustomEvent("`,
+		`function dispatchBridgePayload(payload)`,
 	} {
 		if !strings.Contains(source, required) {
 			t.Fatalf("expected webview_host_windows.go to contain %q", required)
+		}
+	}
+	if strings.Contains(source, `window.__JOICETYPER_NATIVE_BRIDGE_DISPATCH__`) {
+		t.Fatal("expected Windows WebView2 transport to stop depending on a page-owned bridge dispatch function")
+	}
+}
+
+func TestSharedSettingsSource_ObservesLogWritesForLiveLogsPane(t *testing.T) {
+	root := repoRoot(t)
+	targets := []string{
+		filepath.Join(root, "internal", "platform", "darwin", "settings.go"),
+		filepath.Join(root, "internal", "platform", "windows", "settings.go"),
+	}
+	for _, target := range targets {
+		data, err := os.ReadFile(target)
+		if err != nil {
+			t.Fatalf("read %s: %v", filepath.Base(target), err)
+		}
+		source := string(data)
+		for _, required := range []string{
+			`registerLogWriteObserver`,
+			`preferencesOpenLoad()`,
+			`scheduleWebSettingsLogsUpdated()`,
+		} {
+			if !strings.Contains(source, required) {
+				t.Fatalf("expected %s to contain %q", filepath.Base(target), required)
+			}
 		}
 	}
 }
@@ -684,6 +713,7 @@ func TestWindowsPasterSource_UsesClipboardAndTypingFallback(t *testing.T) {
 		`type windowsClipboardEntry struct`,
 		`readWindowsClipboardSnapshot()`,
 		`restoreWindowsClipboardSnapshot(snapshot windowsClipboardSnapshot)`,
+		`isWindowsCloneableClipboardFormat`,
 		`procEnumClipboardFormats.Call(0)`,
 		`procEnumClipboardFormats.Call(format)`,
 		`restore clipboard failed after paste`,

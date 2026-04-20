@@ -415,6 +415,9 @@ func webView2DocumentCreatedScript() string {
 	return `(function() {
   if (window.__JOICETYPER_WEBVIEW2_BRIDGE_READY__) return;
   window.__JOICETYPER_WEBVIEW2_BRIDGE_READY__ = true;
+  function dispatchBridgePayload(payload) {
+    window.dispatchEvent(new CustomEvent("` + bridgepkg.BridgeEventName + `", { detail: payload }));
+  }
   window.webkit = window.webkit || {};
   window.webkit.messageHandlers = window.webkit.messageHandlers || {};
   window.webkit.messageHandlers.joicetyper = {
@@ -423,14 +426,11 @@ func webView2DocumentCreatedScript() string {
       window.chrome.webview.postMessage(JSON.stringify(payload));
     }
   };
-  window.__JOICETYPER_NATIVE_BRIDGE_DISPATCH__ = function(payload) {
-    window.dispatchEvent(new CustomEvent("` + bridgepkg.BridgeEventName + `", { detail: payload }));
-  };
   if (window.chrome && window.chrome.webview) {
     window.chrome.webview.addEventListener('message', function(event) {
       try {
         var payload = typeof event.data === 'string' ? JSON.parse(event.data) : event.data;
-        window.__JOICETYPER_NATIVE_BRIDGE_DISPATCH__(payload);
+        dispatchBridgePayload(payload);
       } catch (error) {
         console.error('joicetyper windows bridge dispatch failed', error);
       }
@@ -445,7 +445,9 @@ func webView2EnvelopeDispatchScript(payloadJSON string) string {
 	script.WriteString("const payload = ")
 	script.WriteString(payloadJSON)
 	script.WriteString(";")
-	script.WriteString("if (window.__JOICETYPER_NATIVE_BRIDGE_DISPATCH__) { window.__JOICETYPER_NATIVE_BRIDGE_DISPATCH__(payload); }")
+	script.WriteString(`window.dispatchEvent(new CustomEvent("`)
+	script.WriteString(bridgepkg.BridgeEventName)
+	script.WriteString(`", { detail: payload }));`)
 	script.WriteString("})();")
 	return script.String()
 }

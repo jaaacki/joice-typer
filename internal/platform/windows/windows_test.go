@@ -35,3 +35,16 @@ func TestWindowsPackageBuilds(t *testing.T) {
 	t.Parallel()
 	_ = NewPaster(nil)
 }
+
+func TestIsWindowsCloneableClipboardFormat_OnlyAllowsKnownMemoryFormats(t *testing.T) {
+	for _, format := range []uint32{cfText, cfUnicodeText, cfHDrop, cfDib, cfDibV5, cfLocale} {
+		if !isWindowsCloneableClipboardFormat(format) {
+			t.Fatalf("expected format %d to be cloneable", format)
+		}
+	}
+	for _, format := range []uint32{2, 3, 9, 14, 0xC000} {
+		if isWindowsCloneableClipboardFormat(format) {
+			t.Fatalf("expected format %d to be rejected as non-cloneable", format)
+		}
+	}
+}

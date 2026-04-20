@@ -255,11 +255,15 @@ func TestWebView2DocumentCreatedScript_ProvidesSharedBridgeShim(t *testing.T) {
 		"window.webkit.messageHandlers.joicetyper.postMessage",
 		"chrome.webview.postMessage(JSON.stringify(payload))",
 		"chrome.webview.addEventListener('message'",
+		"function dispatchBridgePayload(payload)",
 		bridgepkg.BridgeEventName,
 	} {
 		if !strings.Contains(script, snippet) {
 			t.Fatalf("expected document-created script to contain %q, got %q", snippet, script)
 		}
+	}
+	if strings.Contains(script, "window.__JOICETYPER_NATIVE_BRIDGE_DISPATCH__") {
+		t.Fatalf("expected document-created script to avoid a page-owned native dispatch hook, got %q", script)
 	}
 }
 

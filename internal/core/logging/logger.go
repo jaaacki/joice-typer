@@ -7,11 +7,20 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"sync"
 )
 
 const (
 	maxLogBytes int64 = 5 * 1024 * 1024 // 5MB
 	logFileName       = "voicetype.log"
+)
+
+type WriteObserver func(path string)
+
+var (
+	writeObserversMu    sync.Mutex
+	writeObservers      = map[int]WriteObserver{}
+	nextWriteObserverID int
 )
 
 func SetupLogger(logDir string) (*slog.Logger, func(), error) {
@@ -34,7 +43,7 @@ func SetupLogger(logDir string) (*slog.Logger, func(), error) {
 	if os.Getenv("JOICE_DEBUG") != "" {
 		level = slog.LevelDebug
 	}
-	handler := slog.NewJSONHandler(f, &slog.HandlerOptions{
+	handler := slog.NewJSONHandler(notifyingWriter{Writer: f, path: logPath}, &slog.HandlerOptions{
 		Level: level,
 	})
 
@@ -44,6 +53,47 @@ func SetupLogger(logDir string) (*slog.Logger, func(), error) {
 	}
 
 	return logger, cleanup, nil
+}
+
+func RegisterWriteObserver(observer WriteObserver) func() {
+	if observer == nil {
+		return func() {}
+	}
+	writeObserversMu.Lock()
+	id := nextWriteObserverID
+	nextWriteObserverID++
+	writeObservers[id] = observer
+	writeObserversMu.Unlock()
+	return func() {
+		writeObserversMu.Lock()
+		delete(writeObservers, id)
+		writeObserversMu.Unlock()
+	}
+}
+
+type notifyingWriter struct {
+	io.Writer
+	path string
+}
+
+func (w notifyingWriter) Write(p []byte) (int, error) {
+	n, err := w.Writer.Write(p)
+	if n > 0 {
+		notifyWriteObservers(w.path)
+	}
+	return n, err
+}
+
+func notifyWriteObservers(path string) {
+	writeObserversMu.Lock()
+	observers := make([]WriteObserver, 0, len(writeObservers))
+	for _, observer := range writeObservers {
+		observers = append(observers, observer)
+	}
+	writeObserversMu.Unlock()
+	for _, observer := range observers {
+		observer(path)
+	}
 }
 
 func truncateIfNeeded(path string, maxBytes int64) error {

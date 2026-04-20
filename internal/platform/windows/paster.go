@@ -12,7 +12,16 @@ import (
 )
 
 const (
+	cfText           = 1
+	cfOemText        = 7
+	cfDib            = 8
 	cfUnicodeText    = 13
+	cfHDrop          = 15
+	cfLocale         = 16
+	cfDibV5          = 17
+	cfDspText        = 0x0081
+	cfDspOemText     = 0x0082
+	cfDspUnicodeText = 0x0083
 	gmemMoveable     = 0x0002
 	gmemZeroInit     = 0x0040
 	inputKeyboard    = 1
@@ -158,6 +167,9 @@ func readWindowsClipboardSnapshot() (windowsClipboardSnapshot, error) {
 
 	snapshot := windowsClipboardSnapshot{}
 	for format, _, _ := procEnumClipboardFormats.Call(0); format != 0; format, _, _ = procEnumClipboardFormats.Call(format) {
+		if !isWindowsCloneableClipboardFormat(uint32(format)) {
+			continue
+		}
 		handle, _, callErr := procGetClipboardData.Call(format)
 		if handle == 0 {
 			if callErr != nil && callErr.Error() != "The operation completed successfully." {
@@ -185,6 +197,15 @@ func readWindowsClipboardSnapshot() (windowsClipboardSnapshot, error) {
 	}
 
 	return snapshot, nil
+}
+
+func isWindowsCloneableClipboardFormat(format uint32) bool {
+	switch format {
+	case cfText, cfOemText, cfDib, cfUnicodeText, cfHDrop, cfLocale, cfDibV5, cfDspText, cfDspOemText, cfDspUnicodeText:
+		return true
+	default:
+		return false
+	}
 }
 
 func restoreWindowsClipboardSnapshot(snapshot windowsClipboardSnapshot) error {
