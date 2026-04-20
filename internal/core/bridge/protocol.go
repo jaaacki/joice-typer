@@ -29,11 +29,14 @@ const (
 	RuntimeGetMethod                    = generated.RuntimeGetMethod
 	OptionsGetMethod                    = generated.OptionsGetMethod
 	LogsGetMethod                       = generated.LogsGetMethod
+	LogsCopyTailMethod                  = generated.LogsCopyTailMethod
 	LogsCopyAllMethod                   = generated.LogsCopyAllMethod
 	RuntimeStateChangedEvent            = generated.RuntimeStateChangedEvent
 	PermissionsChangedEvent             = generated.PermissionsChangedEvent
 	ModelChangedEvent                   = generated.ModelChangedEvent
 	ModelDownloadProgressEvent          = generated.ModelDownloadProgressEvent
+	ModelDownloadCompletedEvent         = generated.ModelDownloadCompletedEvent
+	ModelDownloadFailedEvent            = generated.ModelDownloadFailedEvent
 	ConfigSavedEvent                    = generated.ConfigSavedEvent
 	LogsUpdatedEvent                    = generated.LogsUpdatedEvent
 	DevicesChangedEvent                 = generated.DevicesChangedEvent

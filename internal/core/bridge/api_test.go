@@ -121,6 +121,13 @@ func TestBridge_ServiceMethodsFailWhenDependenciesMissing(t *testing.T) {
 			},
 		},
 		{
+			name: "LogsCopyTail",
+			run: func() error {
+				_, err := svc.LogsCopyTail(context.Background())
+				return err
+			},
+		},
+		{
 			name: "LogsCopyAll",
 			run: func() error {
 				_, err := svc.LogsCopyAll(context.Background())
@@ -284,5 +291,55 @@ func TestBridge_LogsCopyAllReturnsFullText(t *testing.T) {
 	}
 	if text != "line 001\nline 002\nline 003\n" {
 		t.Fatalf("text = %q, want full file text", text)
+	}
+}
+
+func TestBridge_LogsCopyAllCopiesTextWhenNativeClipboardIsAvailable(t *testing.T) {
+	var copied string
+	svc := NewService(&Dependencies{
+		LoadLogsFull: func(context.Context) (string, error) {
+			return "line 001\nline 002\nline 003\n", nil
+		},
+		WriteClipboardText: func(_ context.Context, text string) error {
+			copied = text
+			return nil
+		},
+	})
+
+	text, err := svc.LogsCopyAll(context.Background())
+	if err != nil {
+		t.Fatalf("LogsCopyAll returned error: %v", err)
+	}
+	if copied != text {
+		t.Fatalf("copied = %q, want %q", copied, text)
+	}
+}
+
+func TestBridge_LogsCopyTailCopiesVisibleTextWhenNativeClipboardIsAvailable(t *testing.T) {
+	var copied string
+	svc := NewService(&Dependencies{
+		LoadLogsTail: func(context.Context) (LogTailSnapshot, error) {
+			return LogTailSnapshot{
+				Text:      "tail 499\ntail 500\n",
+				Truncated: true,
+				ByteSize:  1234,
+				UpdatedAt: "2026-04-20T03:04:05Z",
+			}, nil
+		},
+		WriteClipboardText: func(_ context.Context, text string) error {
+			copied = text
+			return nil
+		},
+	})
+
+	text, err := svc.LogsCopyTail(context.Background())
+	if err != nil {
+		t.Fatalf("LogsCopyTail returned error: %v", err)
+	}
+	if text != "tail 499\ntail 500\n" {
+		t.Fatalf("text = %q, want visible tail text", text)
+	}
+	if copied != text {
+		t.Fatalf("copied = %q, want %q", copied, text)
 	}
 }

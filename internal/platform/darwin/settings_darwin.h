@@ -33,5 +33,6 @@ void setPrefsPermissionState(void);
 int isSetupComplete(void);
 const char *getSelectedDevice(void);
 void runSetupEventLoop(void);
+int copyTextToClipboard(const char *text);
 
 #endif

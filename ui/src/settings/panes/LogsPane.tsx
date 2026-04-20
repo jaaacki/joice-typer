@@ -4,6 +4,7 @@ import { Panel, StatusBadge } from "../shared";
 
 type LogsPaneProps = {
   fetchLogs: () => Promise<LogTailSnapshot>;
+  copyVisibleLogTail: () => Promise<string>;
   copyFullLog: () => Promise<string>;
   subscribeLogsUpdated: (handler: (snapshot: LogTailSnapshot) => void) => () => void;
 };
@@ -39,39 +40,10 @@ function describeError(error: unknown, fallback: string): string {
   return fallback;
 }
 
-async function copyTextToClipboard(text: string) {
-  try {
-    if (navigator.clipboard?.writeText) {
-      await navigator.clipboard.writeText(text);
-      return;
-    }
-  } catch {
-    // Fall through to the legacy clipboard path below.
-  }
-
-  const buffer = document.createElement("textarea");
-  buffer.value = text;
-  buffer.readOnly = true;
-  buffer.setAttribute("aria-hidden", "true");
-  buffer.style.position = "fixed";
-  buffer.style.left = "-9999px";
-  buffer.style.top = "0";
-  buffer.style.opacity = "0";
-  document.body.appendChild(buffer);
-  buffer.select();
-
-  try {
-    if (!document.execCommand("copy")) {
-      throw new Error("Clipboard copy failed");
-    }
-  } finally {
-    document.body.removeChild(buffer);
-  }
-}
-
-export default function LogsPane({ fetchLogs, copyFullLog, subscribeLogsUpdated }: LogsPaneProps) {
+export default function LogsPane({ fetchLogs, copyVisibleLogTail, copyFullLog, subscribeLogsUpdated }: LogsPaneProps) {
   const [tail, setTail] = useState<LogTailSnapshot | null>(null);
   const [loading, setLoading] = useState(true);
+  const [copyingVisible, setCopyingVisible] = useState(false);
   const [copying, setCopying] = useState(false);
   const [status, setStatus] = useState("Loading live log tail...");
 
@@ -113,13 +85,24 @@ export default function LogsPane({ fetchLogs, copyFullLog, subscribeLogsUpdated 
   async function handleCopyFullLog() {
     setCopying(true);
     try {
-      const fullLog = await copyFullLog();
-      await copyTextToClipboard(fullLog);
+      await copyFullLog();
       setStatus("Full log copied to clipboard.");
     } catch (error) {
       setStatus(describeError(error, "Failed to copy full log"));
     } finally {
       setCopying(false);
+    }
+  }
+
+  async function handleCopyVisibleLogTail() {
+    setCopyingVisible(true);
+    try {
+      await copyVisibleLogTail();
+      setStatus("Visible log tail copied to clipboard.");
+    } catch (error) {
+      setStatus(describeError(error, "Failed to copy visible log tail"));
+    } finally {
+      setCopyingVisible(false);
     }
   }
 
@@ -134,6 +117,9 @@ export default function LogsPane({ fetchLogs, copyFullLog, subscribeLogsUpdated 
       >
         <div className="logs-pane">
           <div className="logs-pane__toolbar">
+            <button className="ui-button ui-button--secondary" type="button" onClick={() => void handleCopyVisibleLogTail()} disabled={loading || copyingVisible}>
+              {copyingVisible ? "Copying tail..." : "Copy Visible Tail"}
+            </button>
             <button className="ui-button ui-button--secondary" type="button" onClick={() => void handleCopyFullLog()} disabled={loading || copying}>
               {copying ? "Copying..." : "Copy Full Log"}
             </button>

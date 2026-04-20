@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   BridgeRequestError,
+  copyVisibleLogTail,
   type BootstrapPayload,
   cancelHotkeyCapture,
   canPostNativeMessage,
@@ -18,6 +19,8 @@ import {
   subscribeDevicesChanged,
   subscribeHotkeyCaptureChanged,
   subscribeLogsUpdated,
+  subscribeModelDownloadCompleted,
+  subscribeModelDownloadFailed,
   subscribeModelDownloadProgress,
   subscribeModelChanged,
   subscribePermissionsChanged,
@@ -28,6 +31,7 @@ import {
   type DeviceSnapshot,
   type HotkeyCaptureSnapshot,
   type ModelDownloadProgressSnapshot,
+  type ModelDownloadFailedSnapshot,
   type ModelSnapshot,
   type PermissionsSnapshot,
   type SettingsOptionsSnapshot,
@@ -332,6 +336,23 @@ export function SettingsScreen({ bootstrap }: SettingsScreenProps) {
   );
   useEffect(
     () =>
+      subscribeModelDownloadCompleted(({ size }) => {
+        setDownloadProgress((current) => (current?.size === size ? null : current));
+        setModelInstalled(size, true);
+        setStatus(`Downloaded ${size} model.`);
+      }),
+    [],
+  );
+  useEffect(
+    () =>
+      subscribeModelDownloadFailed((snapshot: ModelDownloadFailedSnapshot) => {
+        setDownloadProgress((current) => (current?.size === snapshot.size ? null : current));
+        setStatus(snapshot.message || `Failed to download ${snapshot.size} model`);
+      }),
+    [],
+  );
+  useEffect(
+    () =>
       subscribeConfigSaved((savedConfig) => {
         const sanitized = sanitizeConfigSnapshot(savedConfig);
         setDraft(sanitized);
@@ -439,9 +460,7 @@ export function SettingsScreen({ bootstrap }: SettingsScreenProps) {
       setDownloadProgress({ size, progress: 0, bytesDownloaded: 0, bytesTotal: 0 });
       setStatus("");
       await downloadModel(size);
-      setDownloadProgress(null);
-      setModelInstalled(size, true);
-      setStatus(`Downloaded ${size} model.`);
+      setStatus("");
     } catch (error) {
       setStatus(describeBridgeError(error, `Failed to download ${size} model`));
       setDownloadProgress(null);
@@ -451,7 +470,6 @@ export function SettingsScreen({ bootstrap }: SettingsScreenProps) {
   async function handleDeleteModel(size: string) {
     if (confirmDeleteModelSize !== size) {
       setConfirmDeleteModelSize(size);
-      setStatus(`Confirm deleting ${size} model.`);
       return;
     }
     try {
@@ -643,7 +661,7 @@ export function SettingsScreen({ bootstrap }: SettingsScreenProps) {
         );
 
       case "logs":
-        return <LogsPane copyFullLog={copyFullLog} fetchLogs={fetchLogs} subscribeLogsUpdated={subscribeLogsUpdated} />;
+        return <LogsPane copyVisibleLogTail={copyVisibleLogTail} copyFullLog={copyFullLog} fetchLogs={fetchLogs} subscribeLogsUpdated={subscribeLogsUpdated} />;
 
       case "about":
         return (

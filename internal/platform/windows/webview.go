@@ -288,6 +288,20 @@ func publishModelDownloadProgress(size string, progress float64, bytesDownloaded
 	}))
 }
 
+func publishModelDownloadCompleted(size string) {
+	dispatchWebSettingsEvent(bridgepkg.NewEvent(bridgepkg.ModelDownloadCompletedEvent, map[string]any{
+		"size": size,
+	}))
+}
+
+func publishModelDownloadFailed(size string, message string, retriable bool) {
+	dispatchWebSettingsEvent(bridgepkg.NewEvent(bridgepkg.ModelDownloadFailedEvent, map[string]any{
+		"size":      size,
+		"message":   message,
+		"retriable": retriable,
+	}))
+}
+
 func publishConfigSaved(snapshot bridgepkg.ConfigSnapshot) {
 	dispatchWebSettingsEvent(bridgepkg.NewEvent(bridgepkg.ConfigSavedEvent, snapshot))
 }

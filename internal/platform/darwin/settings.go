@@ -35,6 +35,14 @@ var removeFile = os.Remove
 var listAudioDevices = audiopkg.ListInputDeviceSnapshots
 var downloadModelWithProgress = transcriptionpkg.DownloadModelWithProgress
 var registerLogWriteObserver = loggingpkg.RegisterWriteObserver
+var copyTextToClipboard = func(text string) error {
+	cText := C.CString(text)
+	defer C.free(unsafe.Pointer(cText))
+	if C.copyTextToClipboard(cText) != 1 {
+		return fmt.Errorf("copy text to clipboard returned false")
+	}
+	return nil
+}
 var webSettingsOpenPermissionSettings = openWebSettingsPermissionSettings
 var webSettingsLogPath = func() (string, error) {
 	dir, err := config.DefaultConfigDir()
@@ -60,6 +68,8 @@ var (
 	webSettingsLogUpdateMu       sync.Mutex
 	webSettingsLogUpdateTimer    *time.Timer
 	webSettingsLogRefreshRunning bool
+	webSettingsDownloadMu        sync.Mutex
+	webSettingsActiveDownload    string
 )
 
 func loadWebSettingsPermissionsSnapshot() bridgepkg.PermissionsSnapshot {
@@ -276,6 +286,23 @@ func loadWebSettingsLogFullText() (string, error) {
 	return full, nil
 }
 
+func copyWebSettingsLogFullText(ctx context.Context) (string, error) {
+	full, err := loadWebSettingsLogFullText()
+	if err != nil {
+		return "", err
+	}
+	if err := copyTextToClipboard(full); err != nil {
+		return "", bridgepkg.WrapContractError(
+			bridgepkg.ErrorCodeLogsUnavailable,
+			"Failed to copy full logs",
+			true,
+			nil,
+			err,
+		)
+	}
+	return full, nil
+}
+
 func notifyWebSettingsLogsUpdated() {
 	webSettingsLogUpdateMu.Lock()
 	if webSettingsLogRefreshRunning {
@@ -334,8 +361,18 @@ func scheduleWebSettingsLogsUpdated() {
 }
 
 func downloadWebSettingsModel(ctx context.Context, modelSize string) error {
+	if !beginWebSettingsModelDownload(modelSize) {
+		return bridgepkg.NewContractError(
+			bridgepkg.ErrorCodeModelDownloadFailed,
+			"Another model download is already running",
+			true,
+			map[string]any{"size": modelSize},
+		)
+	}
+
 	modelPath, err := defaultModelPath(modelSize)
 	if err != nil {
+		finishWebSettingsModelDownload(modelSize)
 		return bridgepkg.WrapContractError(
 			bridgepkg.ErrorCodeModelDownloadFailed,
 			"Failed to resolve model download path",
@@ -351,6 +388,20 @@ func downloadWebSettingsModel(ctx context.Context, modelSize string) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	go func(downloadCtx context.Context, size string, path string) {
+		defer finishWebSettingsModelDownload(size)
+		if err := runWebSettingsModelDownload(downloadCtx, size, path); err != nil {
+			message, retriable := describeWebSettingsModelDownloadFailure(err)
+			currentSettingsLogger().Warn("model download failed", "operation", "downloadWebSettingsModel", "size", size, "error", err)
+			publishModelDownloadFailed(size, message, retriable)
+			return
+		}
+		publishModelDownloadCompleted(size)
+	}(ctx, modelSize, modelPath)
+	return nil
+}
+
+func runWebSettingsModelDownload(ctx context.Context, modelSize string, modelPath string) error {
 	lastPublishedAt := time.Time{}
 	lastPublishedPercent := -1
 	if err := downloadModelWithProgress(ctx, modelPath, modelSize, func(progress float64, downloaded, total int64) {
@@ -378,7 +429,42 @@ func downloadWebSettingsModel(ctx context.Context, modelSize string) error {
 			err,
 		)
 	}
+	if prefsActiveModel == modelSize {
+		snapshot, err := loadActiveWebSettingsModelSnapshot()
+		if err != nil {
+			return err
+		}
+		publishModelChanged(snapshot)
+	}
 	return nil
+}
+
+func beginWebSettingsModelDownload(size string) bool {
+	webSettingsDownloadMu.Lock()
+	defer webSettingsDownloadMu.Unlock()
+	if webSettingsActiveDownload != "" {
+		return false
+	}
+	webSettingsActiveDownload = size
+	return true
+}
+
+func finishWebSettingsModelDownload(size string) {
+	webSettingsDownloadMu.Lock()
+	if webSettingsActiveDownload == size {
+		webSettingsActiveDownload = ""
+	}
+	webSettingsDownloadMu.Unlock()
+}
+
+func describeWebSettingsModelDownloadFailure(err error) (string, bool) {
+	if contractErr, ok := bridgepkg.AsContractError(err); ok {
+		return contractErr.Message, contractErr.Retriable
+	}
+	if err != nil && err.Error() != "" {
+		return err.Error(), false
+	}
+	return "Failed to download model", false
 }
 
 func deleteWebSettingsModel(modelSize string) error {

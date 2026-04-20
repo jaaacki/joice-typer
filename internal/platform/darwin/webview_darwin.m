@@ -19,7 +19,6 @@ extern void webSettingsNativeTransportInfo(char *operation, char *message);
 extern void webSettingsNativeTransportWarning(char *operation, char *message);
 static void stopWebHotkeyCaptureRecorder(void);
 static void dispatchBridgeErrorResponse(NSString *requestID, NSString *message);
-static NSString *bridgeJSONStringLiteral(NSString *value);
 static void dispatchBridgeEnvelopeJSON(NSString *payloadJSON, BOOL closeWindow);
 
 static BOOL shouldProbeWebSettingsDOM(void) {
@@ -39,44 +38,35 @@ static void reportWebSettingsNativeTransportWarning(NSString *operation, NSStrin
     webSettingsNativeTransportWarning(op, msg);
 }
 
-static NSString *bridgeJSONStringLiteral(NSString *value) {
-    NSError *jsonError = nil;
-    NSData *data = [NSJSONSerialization dataWithJSONObject:@[value ?: @""] options:0 error:&jsonError];
-    if (data == nil || jsonError != nil) {
-        reportWebSettingsNativeTransportWarning(@"failed to encode bridge payload string literal",
-                                                jsonError.localizedDescription ?: @"unknown JSON string encoding error");
-        return nil;
-    }
-    NSString *arrayLiteral = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
-    if (arrayLiteral == nil || arrayLiteral.length < 2) {
-        reportWebSettingsNativeTransportWarning(@"failed to encode bridge payload string literal",
-                                                @"failed to decode UTF-8 payload string literal");
-        return nil;
-    }
-    return [arrayLiteral substringWithRange:NSMakeRange(1, arrayLiteral.length - 2)];
-}
-
 static void dispatchBridgeEnvelopeJSON(NSString *payloadJSON, BOOL closeWindow) {
     if (sWebSettingsView == nil || payloadJSON == nil) {
         return;
     }
-    NSString *payloadLiteral = bridgeJSONStringLiteral(payloadJSON);
-    if (payloadLiteral == nil) {
+    NSData *payloadData = [payloadJSON dataUsingEncoding:NSUTF8StringEncoding allowLossyConversion:YES];
+    if (payloadData == nil) {
+        reportWebSettingsNativeTransportWarning(@"failed to encode bridge payload base64",
+                                                @"failed to encode UTF-8 bridge payload bytes");
+        return;
+    }
+    NSString *payloadBase64 = [payloadData base64EncodedStringWithOptions:0];
+    if (payloadBase64 == nil || payloadBase64.length == 0) {
+        reportWebSettingsNativeTransportWarning(@"failed to encode bridge payload base64",
+                                                @"failed to build base64 bridge payload string");
         return;
     }
     NSString *script = [NSString stringWithFormat:
                         @"(function(){"
                         "try {"
-                        "  const detail = typeof %@ === 'string' ? JSON.parse(%@) : %@;"
+                        "  const raw = atob('%@');"
+                        "  const bytes = Uint8Array.from(raw, function(ch){ return ch.charCodeAt(0); });"
+                        "  const detail = JSON.parse(new TextDecoder().decode(bytes));"
                         "  window.dispatchEvent(new CustomEvent('%@', { detail }));"
                         "  return 'ok';"
                         "} catch (error) {"
                         "  return 'dispatch_error:' + (error && error.message ? error.message : String(error));"
                         "}"
                         "})();",
-                        payloadLiteral,
-                        payloadLiteral,
-                        payloadLiteral,
+                        payloadBase64,
                         kJoiceTyperBridgeEventName];
     [sWebSettingsView evaluateJavaScript:script completionHandler:^(id result, NSError *error) {
         if (error != nil) {

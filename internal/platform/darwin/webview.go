@@ -231,6 +231,9 @@ func buildSettingsBridgeService(_ configpkg.Config) *bridgepkg.Service {
 		LoadLogsFull: func(context.Context) (string, error) {
 			return loadWebSettingsLogFullText()
 		},
+		WriteClipboardText: func(_ context.Context, text string) error {
+			return copyTextToClipboard(text)
+		},
 		StartHotkeyCapture: func(context.Context) (bridgepkg.HotkeyCaptureSnapshot, error) {
 			return startWebSettingsHotkeyCapture(), nil
 		},
@@ -507,6 +510,20 @@ func publishModelDownloadProgress(size string, progress float64, bytesDownloaded
 		"progress":        progress,
 		"bytesDownloaded": bytesDownloaded,
 		"bytesTotal":      bytesTotal,
+	}))
+}
+
+func publishModelDownloadCompleted(size string) {
+	dispatchWebSettingsEvent(bridgepkg.NewEvent(bridgepkg.ModelDownloadCompletedEvent, map[string]any{
+		"size": size,
+	}))
+}
+
+func publishModelDownloadFailed(size string, message string, retriable bool) {
+	dispatchWebSettingsEvent(bridgepkg.NewEvent(bridgepkg.ModelDownloadFailedEvent, map[string]any{
+		"size":      size,
+		"message":   message,
+		"retriable": retriable,
 	}))
 }
 

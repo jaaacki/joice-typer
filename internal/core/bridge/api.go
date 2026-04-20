@@ -25,6 +25,7 @@ type Dependencies struct {
 	LoadAppState           func(context.Context) (apppkg.AppState, error)
 	LoadLogsTail           func(context.Context) (LogTailSnapshot, error)
 	LoadLogsFull           func(context.Context) (string, error)
+	WriteClipboardText     func(context.Context, string) error
 }
 
 type Service struct {
@@ -172,7 +173,32 @@ func (s *Service) LogsCopyAll(ctx context.Context) (string, error) {
 	if s.deps.LoadLogsFull == nil {
 		return "", missingDependencyError(LogsCopyAllMethod, "LoadLogsFull")
 	}
-	return s.deps.LoadLogsFull(ctx)
+	text, err := s.deps.LoadLogsFull(ctx)
+	if err != nil {
+		return "", err
+	}
+	if s.deps.WriteClipboardText != nil {
+		if err := s.deps.WriteClipboardText(ctx, text); err != nil {
+			return "", err
+		}
+	}
+	return text, nil
+}
+
+func (s *Service) LogsCopyTail(ctx context.Context) (string, error) {
+	if s.deps.LoadLogsTail == nil {
+		return "", missingDependencyError(LogsCopyTailMethod, "LoadLogsTail")
+	}
+	snapshot, err := s.deps.LoadLogsTail(ctx)
+	if err != nil {
+		return "", err
+	}
+	if s.deps.WriteClipboardText != nil {
+		if err := s.deps.WriteClipboardText(ctx, snapshot.Text); err != nil {
+			return "", err
+		}
+	}
+	return snapshot.Text, nil
 }
 
 func (s *Service) Bootstrap(ctx context.Context) (BootstrapPayload, error) {

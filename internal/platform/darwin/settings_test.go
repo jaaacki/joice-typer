@@ -14,6 +14,7 @@ import (
 	"time"
 
 	bridgepkg "voicetype/internal/core/bridge"
+	transcriptionpkg "voicetype/internal/core/transcription"
 )
 
 func TestRequireSettingSelection_RejectsEmptyDecodeMode(t *testing.T) {
@@ -258,6 +259,69 @@ func TestStartPermissionPolling_PublishesWebPermissionChanges(t *testing.T) {
 		}
 	case <-time.After(250 * time.Millisecond):
 		t.Fatal("timed out waiting for permissions.changed event")
+	}
+}
+
+func TestDownloadWebSettingsModel_ReturnsBeforeDownloadCompletes(t *testing.T) {
+	originalDefaultModelPath := defaultModelPath
+	originalDownloadModelWithProgress := downloadModelWithProgress
+	originalDispatch := webSettingsDispatchEnvelope
+	defer func() {
+		defaultModelPath = originalDefaultModelPath
+		downloadModelWithProgress = originalDownloadModelWithProgress
+		webSettingsDispatchEnvelope = originalDispatch
+		finishWebSettingsModelDownload("small")
+	}()
+
+	defaultModelPath = func(modelSize string) (string, error) {
+		return filepath.Join(t.TempDir(), "ggml-"+modelSize+".bin"), nil
+	}
+
+	started := make(chan struct{}, 1)
+	release := make(chan struct{})
+	dispatched := make(chan string, 4)
+	downloadModelWithProgress = func(_ context.Context, _ string, _ string, progress transcriptionpkg.DownloadProgressFunc, _ *slog.Logger) error {
+		started <- struct{}{}
+		progress(0.1, 10, 100)
+		<-release
+		return nil
+	}
+	webSettingsDispatchEnvelope = func(payload string, _ bool) {
+		dispatched <- payload
+	}
+
+	returned := make(chan error, 1)
+	go func() {
+		returned <- downloadWebSettingsModel(context.Background(), "small")
+	}()
+
+	select {
+	case err := <-returned:
+		if err != nil {
+			t.Fatalf("downloadWebSettingsModel returned error: %v", err)
+		}
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("downloadWebSettingsModel blocked instead of returning immediately")
+	}
+
+	select {
+	case <-started:
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("download goroutine did not start")
+	}
+
+	close(release)
+
+	deadline := time.After(250 * time.Millisecond)
+	for {
+		select {
+		case payload := <-dispatched:
+			if strings.Contains(payload, `"event":"model.download_completed"`) {
+				return
+			}
+		case <-deadline:
+			t.Fatal("timed out waiting for model.download_completed event")
+		}
 	}
 }
 

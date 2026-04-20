@@ -24,6 +24,7 @@
     { "goName": "RuntimeGetMethod", "tsName": "runtimeGet", "value": "runtime.get" },
     { "goName": "OptionsGetMethod", "tsName": "optionsGet", "value": "options.get" },
     { "goName": "LogsGetMethod", "tsName": "logsGet", "value": "logs.get" },
+    { "goName": "LogsCopyTailMethod", "tsName": "logsCopyTail", "value": "logs.copy_tail" },
     { "goName": "LogsCopyAllMethod", "tsName": "logsCopyAll", "value": "logs.copy_all" }
   ],
   "events": [
@@ -32,6 +33,8 @@
     { "goName": "DevicesChangedEvent", "tsName": "devicesChanged", "value": "devices.changed" },
     { "goName": "ModelChangedEvent", "tsName": "modelChanged", "value": "model.changed" },
     { "goName": "ModelDownloadProgressEvent", "tsName": "modelDownloadProgress", "value": "model.download_progress" },
+    { "goName": "ModelDownloadCompletedEvent", "tsName": "modelDownloadCompleted", "value": "model.download_completed" },
+    { "goName": "ModelDownloadFailedEvent", "tsName": "modelDownloadFailed", "value": "model.download_failed" },
     { "goName": "ConfigSavedEvent", "tsName": "configSaved", "value": "config.saved" },
     { "goName": "LogsUpdatedEvent", "tsName": "logsUpdated", "value": "logs.updated" },
     { "goName": "HotkeyCaptureChangedEvent", "tsName": "hotkeyCaptureChanged", "value": "hotkey.capture_changed" }

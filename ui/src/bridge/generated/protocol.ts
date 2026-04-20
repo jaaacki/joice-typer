@@ -28,6 +28,7 @@ export const METHODS = {
   runtimeGet: "runtime.get",
   optionsGet: "options.get",
   logsGet: "logs.get",
+  logsCopyTail: "logs.copy_tail",
   logsCopyAll: "logs.copy_all",
 } as const;
 export type BridgeMethod = (typeof METHODS)[keyof typeof METHODS];
@@ -38,6 +39,8 @@ export const EVENTS = {
   devicesChanged: "devices.changed",
   modelChanged: "model.changed",
   modelDownloadProgress: "model.download_progress",
+  modelDownloadCompleted: "model.download_completed",
+  modelDownloadFailed: "model.download_failed",
   configSaved: "config.saved",
   logsUpdated: "logs.updated",
   hotkeyCaptureChanged: "hotkey.capture_changed",

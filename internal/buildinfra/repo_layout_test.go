@@ -208,13 +208,23 @@ func TestSettingsScreenSource_UsesSharedLogsPaneBridge(t *testing.T) {
 	source := string(data)
 	for _, required := range []string{
 		`fetchLogs`,
+		`copyVisibleLogTail`,
 		`copyFullLog`,
 		`subscribeLogsUpdated`,
+		`Copy Visible Tail`,
 		`Copy Full Log`,
 		`settings-logs`,
 	} {
 		if !strings.Contains(source, required) {
 			t.Fatalf("expected LogsPane.tsx to contain %q", required)
+		}
+	}
+	for _, forbidden := range []string{
+		`navigator.clipboard.writeText`,
+		`document.execCommand("copy")`,
+	} {
+		if strings.Contains(source, forbidden) {
+			t.Fatalf("expected LogsPane.tsx to avoid browser clipboard fallback %q", forbidden)
 		}
 	}
 
@@ -225,9 +235,11 @@ func TestSettingsScreenSource_UsesSharedLogsPaneBridge(t *testing.T) {
 	bridge := string(bridgeSource)
 	for _, required := range []string{
 		`METHODS.logsGet`,
+		`METHODS.logsCopyTail`,
 		`METHODS.logsCopyAll`,
 		`EVENTS.logsUpdated`,
 		`fetchLogs`,
+		`copyVisibleLogTail`,
 		`copyFullLog`,
 		`subscribeLogsUpdated`,
 	} {
@@ -249,6 +261,64 @@ func TestSettingsScreenSource_UsesSharedLogsPaneBridge(t *testing.T) {
 	}
 }
 
+func TestSettingsScreenSource_TracksModelDownloadCompletionAndFailure(t *testing.T) {
+	root := repoRoot(t)
+	data, err := os.ReadFile(filepath.Join(root, "ui", "src", "settings", "SettingsScreen.tsx"))
+	if err != nil {
+		t.Fatalf("read SettingsScreen.tsx: %v", err)
+	}
+	source := string(data)
+	for _, required := range []string{
+		`subscribeModelDownloadCompleted`,
+		`subscribeModelDownloadFailed`,
+		`Downloaded ${size} model.`,
+		`Failed to download ${snapshot.size} model`,
+	} {
+		if !strings.Contains(source, required) {
+			t.Fatalf("expected SettingsScreen.tsx to contain %q", required)
+		}
+	}
+}
+
+func TestPlatformSettingsSources_UseNativeClipboardAndAsyncModelDownload(t *testing.T) {
+	root := repoRoot(t)
+	checks := []struct {
+		path     string
+		required []string
+	}{
+		{
+			path: "internal/platform/darwin/webview.go",
+			required: []string{
+				`WriteClipboardText: func(_ context.Context, text string) error`,
+				`return copyTextToClipboard(text)`,
+			},
+		},
+		{
+			path: "internal/platform/windows/settings.go",
+			required: []string{
+				`WriteClipboardText: func(_ context.Context, text string) error`,
+				`return setWindowsClipboardText(text)`,
+				`go func(downloadCtx context.Context, modelSize string, path string) {`,
+				`publishModelDownloadCompleted(modelSize)`,
+				`publishModelDownloadFailed(modelSize, message, retriable)`,
+			},
+		},
+	}
+
+	for _, check := range checks {
+		data, err := os.ReadFile(filepath.Join(root, check.path))
+		if err != nil {
+			t.Fatalf("read %s: %v", check.path, err)
+		}
+		source := string(data)
+		for _, required := range check.required {
+			if !strings.Contains(source, required) {
+				t.Fatalf("expected %s to contain %q", check.path, required)
+			}
+		}
+	}
+}
+
 func TestDarwinWebviewTransportSource_LogsNativeFailures(t *testing.T) {
 	root := repoRoot(t)
 	data, err := os.ReadFile(filepath.Join(root, "internal", "platform", "darwin", "webview_darwin.m"))
@@ -264,7 +334,9 @@ func TestDarwinWebviewTransportSource_LogsNativeFailures(t *testing.T) {
 		`failed to duplicate web settings request`,
 		`failed to evaluate bridge envelope dispatch`,
 		`failed to dispatch bridge envelope in page`,
-		`failed to encode bridge payload string literal`,
+		`failed to encode bridge payload base64`,
+		`TextDecoder().decode(bytes)`,
+		`atob('`,
 	} {
 		if !strings.Contains(source, required) {
 			t.Fatalf("expected webview_darwin.m to contain %q", required)
@@ -1119,8 +1191,6 @@ func TestSettingsScreenSource_UsesRuntimeStateSubscription(t *testing.T) {
 		`hotkeyCapture`,
 		`downloadProgress.bytesDownloaded`,
 		`downloadProgress.bytesTotal`,
-		`model-download-progress`,
-		`Downloading ${downloadProgress.size} model`,
 		`useEffect`,
 		`setCurrentAppState`,
 		`refreshDevices()`,
@@ -1137,8 +1207,8 @@ func TestSettingsScreenSource_UsesRuntimeStateSubscription(t *testing.T) {
 		`handleOpenPermissionSettings`,
 		`Refresh Devices`,
 		`Download Model`,
-		`Delete Model`,
-		`Confirm Delete`,
+		`Confirm?`,
+		`Remove From Disk`,
 		`Use Model`,
 		`Change Hotkey`,
 		`Cancel`,
@@ -1163,6 +1233,8 @@ func TestSettingsScreenSource_UsesRuntimeStateSubscription(t *testing.T) {
 		`handleDeleteModel(draft.modelSize)`,
 		`handleUseModel(draft.modelSize)`,
 		"Started ${size} model download.",
+		`className="model-download-progress"`,
+		`Confirm deleting ${size} model.`,
 		`value={draft.triggerKey.join(", ")}`,
 		`.split(",")`,
 	} {

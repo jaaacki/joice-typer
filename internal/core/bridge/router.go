@@ -199,6 +199,15 @@ func (r *Router) HandleRequest(ctx context.Context, request RequestEnvelope) Res
 			return NewErrorResponseFromError(request.ID, err, ErrorCodeLogsUnavailable, "failed to load log tail", false, nil)
 		}
 		return NewSuccessResponse(request.ID, tail)
+	case LogsCopyTailMethod:
+		if response := ensureEmptyParams(request); response != nil {
+			return *response
+		}
+		text, err := r.service.LogsCopyTail(ctx)
+		if err != nil {
+			return NewErrorResponseFromError(request.ID, err, ErrorCodeLogsUnavailable, "failed to copy visible log tail", false, nil)
+		}
+		return NewSuccessResponse(request.ID, text)
 	case LogsCopyAllMethod:
 		if response := ensureEmptyParams(request); response != nil {
 			return *response

@@ -62,6 +62,16 @@ export type ModelDownloadProgressSnapshot = {
   bytesTotal: number;
 };
 
+export type ModelDownloadResultSnapshot = {
+  size: string;
+};
+
+export type ModelDownloadFailedSnapshot = {
+  size: string;
+  message: string;
+  retriable: boolean;
+};
+
 export type OptionSnapshot = {
   code: string;
   name: string;
@@ -326,6 +336,10 @@ export function fetchLogs(): Promise<LogTailSnapshot> {
   return query<LogTailSnapshot, Record<string, never>>(METHODS.logsGet, {});
 }
 
+export function copyVisibleLogTail(): Promise<string> {
+  return query<string, Record<string, never>>(METHODS.logsCopyTail, {});
+}
+
 export function copyFullLog(): Promise<string> {
   return query<string, Record<string, never>>(METHODS.logsCopyAll, {});
 }
@@ -382,6 +396,14 @@ export function subscribeModelChanged(handler: (model: ModelSnapshot) => void): 
 
 export function subscribeModelDownloadProgress(handler: (progress: ModelDownloadProgressSnapshot) => void): () => void {
   return subscribeEvent(EVENTS.modelDownloadProgress, handler);
+}
+
+export function subscribeModelDownloadCompleted(handler: (snapshot: ModelDownloadResultSnapshot) => void): () => void {
+  return subscribeEvent(EVENTS.modelDownloadCompleted, handler);
+}
+
+export function subscribeModelDownloadFailed(handler: (snapshot: ModelDownloadFailedSnapshot) => void): () => void {
+  return subscribeEvent(EVENTS.modelDownloadFailed, handler);
 }
 
 export function subscribeConfigSaved(handler: (config: ConfigSnapshot) => void): () => void {

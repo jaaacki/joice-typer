@@ -77,6 +77,8 @@ var (
 	webSettingsLogUpdateMu       sync.Mutex
 	webSettingsLogUpdateTimer    *time.Timer
 	webSettingsLogRefreshRunning bool
+	webSettingsDownloadMu        sync.Mutex
+	webSettingsActiveDownload    string
 )
 
 func shouldUseWebSettings() bool {
@@ -306,6 +308,9 @@ func buildSettingsBridgeService(_ configpkg.Config) *bridgepkg.Service {
 		LoadLogsFull: func(context.Context) (string, error) {
 			return loadWebSettingsLogFullText()
 		},
+		WriteClipboardText: func(_ context.Context, text string) error {
+			return setWindowsClipboardText(text)
+		},
 		StartHotkeyCapture: func(context.Context) (bridgepkg.HotkeyCaptureSnapshot, error) {
 			return webSettingsStartHotkeyCapture()
 		},
@@ -358,8 +363,18 @@ func refreshWebSettingsDevices() ([]bridgepkg.DeviceSnapshot, error) {
 }
 
 func downloadWebSettingsModel(ctx context.Context, size string) error {
+	if !beginWebSettingsModelDownload(size) {
+		return bridgepkg.NewContractError(
+			bridgepkg.ErrorCodeModelDownloadFailed,
+			"Another model download is already running",
+			true,
+			map[string]any{"size": size},
+		)
+	}
+
 	modelPath, err := defaultModelPath(size)
 	if err != nil {
+		finishWebSettingsModelDownload(size)
 		return bridgepkg.WrapContractError(
 			bridgepkg.ErrorCodeModelDownloadFailed,
 			"Failed to resolve model download path",
@@ -376,6 +391,20 @@ func downloadWebSettingsModel(ctx context.Context, size string) error {
 		ctx = context.Background()
 	}
 
+	go func(downloadCtx context.Context, modelSize string, path string) {
+		defer finishWebSettingsModelDownload(modelSize)
+		if err := runWebSettingsModelDownload(downloadCtx, modelSize, path); err != nil {
+			message, retriable := describeWebSettingsModelDownloadFailure(err)
+			currentSettingsLogger().Warn("model download failed", "operation", "downloadWebSettingsModel", "size", modelSize, "error", err)
+			publishModelDownloadFailed(modelSize, message, retriable)
+			return
+		}
+		publishModelDownloadCompleted(modelSize)
+	}(ctx, size, modelPath)
+	return nil
+}
+
+func runWebSettingsModelDownload(ctx context.Context, size string, modelPath string) error {
 	lastPublishedAt := time.Time{}
 	lastPublishedPercent := -1
 	if err := transcriptionpkg.DownloadModelWithProgress(ctx, modelPath, size, func(progress float64, downloaded, total int64) {
@@ -412,6 +441,34 @@ func downloadWebSettingsModel(ctx context.Context, size string) error {
 		publishModelChanged(snapshot)
 	}
 	return nil
+}
+
+func beginWebSettingsModelDownload(size string) bool {
+	webSettingsDownloadMu.Lock()
+	defer webSettingsDownloadMu.Unlock()
+	if webSettingsActiveDownload != "" {
+		return false
+	}
+	webSettingsActiveDownload = size
+	return true
+}
+
+func finishWebSettingsModelDownload(size string) {
+	webSettingsDownloadMu.Lock()
+	if webSettingsActiveDownload == size {
+		webSettingsActiveDownload = ""
+	}
+	webSettingsDownloadMu.Unlock()
+}
+
+func describeWebSettingsModelDownloadFailure(err error) (string, bool) {
+	if contractErr, ok := bridgepkg.AsContractError(err); ok {
+		return contractErr.Message, contractErr.Retriable
+	}
+	if err != nil && err.Error() != "" {
+		return err.Error(), false
+	}
+	return "Failed to download model", false
 }
 
 func deleteWebSettingsModel(ctx context.Context, size string) error {

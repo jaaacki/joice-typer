@@ -301,6 +301,7 @@ func TestRouterHandleRequest_QueryMethods(t *testing.T) {
 		{method: ModelGetMethod, id: "req-model"},
 		{method: RuntimeGetMethod, id: "req-runtime"},
 		{method: LogsGetMethod, id: "req-logs-get"},
+		{method: LogsCopyTailMethod, id: "req-logs-copy-tail"},
 		{method: LogsCopyAllMethod, id: "req-logs-copy"},
 	}
 
@@ -345,6 +346,14 @@ func TestRouterHandleRequest_QueryMethods(t *testing.T) {
 				if payload != "line 001\nline 002\nline 003\n" {
 					t.Fatalf("payload = %q, want full log text", payload)
 				}
+			case LogsCopyTailMethod:
+				payload, ok := response.Result.(string)
+				if !ok {
+					t.Fatalf("Result = %#v, want string", response.Result)
+				}
+				if payload != "line 499\nline 500\n" {
+					t.Fatalf("payload = %q, want tail log text", payload)
+				}
 			}
 		})
 	}
@@ -358,6 +367,7 @@ func TestRouterHandleRequest_LogsMissingDependenciesReturnContractErrors(t *test
 		id     string
 	}{
 		{method: LogsGetMethod, id: "req-logs-missing-get"},
+		{method: LogsCopyTailMethod, id: "req-logs-missing-copy-tail"},
 		{method: LogsCopyAllMethod, id: "req-logs-missing-copy"},
 	}
 
@@ -635,6 +645,9 @@ func TestRouterHandleRequest_OptionsGet(t *testing.T) {
 func TestBridgeContractIncludesLogsMethods(t *testing.T) {
 	if LogsGetMethod != "logs.get" {
 		t.Fatalf("LogsGetMethod = %q, want logs.get", LogsGetMethod)
+	}
+	if LogsCopyTailMethod != "logs.copy_tail" {
+		t.Fatalf("LogsCopyTailMethod = %q, want logs.copy_tail", LogsCopyTailMethod)
 	}
 	if LogsCopyAllMethod != "logs.copy_all" {
 		t.Fatalf("LogsCopyAllMethod = %q, want logs.copy_all", LogsCopyAllMethod)

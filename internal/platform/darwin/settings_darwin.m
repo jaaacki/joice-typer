@@ -1049,3 +1049,15 @@ void updateDownloadProgress(double progress, long long downloaded, long long tot
         }
     });
 }
+
+int copyTextToClipboard(const char *text) {
+    @autoreleasepool {
+        NSString *value = text ? [NSString stringWithUTF8String:text] : @"";
+        if (value == nil) {
+            value = @"";
+        }
+        NSPasteboard *pasteboard = [NSPasteboard generalPasteboard];
+        [pasteboard clearContents];
+        return [pasteboard setString:value forType:NSPasteboardTypeString] ? 1 : 0;
+    }
+}
