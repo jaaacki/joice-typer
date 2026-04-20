@@ -22,6 +22,7 @@ const (
 	downloadRetryBaseWait = 2 * time.Second
 	downloadMaxRedirects  = 5
 	maxDownloadBytes      = 2 * 1024 * 1024 * 1024 // 2GB safety cap
+	downloadResumeStaleAfter = 2 * time.Minute
 )
 
 // modelSpec defines expected properties for each whisper model size.
@@ -267,15 +268,9 @@ func downloadModelWithProgress(ctx context.Context, modelPath string, modelSize 
 }
 
 func doDownload(ctx context.Context, client *http.Client, url string, tmpPath string, expectedSize int64, onProgress DownloadProgressFunc, logger *slog.Logger) error {
-	var startByte int64
-	if info, err := os.Stat(tmpPath); err == nil {
-		startByte = info.Size()
-	}
-
-	if startByte > 0 && startByte >= expectedSize {
-		logger.Warn("stale .tmp file is already >= expected size, deleting", "component", "transcriber", "operation", "doDownload", "tmp_size", startByte, "expected", expectedSize)
-		os.Remove(tmpPath)
-		startByte = 0
+	startByte, err := resolveDownloadStartByte(tmpPath, expectedSize, logger)
+	if err != nil {
+		return err
 	}
 
 	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
@@ -370,6 +365,39 @@ func doDownload(ctx context.Context, client *http.Client, url string, tmpPath st
 	}
 
 	return nil
+}
+
+func resolveDownloadStartByte(tmpPath string, expectedSize int64, logger *slog.Logger) (int64, error) {
+	info, err := os.Stat(tmpPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return 0, nil
+		}
+		return 0, fmt.Errorf("transcriber.resolveDownloadStartByte: stat tmp: %w", err)
+	}
+
+	startByte := info.Size()
+	if startByte <= 0 {
+		return 0, nil
+	}
+
+	if startByte >= expectedSize {
+		logger.Warn("stale .tmp file is already >= expected size, deleting", "component", "transcriber", "operation", "resolveDownloadStartByte", "tmp_size", startByte, "expected", expectedSize)
+		if err := os.Remove(tmpPath); err != nil && !os.IsNotExist(err) {
+			return 0, fmt.Errorf("transcriber.resolveDownloadStartByte: remove oversized tmp: %w", err)
+		}
+		return 0, nil
+	}
+
+	if downloadResumeStaleAfter > 0 && time.Since(info.ModTime()) > downloadResumeStaleAfter {
+		logger.Warn("stale partial download found, restarting from scratch", "component", "transcriber", "operation", "resolveDownloadStartByte", "tmp_size", startByte, "stale_after", downloadResumeStaleAfter.String(), "tmp_age", time.Since(info.ModTime()).String())
+		if err := os.Remove(tmpPath); err != nil && !os.IsNotExist(err) {
+			return 0, fmt.Errorf("transcriber.resolveDownloadStartByte: remove stale tmp: %w", err)
+		}
+		return 0, nil
+	}
+
+	return startByte, nil
 }
 
 type callbackProgressReader struct {
