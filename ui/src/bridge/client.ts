@@ -83,6 +83,13 @@ export type HotkeyCaptureSnapshot = {
   canConfirm: boolean;
 };
 
+export type LogTailSnapshot = {
+  text: string;
+  truncated: boolean;
+  byteSize: number;
+  updatedAt: string;
+};
+
 type WebkitMessageHandler = {
   postMessage: (message: unknown) => void;
 };
@@ -298,6 +305,14 @@ export function fetchRuntime(): Promise<AppStateSnapshot> {
   return query<AppStateSnapshot, Record<string, never>>(METHODS.runtimeGet, {});
 }
 
+export function fetchLogs(): Promise<LogTailSnapshot> {
+  return query<LogTailSnapshot, Record<string, never>>(METHODS.logsGet, {});
+}
+
+export function copyFullLog(): Promise<string> {
+  return query<string, Record<string, never>>(METHODS.logsCopyAll, {});
+}
+
 export function fetchOptions(): Promise<SettingsOptionsSnapshot> {
   return query<SettingsOptionsSnapshot, Record<string, never>>(METHODS.optionsGet, {});
 }
@@ -362,4 +377,8 @@ export function subscribeDevicesChanged(handler: (devices: DeviceSnapshot[]) => 
 
 export function subscribeHotkeyCaptureChanged(handler: (snapshot: HotkeyCaptureSnapshot) => void): () => void {
   return subscribeEvent(EVENTS.hotkeyCaptureChanged, handler);
+}
+
+export function subscribeLogsUpdated(handler: (snapshot: LogTailSnapshot) => void): () => void {
+  return subscribeEvent(EVENTS.logsUpdated, handler);
 }

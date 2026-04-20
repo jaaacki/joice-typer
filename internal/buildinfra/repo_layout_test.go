@@ -179,6 +179,56 @@ func TestSettingsScreenSource_PutsVersionChipInHeader(t *testing.T) {
 	}
 }
 
+func TestSettingsScreenSource_UsesSharedLogsPaneBridge(t *testing.T) {
+	root := repoRoot(t)
+
+	panePath := filepath.Join(root, "ui", "src", "settings", "panes", "LogsPane.tsx")
+	data, err := os.ReadFile(panePath)
+	if err != nil {
+		t.Fatalf("read LogsPane.tsx: %v", err)
+	}
+	source := string(data)
+	for _, required := range []string{
+		`fetchLogs`,
+		`copyFullLog`,
+		`subscribeLogsUpdated`,
+		`Copy Full Log`,
+		`settings-logs`,
+	} {
+		if !strings.Contains(source, required) {
+			t.Fatalf("expected LogsPane.tsx to contain %q", required)
+		}
+	}
+	for _, forbidden := range []string{
+		`webkit?.messageHandlers`,
+		`postMessage(`,
+		`window.webkit`,
+		`joicetyper-bridge-message`,
+	} {
+		if strings.Contains(source, forbidden) {
+			t.Fatalf("expected LogsPane.tsx not to contain %q; bridge boundary violation", forbidden)
+		}
+	}
+
+	bridgeSource, err := os.ReadFile(filepath.Join(root, "ui", "src", "bridge", "client.ts"))
+	if err != nil {
+		t.Fatalf("read bridge/client.ts: %v", err)
+	}
+	bridge := string(bridgeSource)
+	for _, required := range []string{
+		`METHODS.logsGet`,
+		`METHODS.logsCopyAll`,
+		`EVENTS.logsUpdated`,
+		`fetchLogs`,
+		`copyFullLog`,
+		`subscribeLogsUpdated`,
+	} {
+		if !strings.Contains(bridge, required) {
+			t.Fatalf("expected bridge/client.ts to contain %q", required)
+		}
+	}
+}
+
 func TestDarwinWebviewTransportSource_LogsNativeFailures(t *testing.T) {
 	root := repoRoot(t)
 	data, err := os.ReadFile(filepath.Join(root, "internal", "platform", "darwin", "webview_darwin.m"))

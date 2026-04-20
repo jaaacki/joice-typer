@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 
-export type PaneId = "capture" | "transcription" | "vocabulary" | "permissions" | "about";
+export type PaneId = "capture" | "transcription" | "vocabulary" | "permissions" | "logs" | "about";
 
 type FieldProps = {
   label: string;

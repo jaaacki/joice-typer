@@ -930,6 +930,10 @@ svg {
   max-width: 760px;
 }
 
+.pane-stack--logs {
+  max-width: 980px;
+}
+
 .about-summary {
   display: grid;
   gap: 24px;
@@ -976,6 +980,66 @@ svg {
   line-height: 1.45;
 }
 
+.logs-pane {
+  display: grid;
+  gap: 14px;
+}
+
+.logs-pane__toolbar {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.logs-pane__tail {
+  min-height: 320px;
+  max-height: 56vh;
+  resize: vertical;
+  font-family: "JetBrains Mono", "SFMono-Regular", monospace;
+  font-size: 12px;
+  line-height: 1.55;
+  white-space: pre;
+}
+
+.logs-pane__meta {
+  margin: 0;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.logs-pane__meta-item {
+  margin: 0;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+  display: grid;
+  gap: 6px;
+}
+
+.logs-pane__meta dt {
+  margin: 0;
+  color: var(--ink-4);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.logs-pane__meta dd {
+  margin: 0;
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.45;
+  word-break: break-word;
+}
+
+.logs-pane__status {
+  margin: 0;
+  color: var(--ink-2);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
 .settings-footer {
   display: flex;
   align-items: center;
@@ -1019,6 +1083,10 @@ svg {
 
   .pane-grid--two,
   .about-facts {
+    grid-template-columns: 1fr;
+  }
+
+  .logs-pane__meta {
     grid-template-columns: 1fr;
   }
 

@@ -5,9 +5,11 @@ import {
   cancelHotkeyCapture,
   canPostNativeMessage,
   confirmHotkeyCapture,
+  copyFullLog,
   deleteModel,
   downloadModel,
   fetchPermissions,
+  fetchLogs,
   openPermissionSettings,
   refreshDevices,
   saveConfig,
@@ -15,6 +17,7 @@ import {
   subscribeConfigSaved,
   subscribeDevicesChanged,
   subscribeHotkeyCaptureChanged,
+  subscribeLogsUpdated,
   subscribeModelDownloadProgress,
   subscribeModelChanged,
   subscribePermissionsChanged,
@@ -31,6 +34,7 @@ import {
 } from "../bridge";
 import AboutPane from "./panes/AboutPane";
 import PermissionsPane from "./panes/PermissionsPane";
+import LogsPane from "./panes/LogsPane";
 import TranscriptionPane from "./panes/TranscriptionPane";
 import VocabularyPane from "./panes/VocabularyPane";
 import { Field, Panel, StatusBadge, formatTriggerKeyDisplay, runtimeTone, type PaneId } from "./shared";
@@ -51,6 +55,7 @@ const NAV_ITEMS: NavItem[] = [
   { id: "transcription", label: "Transcription", sublabel: "Model & language", icon: <WaveformIcon /> },
   { id: "vocabulary", label: "Vocabulary", sublabel: "Terms & fixes", icon: <BookIcon /> },
   { id: "permissions", label: "Permissions", sublabel: "System access", icon: <ShieldIcon /> },
+  { id: "logs", label: "Logs", sublabel: "Live tail", icon: <ConsoleIcon /> },
   { id: "about", label: "About", sublabel: "Version & runtime", icon: <InfoIcon /> },
 ];
 
@@ -570,6 +575,9 @@ export function SettingsScreen({ bootstrap }: SettingsScreenProps) {
       case "permissions":
         return <PermissionsPane permissions={permissions} onOpenPermissionSettings={handleOpenPermissionSettings} />;
 
+      case "logs":
+        return <LogsPane copyFullLog={copyFullLog} fetchLogs={fetchLogs} subscribeLogsUpdated={subscribeLogsUpdated} />;
+
       case "about":
         return (
           <AboutPane
@@ -713,6 +721,21 @@ function InfoIcon() {
         fill="none"
         stroke="currentColor"
         strokeWidth="1.4"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function ConsoleIcon() {
+  return (
+    <svg viewBox="0 0 16 16" aria-hidden="true">
+      <path
+        d="M3 4.2h10a.8.8 0 0 1 .8.8v6a.8.8 0 0 1-.8.8H3a.8.8 0 0 1-.8-.8V5a.8.8 0 0 1 .8-.8Zm1.1 2.1 1.6 1.7-1.6 1.7m3.2.8h3.3"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.3"
         strokeLinecap="round"
         strokeLinejoin="round"
       />
