@@ -51,7 +51,15 @@ Windows bootstrap build:
 make build-windows-amd64
 ```
 
-This currently produces a bootstrap executable at `build/windows-amd64/joicetyper.exe`. The full Windows desktop runtime is not implemented yet.
+Windows installer packaging:
+
+```bash
+make package-windows
+```
+
+This produces a Windows build at `build/windows-amd64/joicetyper.exe` and, when `iscc` (Inno Setup) is available, packages it with `packaging/windows/joicetyper.iss`.
+
+The Windows desktop runtime is under active adapter work. The shared web Preferences shell and bridge host are in place, but full runtime parity is still in progress.
 
 Frontend-only rebuild:
 

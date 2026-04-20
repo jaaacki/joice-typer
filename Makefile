@@ -1,4 +1,4 @@
-.PHONY: all setup build clean download-model whisper test app dmg release-check build-windows-amd64 frontend-build bridge-contract bridge-contract-check
+.PHONY: all setup build clean download-model whisper test app dmg release-check build-windows-amd64 package-windows frontend-build bridge-contract bridge-contract-check
 
 WHISPER_DIR := third_party/whisper.cpp
 WHISPER_BUILD := $(WHISPER_DIR)/build
@@ -21,6 +21,12 @@ MODEL_FILE := $(MODEL_DIR)/ggml-small.bin
 MODEL_URL := https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin
 BUILD_DIR := build/$(HOST_GOOS)-$(HOST_GOARCH)
 BIN_PATH := $(BUILD_DIR)/voicetype
+WINDOWS_BUILD_DIR := build/windows-amd64
+WINDOWS_BIN_PATH := $(WINDOWS_BUILD_DIR)/joicetyper.exe
+WINDOWS_INSTALLER_SCRIPT := packaging/windows/joicetyper.iss
+WINDOWS_INSTALLER_NAME := JoiceTyper-$(VERSION)-setup.exe
+WINDOWS_INSTALLER_PATH := $(WINDOWS_BUILD_DIR)/$(WINDOWS_INSTALLER_NAME)
+ISCC ?= iscc
 UI_DIR := ui
 FRONTEND_INSTALL_STAMP := $(UI_DIR)/node_modules/.package-lock.stamp
 FRONTEND_VITE_BIN := $(UI_DIR)/node_modules/.bin/vite
@@ -127,5 +133,9 @@ release-check:
 	@echo "Release tag $(RELEASE_TAG) matches VERSION $(VERSION)"
 
 build-windows-amd64: bridge-contract frontend-build
-	mkdir -p build/windows-amd64
-	GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -ldflags "$(GO_LDFLAGS)" -o build/windows-amd64/joicetyper.exe ./cmd/joicetyper
+	mkdir -p $(WINDOWS_BUILD_DIR)
+	GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -ldflags "$(GO_LDFLAGS)" -o $(WINDOWS_BIN_PATH) ./cmd/joicetyper
+
+package-windows: build-windows-amd64
+	@test -f "$(WINDOWS_INSTALLER_SCRIPT)" || (echo "fatal: missing $(WINDOWS_INSTALLER_SCRIPT)" && exit 1)
+	$(ISCC) /DAppVersion=$(VERSION) /DRepoRoot="$(CURDIR)" /DOutputDir="$(CURDIR)/$(WINDOWS_BUILD_DIR)" "$(WINDOWS_INSTALLER_SCRIPT)"

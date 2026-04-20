@@ -1,5 +1,10 @@
 # Windows Packaging
 
-This directory is reserved for Windows packaging scripts, templates, manifests, and installer assets.
+This directory contains Windows packaging scripts, templates, manifests, and installer assets.
 
-The root `Makefile` remains the packaging entrypoint during this structural phase.
+Current contents:
+- `joicetyper.iss`: Inno Setup installer definition for the Windows build output
+
+The root `Makefile` remains the packaging entrypoint:
+- `make build-windows-amd64`
+- `make package-windows`

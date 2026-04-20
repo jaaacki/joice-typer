@@ -145,6 +145,28 @@ func TestMakeWindowsBuildRunsFrontendBuild(t *testing.T) {
 	}
 }
 
+func TestMakePackageWindowsUsesInstallerScript(t *testing.T) {
+	root := repoRoot(t)
+
+	cmd := exec.Command("make", "-n", "package-windows")
+	cmd.Dir = root
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("make -n package-windows: %v\n%s", err, out)
+	}
+
+	text := string(out)
+	if !strings.Contains(text, "packaging/windows/joicetyper.iss") {
+		t.Fatalf("expected windows packaging to use packaging/windows/joicetyper.iss\noutput:\n%s", text)
+	}
+	if !strings.Contains(text, "build/windows-amd64/joicetyper.exe") {
+		t.Fatalf("expected windows packaging to depend on build/windows-amd64/joicetyper.exe\noutput:\n%s", text)
+	}
+	if !strings.Contains(text, "/DAppVersion=") {
+		t.Fatalf("expected windows packaging to pass version into installer\noutput:\n%s", text)
+	}
+}
+
 func TestMakeBuildSkipsFrontendInstallWhenStampPresent(t *testing.T) {
 	root := repoRoot(t)
 	stampPath := filepath.Join(root, "ui", "node_modules", ".package-lock.stamp")

@@ -7,6 +7,7 @@ func InitStatusBar() {
 
 func UpdateStatusBar(state AppState) {
 	storeCurrentAppState(state)
+	publishRuntimeStateChanged(state)
 }
 
 func SetStatusBarHotkeyText(string) {}
