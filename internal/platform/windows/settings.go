@@ -58,6 +58,7 @@ var (
 	}
 	defaultModelPath = configpkg.DefaultModelPath
 	removeFile       = os.Remove
+	listAudioDevices = listWindowsCaptureDevices
 )
 
 func shouldUseWebSettings() bool {
@@ -242,13 +243,37 @@ func buildSettingsBridgeService(_ configpkg.Config) *bridgepkg.Service {
 var prefsActiveModel string
 
 func listWebSettingsInputDevices() ([]bridgepkg.DeviceSnapshot, error) {
-	return []bridgepkg.DeviceSnapshot{
-		{Name: "System default", IsDefault: true},
-	}, nil
+	devices, err := listAudioDevices()
+	if err != nil {
+		return nil, bridgepkg.WrapContractError(
+			bridgepkg.ErrorCodeDevicesEnumerationFailed,
+			"Failed to list input devices",
+			true,
+			nil,
+			err,
+		)
+	}
+	return devices, nil
 }
 
 func refreshWebSettingsDevices() ([]bridgepkg.DeviceSnapshot, error) {
-	return listWebSettingsInputDevices()
+	if recorder := currentSettingsRecorder(); recorder != nil {
+		if err := recorder.RefreshDevices(); err != nil {
+			return nil, bridgepkg.WrapContractError(
+				bridgepkg.ErrorCodeDevicesRefreshFailed,
+				"Failed to refresh input devices",
+				true,
+				nil,
+				err,
+			)
+		}
+	}
+	devices, err := listWebSettingsInputDevices()
+	if err != nil {
+		return nil, err
+	}
+	publishDevicesChanged(devices)
+	return devices, nil
 }
 
 func downloadWebSettingsModel(ctx context.Context, size string) error {

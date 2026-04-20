@@ -313,6 +313,8 @@ func TestWindowsSettingsBridgeSource_ProvidesExplicitAdapterHooks(t *testing.T) 
 		`publishModelChanged(snapshot)`,
 		`return webSettingsStartHotkeyCapture()`,
 		`return webSettingsConfirmHotkeyCapture()`,
+		`listAudioDevices = listWindowsCaptureDevices`,
+		`publishDevicesChanged(devices)`,
 	} {
 		if !strings.Contains(source, required) {
 			t.Fatalf("expected windows/settings.go to contain %q", required)
@@ -338,6 +340,28 @@ func TestWindowsHotkeyCaptureSource_UsesDedicatedLowLevelHook(t *testing.T) {
 	} {
 		if !strings.Contains(source, required) {
 			t.Fatalf("expected windows/hotkey_capture.go to contain %q", required)
+		}
+	}
+}
+
+func TestWindowsAudioDevicesSource_UsesCoreAudioEnumeration(t *testing.T) {
+	root := repoRoot(t)
+	data, err := os.ReadFile(filepath.Join(root, "internal", "platform", "windows", "audio_devices.go"))
+	if err != nil {
+		t.Fatalf("read windows/audio_devices.go: %v", err)
+	}
+	source := string(data)
+	for _, required := range []string{
+		`github.com/go-ole/go-ole`,
+		`github.com/moutend/go-wca/pkg/wca`,
+		`ole.CoInitializeEx`,
+		`wca.CLSID_MMDeviceEnumerator`,
+		`enumerator.EnumAudioEndpoints(wca.ECapture, wca.DEVICE_STATE_ACTIVE`,
+		`wca.PKEY_Device_FriendlyName`,
+		`bridgepkg.DeviceSnapshot`,
+	} {
+		if !strings.Contains(source, required) {
+			t.Fatalf("expected windows/audio_devices.go to contain %q", required)
 		}
 	}
 }
