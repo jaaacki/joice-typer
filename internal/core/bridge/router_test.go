@@ -277,6 +277,17 @@ func TestRouterHandleRequest_QueryMethods(t *testing.T) {
 		LoadAppState: func(context.Context) (apppkg.AppState, error) {
 			return apppkg.StateReady, nil
 		},
+		LoadLogsTail: func(context.Context) (LogTailSnapshot, error) {
+			return LogTailSnapshot{
+				Text:      "line 499\nline 500\n",
+				Truncated: true,
+				ByteSize:  1234,
+				UpdatedAt: "2026-04-20T03:04:05Z",
+			}, nil
+		},
+		LoadLogsFull: func(context.Context) (string, error) {
+			return "line 001\nline 002\nline 003\n", nil
+		},
 	})
 	router := NewRouter(service)
 
@@ -288,6 +299,8 @@ func TestRouterHandleRequest_QueryMethods(t *testing.T) {
 		{method: DevicesListMethod, id: "req-devices"},
 		{method: ModelGetMethod, id: "req-model"},
 		{method: RuntimeGetMethod, id: "req-runtime"},
+		{method: LogsGetMethod, id: "req-logs-get"},
+		{method: LogsCopyAllMethod, id: "req-logs-copy"},
 	}
 
 	for _, tc := range tests {
@@ -301,6 +314,61 @@ func TestRouterHandleRequest_QueryMethods(t *testing.T) {
 			})
 			if !response.OK {
 				t.Fatalf("expected success for %s, got %#v", tc.method, response.Error)
+			}
+			switch tc.method {
+			case LogsGetMethod:
+				payload, ok := response.Result.(LogTailSnapshot)
+				if !ok {
+					t.Fatalf("Result = %#v, want LogTailSnapshot", response.Result)
+				}
+				if !payload.Truncated || payload.ByteSize != 1234 || payload.UpdatedAt != "2026-04-20T03:04:05Z" {
+					t.Fatalf("payload = %#v, want tail metadata", payload)
+				}
+				if payload.Text != "line 499\nline 500\n" {
+					t.Fatalf("payload.Text = %q, want tail text", payload.Text)
+				}
+			case LogsCopyAllMethod:
+				payload, ok := response.Result.(string)
+				if !ok {
+					t.Fatalf("Result = %#v, want string", response.Result)
+				}
+				if payload != "line 001\nline 002\nline 003\n" {
+					t.Fatalf("payload = %q, want full log text", payload)
+				}
+			}
+		})
+	}
+}
+
+func TestRouterHandleRequest_LogsMissingDependenciesReturnContractErrors(t *testing.T) {
+	router := NewRouter(NewService(nil))
+
+	tests := []struct {
+		method string
+		id     string
+	}{
+		{method: LogsGetMethod, id: "req-logs-missing-get"},
+		{method: LogsCopyAllMethod, id: "req-logs-missing-copy"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.method, func(t *testing.T) {
+			response := router.HandleRequest(context.Background(), RequestEnvelope{
+				V:      ProtocolVersion,
+				Kind:   KindRequest,
+				ID:     tc.id,
+				Method: tc.method,
+				Params: json.RawMessage(`{}`),
+			})
+
+			if response.OK {
+				t.Fatal("expected missing log dependency request to fail")
+			}
+			if response.Error == nil || response.Error.Code != ErrorCodeInternal {
+				t.Fatalf("Error = %#v, want code %q", response.Error, ErrorCodeInternal)
+			}
+			if got := response.Error.Details["operation"]; got == "" {
+				t.Fatalf("Error.Details[operation] = %#v, want operation metadata", got)
 			}
 		})
 	}

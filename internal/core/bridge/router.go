@@ -1,8 +1,8 @@
 package bridge
 
 import (
-	"context"
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -189,6 +189,24 @@ func (r *Router) HandleRequest(ctx context.Context, request RequestEnvelope) Res
 			return NewErrorResponseFromError(request.ID, err, ErrorCodeRuntimeUnavailable, "failed to load runtime state", true, nil)
 		}
 		return NewSuccessResponse(request.ID, state)
+	case LogsGetMethod:
+		if response := ensureEmptyParams(request); response != nil {
+			return *response
+		}
+		tail, err := r.service.LogsGet(ctx)
+		if err != nil {
+			return NewErrorResponseFromError(request.ID, err, ErrorCodeLogsUnavailable, "failed to load log tail", false, nil)
+		}
+		return NewSuccessResponse(request.ID, tail)
+	case LogsCopyAllMethod:
+		if response := ensureEmptyParams(request); response != nil {
+			return *response
+		}
+		text, err := r.service.LogsCopyAll(ctx)
+		if err != nil {
+			return NewErrorResponseFromError(request.ID, err, ErrorCodeLogsUnavailable, "failed to load full logs", false, nil)
+		}
+		return NewSuccessResponse(request.ID, text)
 	case OptionsGetMethod:
 		if response := ensureEmptyParams(request); response != nil {
 			return *response

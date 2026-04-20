@@ -69,3 +69,10 @@ type HotkeyCaptureSnapshot struct {
 	Recording  bool     `json:"recording"`
 	CanConfirm bool     `json:"canConfirm"`
 }
+
+type LogTailSnapshot struct {
+	Text      string `json:"text"`
+	Truncated bool   `json:"truncated"`
+	ByteSize  int64  `json:"byteSize"`
+	UpdatedAt string `json:"updatedAt"`
+}

@@ -113,6 +113,20 @@ func TestBridge_ServiceMethodsFailWhenDependenciesMissing(t *testing.T) {
 				return err
 			},
 		},
+		{
+			name: "LogsGet",
+			run: func() error {
+				_, err := svc.LogsGet(context.Background())
+				return err
+			},
+		},
+		{
+			name: "LogsCopyAll",
+			run: func() error {
+				_, err := svc.LogsCopyAll(context.Background())
+				return err
+			},
+		},
 	}
 
 	for _, tc := range testCases {
@@ -224,5 +238,51 @@ func TestBridge_BootstrapIncludesConfigAndAppState(t *testing.T) {
 	}
 	if len(bootstrap.Options.Models) == 0 {
 		t.Fatal("expected bootstrap options to include models")
+	}
+}
+
+func TestBridge_LogsGetReturnsTailPayload(t *testing.T) {
+	svc := NewService(&Dependencies{
+		LoadLogsTail: func(context.Context) (LogTailSnapshot, error) {
+			return LogTailSnapshot{
+				Text:      "line 499\nline 500\n",
+				Truncated: true,
+				ByteSize:  1234,
+				UpdatedAt: "2026-04-20T03:04:05Z",
+			}, nil
+		},
+	})
+
+	snapshot, err := svc.LogsGet(context.Background())
+	if err != nil {
+		t.Fatalf("LogsGet returned error: %v", err)
+	}
+	if !snapshot.Truncated {
+		t.Fatal("expected truncated tail payload")
+	}
+	if snapshot.ByteSize != 1234 {
+		t.Fatalf("ByteSize = %d, want 1234", snapshot.ByteSize)
+	}
+	if snapshot.UpdatedAt != "2026-04-20T03:04:05Z" {
+		t.Fatalf("UpdatedAt = %q, want 2026-04-20T03:04:05Z", snapshot.UpdatedAt)
+	}
+	if snapshot.Text != "line 499\nline 500\n" {
+		t.Fatalf("Text = %q, want tail text", snapshot.Text)
+	}
+}
+
+func TestBridge_LogsCopyAllReturnsFullText(t *testing.T) {
+	svc := NewService(&Dependencies{
+		LoadLogsFull: func(context.Context) (string, error) {
+			return "line 001\nline 002\nline 003\n", nil
+		},
+	})
+
+	text, err := svc.LogsCopyAll(context.Background())
+	if err != nil {
+		t.Fatalf("LogsCopyAll returned error: %v", err)
+	}
+	if text != "line 001\nline 002\nline 003\n" {
+		t.Fatalf("text = %q, want full file text", text)
 	}
 }

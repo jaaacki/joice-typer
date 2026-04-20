@@ -23,6 +23,8 @@ type Dependencies struct {
 	CancelHotkeyCapture    func(context.Context) error
 	ConfirmHotkeyCapture   func(context.Context) (HotkeyCaptureSnapshot, error)
 	LoadAppState           func(context.Context) (apppkg.AppState, error)
+	LoadLogsTail           func(context.Context) (LogTailSnapshot, error)
+	LoadLogsFull           func(context.Context) (string, error)
 }
 
 type Service struct {
@@ -157,6 +159,20 @@ func (s *Service) AppState(ctx context.Context) (AppStateSnapshot, error) {
 	}
 	snapshot.State = state.String()
 	return snapshot, nil
+}
+
+func (s *Service) LogsGet(ctx context.Context) (LogTailSnapshot, error) {
+	if s.deps.LoadLogsTail == nil {
+		return LogTailSnapshot{}, missingDependencyError(LogsGetMethod, "LoadLogsTail")
+	}
+	return s.deps.LoadLogsTail(ctx)
+}
+
+func (s *Service) LogsCopyAll(ctx context.Context) (string, error) {
+	if s.deps.LoadLogsFull == nil {
+		return "", missingDependencyError(LogsCopyAllMethod, "LoadLogsFull")
+	}
+	return s.deps.LoadLogsFull(ctx)
 }
 
 func (s *Service) Bootstrap(ctx context.Context) (BootstrapPayload, error) {
