@@ -266,6 +266,30 @@ func TestMacReleaseTargetsProduceGitHubReleaseFriendlyOutputs(t *testing.T) {
 	}
 }
 
+func TestMacPublishGitHubReleaseTargetUsesReleaseCheckAndGHUpload(t *testing.T) {
+	root := repoRoot(t)
+
+	cmd := makeCommand(root, "-n", "mac-publish-github-release", "RELEASE_TAG=v1.1.10")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("make -n mac-publish-github-release: %v\n%s", err, out)
+	}
+
+	text := string(out)
+	for _, required := range []string{
+		`Release tag v1.1.10 matches VERSION 1.1.10`,
+		"scripts/release/macos_publish_github.sh",
+		`RELEASE_TAG="v1.1.10"`,
+		"JoiceTyper-1.1.10-macos.zip",
+		"JoiceTyper-1.1.10.dmg",
+		"appcast.xml",
+	} {
+		if !strings.Contains(text, required) {
+			t.Fatalf("expected mac GitHub publish flow to contain %q\noutput:\n%s", required, text)
+		}
+	}
+}
+
 func TestMakeWindowsBuildRunsFrontendBuild(t *testing.T) {
 	root := repoRoot(t)
 

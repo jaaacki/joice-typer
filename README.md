@@ -111,6 +111,18 @@ make release-check
 make dmg
 ```
 
+macOS self-update release flow:
+
+```bash
+cp packaging/macos/release.env.example packaging/macos/release.env.local
+# fill in your real signing, notarytool, Sparkle, and GitHub values
+
+make mac-release-artifacts
+make mac-publish-github-release RELEASE_TAG=v$(cat VERSION)
+```
+
+This keeps normal development builds credential-free while generating Sparkle-ready release artifacts under `build/macos-release/` for GitHub Releases hosting.
+
 On first launch, a setup wizard guides you through granting Accessibility permission, selecting a microphone, and downloading the speech model.
 
 ## Configuration

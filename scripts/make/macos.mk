@@ -15,6 +15,7 @@ MACOS_PLIST_RENDER_SCRIPT := scripts/release/macos_render_info_plist.py
 MACOS_SPARKLE_STAGE_SCRIPT := scripts/release/macos_stage_sparkle.sh
 MACOS_PREPARE_RELEASE_APP_SCRIPT := scripts/release/macos_prepare_release_app.sh
 MACOS_NOTARIZE_SCRIPT := scripts/release/macos_notarize.sh
+MACOS_PUBLISH_GITHUB_SCRIPT := scripts/release/macos_publish_github.sh
 MACOS_APPCAST_TEMPLATE := packaging/macos/sparkle-appcast.xml.tmpl
 MACOS_RELEASE_APP_BUNDLE := $(MACOS_RELEASE_DIR)/$(APP_BUNDLE)
 MACOS_RELEASE_ARCHIVE := $(MACOS_RELEASE_DIR)/JoiceTyper-$(VERSION)-macos.zip
@@ -118,3 +119,7 @@ mac-notarize-release: mac-release-archive
 
 mac-release-artifacts: mac-appcast mac-release-dmg
 	mkdir -p "$(MACOS_RELEASE_DIR)"
+
+mac-publish-github-release: release-check mac-release-artifacts
+	@. "$(MACOS_RELEASE_ENV_FILE)"; \
+		RELEASE_TAG="$(RELEASE_TAG)" sh "$(MACOS_PUBLISH_GITHUB_SCRIPT)" "$(MACOS_RELEASE_ARCHIVE)" "$(MACOS_RELEASE_DMG)" "$(MACOS_APPCAST_PATH)"
