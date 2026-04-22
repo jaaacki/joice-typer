@@ -32,6 +32,26 @@ func repoRoot(t *testing.T) string {
 	return filepath.Clean(filepath.Join(filepath.Dir(file), "..", ".."))
 }
 
+func TestMakeBuildTargetsBumpVersion(t *testing.T) {
+	root := repoRoot(t)
+
+	macOut, err := makeCommand(root, "-n", "build").CombinedOutput()
+	if err != nil {
+		t.Fatalf("make -n build: %v\n%s", err, macOut)
+	}
+	if !strings.Contains(string(macOut), "version-bump") {
+		t.Fatalf("expected macOS build target to invoke version-bump\noutput:\n%s", macOut)
+	}
+
+	winOut, err := makeCommand(root, "-n", "build-windows-runtime-amd64").CombinedOutput()
+	if err != nil {
+		t.Fatalf("make -n build-windows-runtime-amd64: %v\n%s", err, winOut)
+	}
+	if !strings.Contains(string(winOut), "version-bump") {
+		t.Fatalf("expected Windows runtime build target to invoke version-bump\noutput:\n%s", winOut)
+	}
+}
+
 func TestMakeDownloadModelUsesRuntimeModelDir(t *testing.T) {
 	root := repoRoot(t)
 	home := t.TempDir()

@@ -12,6 +12,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -28,6 +29,7 @@ const (
 	maxTranscribeBytes    = 50000            // cap output text to ~50KB
 	transcribeTimeout     = 90 * time.Second // hard deadline for whisper_full
 	whisperBeamSize       = 5
+	longFormSeconds       = 15               // long utterances need less aggressive fast-path params
 )
 
 type whisperTranscriber struct {
@@ -54,6 +56,10 @@ func decodeConfigForMode(mode string) decodeConfig {
 	return decodeConfig{strategy: "beam", beamSize: whisperBeamSize}
 }
 
+func whisperThreadCount() int {
+	return max(1, runtime.NumCPU())
+}
+
 func NewTranscriber(ctx context.Context, modelPath string, modelSize string, language string, sampleRate int, decodeMode string, punctuationMode string, logger *slog.Logger) (apppkg.Transcriber, error) {
 	l := logger.With("component", "transcriber")
 
@@ -62,11 +68,23 @@ func NewTranscriber(ctx context.Context, modelPath string, modelSize string, lan
 	}
 
 	l.Info("loading model", "operation", "NewTranscriber", "model_path", modelPath)
+	sysInfo := C.GoString(C.whisper_print_system_info())
+	if sysInfo != "" {
+		l.Info("whisper system info", "operation", "NewTranscriber", "system_info", sysInfo)
+	}
+	if runtime.GOOS == "windows" {
+		logWindowsBackendInventory(modelPath, l)
+	}
 
 	cPath := C.CString(modelPath)
 	defer C.free(unsafe.Pointer(cPath))
 
 	cparams := C.whisper_context_default_params()
+	if runtime.GOOS == "windows" {
+		cparams.use_gpu = C.bool(true)
+		cparams.gpu_device = 0
+		l.Info("requesting GPU backend", "operation", "NewTranscriber", "gpu_device", 0)
+	}
 	wctx := C.whisper_init_from_file_with_params(cPath, cparams)
 	if wctx == nil {
 		quarantineModel(modelPath, "", l, "NewTranscriber")
@@ -172,7 +190,12 @@ func (t *whisperTranscriber) transcribeBlocking(audio []float32) (string, error)
 	if len(audio) > 0 {
 		rms = sumSq / float64(len(audio))
 	}
-	t.logger.Info("transcribing", "operation", "Transcribe", "samples", len(audio), "audio_rms_sq", rms)
+	durationSeconds := 0.0
+	if t.sampleRate > 0 {
+		durationSeconds = float64(len(audio)) / float64(t.sampleRate)
+	}
+	longForm := durationSeconds >= longFormSeconds
+	t.logger.Info("transcribing", "operation", "Transcribe", "samples", len(audio), "audio_rms_sq", rms, "duration_sec", durationSeconds, "long_form", longForm)
 
 	decodeCfg := decodeConfigForMode(t.decodeMode)
 	params := C.whisper_full_default_params(C.WHISPER_SAMPLING_GREEDY)
@@ -183,7 +206,15 @@ func (t *whisperTranscriber) transcribeBlocking(audio []float32) (string, error)
 	params.print_timestamps = C._Bool(false)
 	params.print_realtime = C._Bool(false)
 	params.print_special = C._Bool(false)
-	params.single_segment = C._Bool(false)
+	params.n_threads = C.int(whisperThreadCount())
+	params.no_timestamps = C._Bool(true)
+	if longForm {
+		params.no_context = C._Bool(false)
+		params.single_segment = C._Bool(false)
+	} else {
+		params.no_context = C._Bool(true)
+		params.single_segment = C._Bool(false)
+	}
 	if decodeCfg.strategy == "beam" {
 		params.beam_search.beam_size = C.int(decodeCfg.beamSize)
 	}
@@ -200,7 +231,9 @@ func (t *whisperTranscriber) transcribeBlocking(audio []float32) (string, error)
 		params.initial_prompt = cPrompt
 	}
 
+	decodeStart := time.Now()
 	result := C.whisper_full(t.ctx, params, (*C.float)(unsafe.Pointer(&audio[0])), C.int(len(audio)))
+	decodeMs := time.Since(decodeStart).Milliseconds()
 	if result != 0 {
 		return "", fmt.Errorf("transcriber.Transcribe: whisper_full returned %d", result)
 	}
@@ -227,7 +260,7 @@ func (t *whisperTranscriber) transcribeBlocking(audio []float32) (string, error)
 	text := sanitizeTranscript(strings.TrimSpace(sb.String()))
 	text = applyPunctuationMode(t.punctMode, text)
 	t.logger.Info("transcribed", "operation", "Transcribe",
-		"segments", n, "text_length", len(text))
+		"segments", n, "text_length", len(text), "decode_ms", decodeMs, "threads", int(params.n_threads))
 	return text, nil
 }
 

@@ -318,6 +318,10 @@ func publishHotkeyCaptureChanged(snapshot bridgepkg.HotkeyCaptureSnapshot) {
 	dispatchWebSettingsEvent(bridgepkg.NewEvent(bridgepkg.HotkeyCaptureChangedEvent, snapshot))
 }
 
+func publishInputLevelChanged(snapshot bridgepkg.InputLevelSnapshot) {
+	dispatchWebSettingsEvent(bridgepkg.NewEvent(bridgepkg.InputLevelChangedEvent, snapshot))
+}
+
 func webSettingsWindowClosed() {
 	resetWebSettingsHotkeyCapture()
 	cancelPreferencesContext()

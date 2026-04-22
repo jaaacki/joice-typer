@@ -7,9 +7,15 @@ type ConfigSnapshot struct {
 	SampleRate      int      `json:"sampleRate"`
 	SoundFeedback   bool     `json:"soundFeedback"`
 	InputDevice     string   `json:"inputDevice"`
+	InputDeviceName string   `json:"inputDeviceName"`
 	DecodeMode      string   `json:"decodeMode"`
 	PunctuationMode string   `json:"punctuationMode"`
 	Vocabulary      string   `json:"vocabulary"`
+}
+
+type InputLevelSnapshot struct {
+	Level   float64 `json:"level"`
+	Quality string  `json:"quality"`
 }
 
 type PermissionsSnapshot struct {
@@ -18,6 +24,7 @@ type PermissionsSnapshot struct {
 }
 
 type DeviceSnapshot struct {
+	ID        string `json:"id"`
 	Name      string `json:"name"`
 	IsDefault bool   `json:"isDefault"`
 }

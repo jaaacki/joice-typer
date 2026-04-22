@@ -42,6 +42,17 @@ bridge-contract:
 bridge-contract-check:
 	go run ./scripts/generate_bridge_contract -check
 
+version-bump:
+	@current=$$(tr -d '[:space:]' < "$(VERSION_FILE)"); \
+	major=$${current%%.*}; \
+	rest=$${current#*.}; \
+	minor=$${rest%%.*}; \
+	patch=$${rest##*.}; \
+	next_patch=$$((patch + 1)); \
+	next="$$major.$$minor.$$next_patch"; \
+	printf '%s\n' "$$next" > "$(VERSION_FILE)"; \
+	echo "Version bumped: $$current -> $$next"
+
 $(FRONTEND_VITE_BIN) $(FRONTEND_REACT_PKG) $(FRONTEND_REACT_DOM_PKG) $(FRONTEND_TYPESCRIPT_PKG): $(UI_DIR)/package-lock.json $(UI_DIR)/package.json
 	cd $(UI_DIR) && npm ci
 

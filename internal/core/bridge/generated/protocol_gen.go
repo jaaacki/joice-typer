@@ -37,6 +37,7 @@ const (
 	ConfigSavedEvent                    = "config.saved"
 	LogsUpdatedEvent                    = "logs.updated"
 	HotkeyCaptureChangedEvent           = "hotkey.capture_changed"
+	InputLevelChangedEvent              = "audio_input.level_changed"
 	ErrorCodeBadRequest                 = "bridge.invalid_request"
 	ErrorCodeBadMethod                  = "bridge.unsupported_method"
 	ErrorCodeInternal                   = "bridge.internal_error"

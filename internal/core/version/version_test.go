@@ -7,6 +7,32 @@ import (
 	"testing"
 )
 
+func TestParseSemver(t *testing.T) {
+	got, err := ParseSemver("1.2.3")
+	if err != nil {
+		t.Fatalf("ParseSemver: %v", err)
+	}
+	if got.Major != 1 || got.Minor != 2 || got.Patch != 3 {
+		t.Fatalf("unexpected semver: %#v", got)
+	}
+}
+
+func TestBumpPatch(t *testing.T) {
+	got, err := BumpPatch("1.2.3")
+	if err != nil {
+		t.Fatalf("BumpPatch: %v", err)
+	}
+	if got != "1.2.4" {
+		t.Fatalf("expected 1.2.4, got %q", got)
+	}
+}
+
+func TestBumpPatch_InvalidVersion(t *testing.T) {
+	if _, err := BumpPatch("banana"); err == nil {
+		t.Fatal("expected invalid version to fail")
+	}
+}
+
 func TestLoadVersionFile_TrimsWhitespace(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "VERSION")
 	if err := os.WriteFile(path, []byte("1.0.0\n"), 0644); err != nil {

@@ -24,7 +24,7 @@ WINDOWS_INSTALLER_NAME := JoiceTyper-$(VERSION)-setup.exe
 WINDOWS_INSTALLER_PATH := $(WINDOWS_BUILD_DIR)/$(WINDOWS_INSTALLER_NAME)
 ISCC ?= iscc
 
-build-windows-amd64: bridge-contract frontend-build
+build-windows-amd64: version-bump bridge-contract frontend-build
 	mkdir -p $(WINDOWS_BUILD_DIR)
 	GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -ldflags "$(WINDOWS_GO_LDFLAGS)" -o $(WINDOWS_BIN_PATH) ./cmd/joicetyper
 
@@ -110,7 +110,7 @@ windows-runtime-stage-check:
 		test -f "$(WINDOWS_BUILD_DIR)/$$artifact" || (echo "fatal: missing staged Windows runtime artifact $(WINDOWS_BUILD_DIR)/$$artifact" && exit 1); \
 	done
 
-build-windows-runtime-amd64: bridge-contract frontend-build windows-runtime-prereqs
+build-windows-runtime-amd64: version-bump bridge-contract frontend-build windows-runtime-prereqs
 	mkdir -p $(WINDOWS_BUILD_DIR)
 	rm -f "$(WINDOWS_BUILD_DIR)/libportaudio-2.dll"
 	go clean -cache

@@ -515,6 +515,7 @@ func TestWindowsTranscriptionSource_UsesDedicatedWindowsCGOPath(t *testing.T) {
 	for _, required := range []string{
 		"build-windows-runtime-amd64:",
 		"package-windows-runtime:",
+		"version-bump:",
 		"CGO_ENABLED=1",
 		"WINDOWS_CC ?=",
 		"WINDOWS_CXX ?=",

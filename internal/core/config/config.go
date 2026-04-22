@@ -32,6 +32,7 @@ type Config struct {
 	SampleRate      int      `yaml:"sample_rate"`
 	SoundFeedback   bool     `yaml:"sound_feedback"`
 	InputDevice     string   `yaml:"input_device"`
+	InputDeviceName string   `yaml:"input_device_name,omitempty"`
 	LegacyTypeMode  string   `yaml:"type_mode,omitempty"`
 	DecodeMode      string   `yaml:"decode_mode"`
 	PunctuationMode string   `yaml:"punctuation_mode"`

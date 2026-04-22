@@ -19,6 +19,7 @@ import {
   subscribeConfigSaved,
   subscribeDevicesChanged,
   subscribeHotkeyCaptureChanged,
+  subscribeInputLevelChanged,
   subscribeLogsUpdated,
   subscribeModelDownloadCompleted,
   subscribeModelDownloadFailed,
@@ -31,6 +32,7 @@ import {
   type ConfigSnapshot,
   type DeviceSnapshot,
   type HotkeyCaptureSnapshot,
+  type InputLevelSnapshot,
   type ModelDownloadProgressSnapshot,
   type ModelDownloadFailedSnapshot,
   type ModelSnapshot,
@@ -131,12 +133,24 @@ function formatTransferSize(bytes: number): string {
   return `${Math.round(bytes)} B`;
 }
 
-function MicMeter() {
+function micQualityTone(quality: string): "warn" | "ok" | "idle" {
+  switch (quality) {
+    case "good":
+      return "ok";
+    case "acceptable":
+      return "warn";
+    default:
+      return "idle";
+  }
+}
+
+function MicLevelMeter({ level }: { level: number }) {
+  const clamped = Math.max(0, Math.min(1, level));
   return (
-    <div className="mic-meter" aria-hidden="true">
-      {Array.from({ length: 16 }, (_, index) => (
-        <span key={index} className="mic-meter__bar" style={{ animationDelay: `${index * 70}ms` }} />
-      ))}
+    <div className="mic-level" aria-hidden="true">
+      <div className="mic-level__bar">
+        <span className="mic-level__fill" style={{ width: `${Math.round(clamped * 100)}%` }} />
+      </div>
     </div>
   );
 }
@@ -156,6 +170,7 @@ export function SettingsScreen({ bootstrap }: SettingsScreenProps) {
   const [confirmDeleteModelSize, setConfirmDeleteModelSize] = useState<string | null>(null);
   const [hotkeyCapture, setHotkeyCapture] = useState<HotkeyCaptureSnapshot | null>(null);
   const [downloadProgress, setDownloadProgress] = useState<ModelDownloadProgressSnapshot | null>(null);
+  const [inputLevel, setInputLevel] = useState<InputLevelSnapshot>({ level: 0, quality: "poor" });
 
   const modelOptionsByCode = useMemo(
     () => new Map(options.models.map((option) => [option.code, option])),
@@ -328,6 +343,7 @@ export function SettingsScreen({ bootstrap }: SettingsScreenProps) {
   );
   useEffect(() => subscribeDevicesChanged((nextDevices) => setDevices(nextDevices)), []);
   useEffect(() => subscribeHotkeyCaptureChanged((snapshot) => setHotkeyCapture(snapshot)), []);
+  useEffect(() => subscribeInputLevelChanged((snapshot) => setInputLevel(snapshot)), []);
   useEffect(
     () =>
       subscribeModelDownloadProgress((progress: ModelDownloadProgressSnapshot) => {
@@ -617,11 +633,15 @@ export function SettingsScreen({ bootstrap }: SettingsScreenProps) {
                     <select
                       className="ui-select"
                       value={draft.inputDevice}
-                      onChange={(event) => update("inputDevice", event.target.value)}
+                      onChange={(event) => {
+                        const selected = devices.find((device) => device.id === event.target.value);
+                        update("inputDevice", event.target.value);
+                        update("inputDeviceName", selected?.name ?? "");
+                      }}
                     >
                       <option value="">System default</option>
                       {devices.map((device) => (
-                        <option key={device.name} value={device.name}>
+                        <option key={device.id} value={device.id}>
                           {device.name}
                           {device.isDefault ? " (Default)" : ""}
                         </option>
@@ -645,8 +665,15 @@ export function SettingsScreen({ bootstrap }: SettingsScreenProps) {
                 <span className="mic-preview__icon">
                   <MicIcon />
                 </span>
-                <MicMeter />
-                <span className="mic-preview__label">{devices.length > 0 ? "Live input ready" : "Awaiting device list"}</span>
+                <div className="mic-preview__content">
+                  <div className="mic-preview__instruction">
+                    Leave the mic where you normally use it and speak a short phrase in your normal voice.
+                  </div>
+                  <MicLevelMeter level={inputLevel.level} />
+                </div>
+                <span className="mic-preview__label">
+                  <StatusBadge tone={micQualityTone(inputLevel.quality)}>{inputLevel.quality === "good" ? "Good" : inputLevel.quality === "acceptable" ? "Acceptable" : "Poor"}</StatusBadge>
+                </span>
               </div>
 
               {/* Future template slot: advanced capture tuning is intentionally hidden until the backend has hard constraints instead of accepting arbitrary integers.

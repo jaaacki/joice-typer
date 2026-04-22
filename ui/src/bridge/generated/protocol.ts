@@ -44,6 +44,7 @@ export const EVENTS = {
   configSaved: "config.saved",
   logsUpdated: "logs.updated",
   hotkeyCaptureChanged: "hotkey.capture_changed",
+  inputLevelChanged: "audio_input.level_changed",
 } as const;
 export type BridgeEventName = (typeof EVENTS)[keyof typeof EVENTS];
 

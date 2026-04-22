@@ -4,12 +4,52 @@ import (
 	"fmt"
 	"os"
 	"regexp"
+	"strconv"
 	"strings"
 )
 
 var Version = "dev"
 
-var semverPattern = regexp.MustCompile(`^\d+\.\d+\.\d+$`)
+var semverPattern = regexp.MustCompile(`^(\d+)\.(\d+)\.(\d+)$`)
+
+type Semver struct {
+	Major int
+	Minor int
+	Patch int
+}
+
+func ParseSemver(version string) (Semver, error) {
+	matches := semverPattern.FindStringSubmatch(strings.TrimSpace(version))
+	if matches == nil {
+		return Semver{}, fmt.Errorf("version.ParseSemver: invalid version %q", version)
+	}
+	major, err := strconv.Atoi(matches[1])
+	if err != nil {
+		return Semver{}, fmt.Errorf("version.ParseSemver: parse major: %w", err)
+	}
+	minor, err := strconv.Atoi(matches[2])
+	if err != nil {
+		return Semver{}, fmt.Errorf("version.ParseSemver: parse minor: %w", err)
+	}
+	patch, err := strconv.Atoi(matches[3])
+	if err != nil {
+		return Semver{}, fmt.Errorf("version.ParseSemver: parse patch: %w", err)
+	}
+	return Semver{Major: major, Minor: minor, Patch: patch}, nil
+}
+
+func (s Semver) String() string {
+	return fmt.Sprintf("%d.%d.%d", s.Major, s.Minor, s.Patch)
+}
+
+func BumpPatch(version string) (string, error) {
+	semver, err := ParseSemver(version)
+	if err != nil {
+		return "", fmt.Errorf("version.BumpPatch: %w", err)
+	}
+	semver.Patch++
+	return semver.String(), nil
+}
 
 func LoadVersionFile(path string) (string, error) {
 	data, err := os.ReadFile(path)

@@ -101,6 +101,7 @@ func windowsCaptureDeviceSnapshot(device *wca.IMMDevice, defaultID string) (brid
 	}
 
 	return bridgepkg.DeviceSnapshot{
+		ID:        deviceID,
 		Name:      name,
 		IsDefault: deviceID != "" && deviceID == defaultID,
 	}, nil

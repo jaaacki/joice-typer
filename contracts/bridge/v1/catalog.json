@@ -37,7 +37,8 @@
     { "goName": "ModelDownloadFailedEvent", "tsName": "modelDownloadFailed", "value": "model.download_failed" },
     { "goName": "ConfigSavedEvent", "tsName": "configSaved", "value": "config.saved" },
     { "goName": "LogsUpdatedEvent", "tsName": "logsUpdated", "value": "logs.updated" },
-    { "goName": "HotkeyCaptureChangedEvent", "tsName": "hotkeyCaptureChanged", "value": "hotkey.capture_changed" }
+    { "goName": "HotkeyCaptureChangedEvent", "tsName": "hotkeyCaptureChanged", "value": "hotkey.capture_changed" },
+    { "goName": "InputLevelChangedEvent", "tsName": "inputLevelChanged", "value": "audio_input.level_changed" }
   ],
   "errors": [
     { "goName": "ErrorCodeBadRequest", "tsName": "invalidRequest", "value": "bridge.invalid_request" },

@@ -41,6 +41,7 @@ const (
 	LogsUpdatedEvent                    = generated.LogsUpdatedEvent
 	DevicesChangedEvent                 = generated.DevicesChangedEvent
 	HotkeyCaptureChangedEvent           = generated.HotkeyCaptureChangedEvent
+	InputLevelChangedEvent              = generated.InputLevelChangedEvent
 	ErrorCodeBadRequest                 = generated.ErrorCodeBadRequest
 	ErrorCodeBadMethod                  = generated.ErrorCodeBadMethod
 	ErrorCodeInternal                   = generated.ErrorCodeInternal

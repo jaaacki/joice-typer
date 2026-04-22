@@ -164,19 +164,23 @@ func (a *App) handleRelease() {
 }
 
 func (a *App) handleReleaseClipboard() {
+	releaseTime := time.Now()
 	a.componentMu.RLock()
 	rec := a.recorder
 	a.componentMu.RUnlock()
 
 	audio, err := rec.Stop()
+	stopMs := time.Since(releaseTime).Milliseconds()
 	atomic.StoreInt32(&a.recording, 0)
 	if err != nil {
 		a.logger.Error("failed to stop recording",
-			"operation", "handleReleaseClipboard", "error", err)
+			"operation", "handleReleaseClipboard", "error", err, "stop_ms", stopMs)
 		a.sound.PlayError()
 		a.emitState(a.failureState(err))
 		return
 	}
+
+	a.logger.Info("recording stopped for transcription", "operation", "handleReleaseClipboard", "stop_ms", stopMs, "samples", len(audio))
 
 	a.sound.PlayStop()
 	a.emitState(StateTranscribing)
@@ -194,6 +198,7 @@ func (a *App) handleReleaseClipboard() {
 
 func (a *App) transcribeAndPaste(audio []float32) {
 	defer a.wg.Done()
+	transcribeStart := time.Now()
 
 	a.componentMu.RLock()
 	trans := a.transcriber
@@ -212,6 +217,7 @@ func (a *App) transcribeAndPaste(audio []float32) {
 	transcribeCtx, cancel := context.WithTimeout(context.Background(), clipboardTranscribeTimeout)
 	defer cancel()
 	text, err := trans.Transcribe(transcribeCtx, audio)
+	transcribeMs := time.Since(transcribeStart).Milliseconds()
 	if err != nil {
 		var timeoutErr *ErrDependencyTimeout
 		if errors.As(err, &timeoutErr) {
@@ -236,16 +242,17 @@ func (a *App) transcribeAndPaste(audio []float32) {
 	}
 
 	// Add a separator only for sentence-like output; raw text should pass through unchanged.
+	pasteStart := time.Now()
 	if err := pst.Paste(formatPasteText(text)); err != nil {
 		a.logger.Error("paste failed",
-			"operation", "transcribeAndPaste", "error", err)
+			"operation", "transcribeAndPaste", "error", err, "transcribe_ms", transcribeMs)
 		a.sound.PlayError()
 		a.emitState(StateReady)
 		return
 	}
 
 	a.logger.Info("text pasted", "operation", "transcribeAndPaste",
-		"text_length", len(text))
+		"text_length", len(text), "transcribe_ms", transcribeMs, "paste_ms", time.Since(pasteStart).Milliseconds(), "total_ms", time.Since(transcribeStart).Milliseconds())
 	a.emitState(StateReady)
 }
 

@@ -41,6 +41,7 @@ type saveConfigPayload struct {
 	SampleRate      *int      `json:"sampleRate"`
 	SoundFeedback   *bool     `json:"soundFeedback"`
 	InputDevice     *string   `json:"inputDevice"`
+	InputDeviceName *string   `json:"inputDeviceName"`
 	DecodeMode      *string   `json:"decodeMode"`
 	PunctuationMode *string   `json:"punctuationMode"`
 	Vocabulary      *string   `json:"vocabulary"`
@@ -299,6 +300,7 @@ func (p saveConfigPayload) snapshot(requestID string) (ConfigSnapshot, *Response
 		{name: "sampleRate", present: p.SampleRate != nil},
 		{name: "soundFeedback", present: p.SoundFeedback != nil},
 		{name: "inputDevice", present: p.InputDevice != nil},
+		{name: "inputDeviceName", present: p.InputDeviceName != nil},
 		{name: "decodeMode", present: p.DecodeMode != nil},
 		{name: "punctuationMode", present: p.PunctuationMode != nil},
 		{name: "vocabulary", present: p.Vocabulary != nil},
@@ -318,6 +320,7 @@ func (p saveConfigPayload) snapshot(requestID string) (ConfigSnapshot, *Response
 		SampleRate:      *p.SampleRate,
 		SoundFeedback:   *p.SoundFeedback,
 		InputDevice:     *p.InputDevice,
+		InputDeviceName: *p.InputDeviceName,
 		DecodeMode:      *p.DecodeMode,
 		PunctuationMode: *p.PunctuationMode,
 		Vocabulary:      *p.Vocabulary,

@@ -24,7 +24,7 @@ type portaudioRecorder struct {
 	activeStream *portaudio.Stream // guarded by mu; used by Stop to force-abort on timeout
 	warmStream   *portaudio.Stream // pre-opened stream for instant start
 	buffer       []float32
-	chunks       [][]float32
+	audio        []float32
 	mu           sync.Mutex
 	recording    bool
 	done         chan struct{}
@@ -176,6 +176,34 @@ func findInputDevice(name string) (*portaudio.DeviceInfo, error) {
 	return nil, &apppkg.ErrDependencyUnavailable{Component: "recorder", Operation: "findInputDevice", Wrapped: fmt.Errorf("input device %q not found", name)}
 }
 
+func findInputDeviceByID(id string) (*portaudio.DeviceInfo, error) {
+	if runtime.GOOS != "windows" {
+		return findInputDevice(id)
+	}
+	devices, err := portaudio.Devices()
+	if err != nil {
+		return nil, &apppkg.ErrDependencyUnavailable{Component: "recorder", Operation: "findInputDeviceByID", Wrapped: err}
+	}
+	snapshots, snapErr := ListInputDeviceSnapshots()
+	if snapErr != nil {
+		return nil, &apppkg.ErrDependencyUnavailable{Component: "recorder", Operation: "findInputDeviceByID", Wrapped: snapErr}
+	}
+	nameByID := make(map[string]string, len(snapshots))
+	for _, snapshot := range snapshots {
+		nameByID[snapshot.ID] = snapshot.Name
+	}
+	name, ok := nameByID[id]
+	if !ok {
+		return nil, &apppkg.ErrDependencyUnavailable{Component: "recorder", Operation: "findInputDeviceByID", Wrapped: fmt.Errorf("input device %q not found", id)}
+	}
+	for _, d := range devices {
+		if d.MaxInputChannels > 0 && d.Name == name {
+			return d, nil
+		}
+	}
+	return nil, &apppkg.ErrDependencyUnavailable{Component: "recorder", Operation: "findInputDeviceByID", Wrapped: fmt.Errorf("input device %q resolved to %q but portaudio device was not found", id, name)}
+}
+
 // openStream creates and returns a PortAudio stream for the configured device.
 // Returns the stream and the actual sample rate used (may differ from r.sampleRate
 // if the device does not support the requested rate and a fallback was used).
@@ -221,21 +249,32 @@ func (r *portaudioRecorder) openStream(buf []float32) (*portaudio.Stream, float6
 
 func (r *portaudioRecorder) resolveDevice() (*portaudio.DeviceInfo, error) {
 	if r.deviceName != "" {
-		device, err := findInputDevice(r.deviceName)
+		device, err := findInputDeviceByID(r.deviceName)
 		if err != nil {
 			r.logger.Warn("configured device not found, using default input",
 				"operation", "openStream",
 				"device", r.deviceName, "error", err)
 		} else {
+			r.logger.Info("using configured input device", "operation", "openStream", "device", r.deviceName, "portaudio_name", device.Name)
 			return device, nil
 		}
 	}
-	return portaudio.DefaultInputDevice()
+	device, err := portaudio.DefaultInputDevice()
+	if err == nil && device != nil {
+		r.logger.Info("using default input device", "operation", "openStream", "portaudio_name", device.Name)
+	}
+	return device, err
 }
 
 // Warm pre-opens the audio stream so Start() is near-instant.
 // Call after the app is ready. Safe to call multiple times.
 func (r *portaudioRecorder) Warm() {
+	if runtime.GOOS == "windows" {
+		// Windows warm-stream reuse has been causing intermittent near-silent/blank
+		// captures. Prefer reliability over startup speed on Windows.
+		return
+	}
+
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -314,7 +353,7 @@ func (r *portaudioRecorder) Start(ctx context.Context) error {
 	r.logger.Debug("starting", "operation", "Start",
 		"sample_rate", r.sampleRate, "device", r.deviceName)
 
-	r.chunks = nil
+	r.audio = nil
 	r.totalSamples = 0
 	r.recording = true
 	r.sessionID++
@@ -419,10 +458,8 @@ func (r *portaudioRecorder) readLoop(stream *portaudio.Stream, buffer []float32,
 			r.mu.Unlock()
 			return
 		}
-		chunk := make([]float32, len(buffer))
-		copy(chunk, buffer)
-		r.chunks = append(r.chunks, chunk)
-		r.totalSamples += len(chunk)
+						r.audio = append(r.audio, buffer...)
+		r.totalSamples += len(buffer)
 		if r.totalSamples >= r.maxSamples {
 			r.recording = false
 			r.mu.Unlock()
@@ -439,27 +476,17 @@ func (r *portaudioRecorder) readLoop(stream *portaudio.Stream, buffer []float32,
 func (r *portaudioRecorder) Snapshot() []float32 {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-
-	total := 0
-	for _, chunk := range r.chunks {
-		total += len(chunk)
-	}
-	if total == 0 {
+	if len(r.audio) == 0 {
 		return nil
 	}
-
-	audio := make([]float32, 0, total)
-	for _, chunk := range r.chunks {
-		audio = append(audio, chunk...)
-	}
-	return audio
+	return append([]float32(nil), r.audio...)
 }
 
 func (r *portaudioRecorder) Stop() ([]float32, error) {
 	r.mu.Lock()
 	r.recording = false
-	chunks := r.chunks
-	r.chunks = nil
+	audio := append([]float32(nil), r.audio...)
+	r.audio = nil
 	done := r.done
 	r.mu.Unlock()
 
@@ -494,10 +521,7 @@ func (r *portaudioRecorder) Stop() ([]float32, error) {
 		}
 	}
 
-	total := 0
-	for _, chunk := range chunks {
-		total += len(chunk)
-	}
+	total := len(audio)
 	r.mu.Lock()
 	unhealthy := r.unhealthy
 	r.mu.Unlock()
@@ -518,11 +542,6 @@ func (r *portaudioRecorder) Stop() ([]float32, error) {
 			}
 		}
 		return []float32{}, nil
-	}
-
-	audio := make([]float32, 0, total)
-	for _, chunk := range chunks {
-		audio = append(audio, chunk...)
 	}
 
 	captureRate := r.sampleRate

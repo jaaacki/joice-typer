@@ -12,6 +12,8 @@ The root `Makefile` remains the packaging entrypoint:
 - `make package-windows`
 - `make package-windows-runtime`
 
+These artifact-producing build targets now bump the checked-in patch version in `VERSION` once per invocation before building, so Windows installers and binaries always get a newer semantic version.
+
 Runtime packaging is fail-closed:
 - `build-windows-runtime-amd64` requires a Windows CGO toolchain and a local `third_party/portaudio-windows-src` checkout
 - the runtime build now stages whisper/ggml Windows artifacts into the expected `build/.../Release` layout automatically

@@ -79,6 +79,7 @@ var (
 	webSettingsLogRefreshRunning bool
 	webSettingsDownloadMu        sync.Mutex
 	webSettingsActiveDownload    string
+	webSettingsInputLevelOnce    sync.Once
 )
 
 func shouldUseWebSettings() bool {
@@ -123,6 +124,7 @@ func OpenPreferences() {
 
 func openPreferences() error {
 	ensureWebSettingsLogObserver()
+	ensureWebSettingsInputLevelPublisher()
 	if !preferencesOpenCompareAndSwap(0, 1) {
 		currentSettingsLogger().Info("preferences already open, reactivating existing window", "operation", "OpenPreferences")
 		FocusWebSettingsWindow()
@@ -211,6 +213,32 @@ func loadWebSettingsPermissionsSnapshot() bridgepkg.PermissionsSnapshot {
 	return bridgepkg.PermissionsSnapshot{Accessibility: true, InputMonitoring: true}
 }
 
+func migrateWindowsInputDeviceConfig(cfg configpkg.Config) configpkg.Config {
+	if cfg.InputDevice == "" {
+		return cfg
+	}
+	devices, err := listWebSettingsInputDevices()
+	if err != nil {
+		return cfg
+	}
+	for _, device := range devices {
+		if cfg.InputDevice == device.ID {
+			if cfg.InputDeviceName == "" {
+				cfg.InputDeviceName = device.Name
+			}
+			return cfg
+		}
+	}
+	for _, device := range devices {
+		if cfg.InputDevice == device.Name {
+			cfg.InputDevice = device.ID
+			cfg.InputDeviceName = device.Name
+			return cfg
+		}
+	}
+	return cfg
+}
+
 func buildSettingsBridgeService(_ configpkg.Config) *bridgepkg.Service {
 	return bridgepkg.NewService(&bridgepkg.Dependencies{
 		LoadConfig: func(context.Context) (configpkg.Config, error) {
@@ -234,6 +262,7 @@ func buildSettingsBridgeService(_ configpkg.Config) *bridgepkg.Service {
 					err,
 				)
 			}
+			loaded = migrateWindowsInputDeviceConfig(loaded)
 			return loaded, nil
 		},
 		SaveConfig: func(_ context.Context, updated configpkg.Config) error {
@@ -246,6 +275,7 @@ func buildSettingsBridgeService(_ configpkg.Config) *bridgepkg.Service {
 					err,
 				)
 			}
+			updated = migrateWindowsInputDeviceConfig(updated)
 			cfgPath, err := webSettingsDefaultConfigPath()
 			if err != nil {
 				return bridgepkg.WrapContractError(
@@ -725,4 +755,41 @@ func scheduleWebSettingsLogsUpdated() {
 		return
 	}
 	webSettingsLogUpdateTimer.Reset(150 * time.Millisecond)
+}
+
+func ensureWebSettingsInputLevelPublisher() {
+	webSettingsInputLevelOnce.Do(func() {
+		go func() {
+			ticker := time.NewTicker(150 * time.Millisecond)
+			defer ticker.Stop()
+			for range ticker.C {
+				if preferencesOpenLoad() == 0 {
+					continue
+				}
+				recorder := currentSettingsRecorder()
+				if recorder == nil {
+					continue
+				}
+				samples := recorder.Snapshot()
+				var sumSq float64
+				for _, s := range samples {
+					sumSq += float64(s) * float64(s)
+				}
+				level := 0.0
+				if len(samples) > 0 {
+					level = math.Sqrt(sumSq / float64(len(samples))) * 12
+				}
+				if level > 1 {
+					level = 1
+				}
+				quality := "poor"
+				if level >= 0.35 {
+					quality = "good"
+				} else if level >= 0.12 {
+					quality = "acceptable"
+				}
+				publishInputLevelChanged(bridgepkg.InputLevelSnapshot{Level: level, Quality: quality})
+			}
+		}()
+	})
 }

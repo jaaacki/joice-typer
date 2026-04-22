@@ -70,6 +70,7 @@ var (
 	webSettingsLogRefreshRunning bool
 	webSettingsDownloadMu        sync.Mutex
 	webSettingsActiveDownload    string
+	webSettingsInputLevelOnce    sync.Once
 )
 
 func loadWebSettingsPermissionsSnapshot() bridgepkg.PermissionsSnapshot {
@@ -358,6 +359,43 @@ func scheduleWebSettingsLogsUpdated() {
 		return
 	}
 	webSettingsLogUpdateTimer.Reset(150 * time.Millisecond)
+}
+
+func ensureWebSettingsInputLevelPublisher() {
+	webSettingsInputLevelOnce.Do(func() {
+		go func() {
+			ticker := time.NewTicker(150 * time.Millisecond)
+			defer ticker.Stop()
+			for range ticker.C {
+				if preferencesOpenLoad() == 0 {
+					continue
+				}
+				recorder := currentSettingsRecorder()
+				if recorder == nil {
+					continue
+				}
+				samples := recorder.Snapshot()
+				var sumSq float64
+				for _, s := range samples {
+					sumSq += float64(s) * float64(s)
+				}
+				level := 0.0
+				if len(samples) > 0 {
+					level = math.Sqrt(sumSq / float64(len(samples))) * 12
+				}
+				if level > 1 {
+					level = 1
+				}
+				quality := "poor"
+				if level >= 0.35 {
+					quality = "good"
+				} else if level >= 0.12 {
+					quality = "acceptable"
+				}
+				publishInputLevelChanged(bridgepkg.InputLevelSnapshot{Level: level, Quality: quality})
+			}
+		}()
+	})
 }
 
 func downloadWebSettingsModel(ctx context.Context, modelSize string) error {
@@ -1013,6 +1051,7 @@ func signalHotkeyRestart() {
 // main thread, then moves to a goroutine so [NSApp run] stays responsive.
 func OpenPreferences() {
 	ensureWebSettingsLogObserver()
+	ensureWebSettingsInputLevelPublisher()
 
 	if !preferencesOpenCompareAndSwap(0, 1) {
 		currentSettingsLogger().Info("preferences already open, reactivating existing window",

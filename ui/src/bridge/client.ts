@@ -21,6 +21,7 @@ export type ConfigSnapshot = {
   sampleRate: number;
   soundFeedback: boolean;
   inputDevice: string;
+  inputDeviceName: string;
   decodeMode: string;
   punctuationMode: string;
   vocabulary: string;
@@ -45,6 +46,7 @@ export type PermissionsSnapshot = {
 };
 
 export type DeviceSnapshot = {
+  id: string;
   name: string;
   isDefault: boolean;
 };
@@ -110,11 +112,9 @@ export type HotkeyCaptureSnapshot = {
   canConfirm: boolean;
 };
 
-export type LogTailSnapshot = {
-  text: string;
-  truncated: boolean;
-  byteSize: number;
-  updatedAt: string;
+export type InputLevelSnapshot = {
+  level: number;
+  quality: string;
 };
 
 type WebkitMessageHandler = {
@@ -416,6 +416,10 @@ export function subscribeDevicesChanged(handler: (devices: DeviceSnapshot[]) => 
 
 export function subscribeHotkeyCaptureChanged(handler: (snapshot: HotkeyCaptureSnapshot) => void): () => void {
   return subscribeEvent(EVENTS.hotkeyCaptureChanged, handler);
+}
+
+export function subscribeInputLevelChanged(handler: (snapshot: InputLevelSnapshot) => void): () => void {
+  return subscribeEvent(EVENTS.inputLevelChanged, handler);
 }
 
 export function subscribeLogsUpdated(handler: (snapshot: LogTailSnapshot) => void): () => void {

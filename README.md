@@ -57,6 +57,8 @@ Windows installer packaging:
 make package-windows
 ```
 
+Each build target now bumps the checked-in patch version in `VERSION` once per invocation before producing artifacts, so version numbers advance monotonically across macOS and Windows builds.
+
 Windows runtime build:
 
 ```bash

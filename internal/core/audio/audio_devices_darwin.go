@@ -42,7 +42,8 @@ func ListInputDeviceSnapshots() ([]bridgepkg.DeviceSnapshot, error) {
 		}
 		isDefault := defaultErr == nil && defaultInput != nil && defaultInput.Name == device.Name
 		snapshots = append(snapshots, bridgepkg.DeviceSnapshot{
-			Name:      device.Name,
+			ID:        device.Name,
+				Name:      device.Name,
 			IsDefault: isDefault,
 		})
 	}
