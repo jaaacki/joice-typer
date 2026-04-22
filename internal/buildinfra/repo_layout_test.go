@@ -701,6 +701,40 @@ func TestMacReleaseSourcesContainUpdaterPaths(t *testing.T) {
 		}
 	}
 
+	workflowData, err := os.ReadFile(filepath.Join(root, ".github", "workflows", "macos-release.yml"))
+	if err != nil {
+		t.Fatalf("read macos-release workflow: %v", err)
+	}
+	for _, required := range []string{
+		`name: macOS Release`,
+		`workflow_dispatch:`,
+		`push:`,
+		`tags:`,
+		`uses: actions/checkout@v4`,
+		`uses: actions/setup-go@v5`,
+		`uses: actions/setup-node@v4`,
+		`MACOS_DEVELOPER_ID_P12_BASE64`,
+		`MACOS_DEVELOPER_ID_P12_PASSWORD`,
+		`MACOS_CODESIGN_IDENTITY`,
+		`MACOS_NOTARY_APPLE_ID`,
+		`MACOS_NOTARY_TEAM_ID`,
+		`MACOS_NOTARY_PASSWORD`,
+		`MACOS_SPARKLE_PUBLIC_ED_KEY`,
+		`MACOS_SPARKLE_PRIVATE_KEY`,
+		`make mac-release-preflight`,
+		`make mac-notarize-preflight`,
+		`make mac-publish-preflight`,
+		`make mac-notarize-release`,
+		`make mac-release-artifacts`,
+		`make mac-publish-github-release`,
+		`gh release create`,
+		`actions/upload-artifact@v4`,
+	} {
+		if !strings.Contains(string(workflowData), required) {
+			t.Fatalf("expected macos-release workflow to contain %q", required)
+		}
+	}
+
 	updaterData, err := os.ReadFile(filepath.Join(root, "internal", "platform", "darwin", "updater.go"))
 	if err != nil {
 		t.Fatalf("read internal/platform/darwin/updater.go: %v", err)

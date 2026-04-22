@@ -126,6 +126,10 @@ make mac-publish-github-release RELEASE_TAG=v$(cat VERSION)
 
 This keeps normal development builds credential-free while generating Sparkle-ready release artifacts under `build/macos-release/` for GitHub Releases hosting.
 
+There is also a GitHub Actions path for this release flow:
+- `.github/workflows/macos-release.yml`
+- it expects the mac signing/notary/Sparkle secrets documented in `packaging/macos/README.md`
+
 On first launch, a setup wizard guides you through granting Accessibility permission, selecting a microphone, and downloading the speech model.
 
 ## Configuration

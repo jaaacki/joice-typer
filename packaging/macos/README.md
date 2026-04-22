@@ -34,3 +34,24 @@ Preflight targets are the quickest readiness check before a real release run:
 - `mac-release-preflight` validates codesign access and the Sparkle private key path
 - `mac-notarize-preflight` validates that `notarytool` can access the configured keychain profile
 - `mac-publish-preflight` validates `gh` authentication and that the tagged GitHub release is reachable
+
+GitHub Actions release automation now lives at:
+- `.github/workflows/macos-release.yml`
+
+Expected GitHub Actions secrets:
+- `MACOS_DEVELOPER_ID_P12_BASE64`
+- `MACOS_DEVELOPER_ID_P12_PASSWORD`
+- `MACOS_CODESIGN_IDENTITY`
+- `MACOS_NOTARY_APPLE_ID`
+- `MACOS_NOTARY_TEAM_ID`
+- `MACOS_NOTARY_PASSWORD`
+- `MACOS_SPARKLE_PUBLIC_ED_KEY`
+- `MACOS_SPARKLE_PRIVATE_KEY`
+
+The workflow:
+- imports the Developer ID certificate into a temporary keychain
+- creates the `notarytool` profile on the runner
+- writes `packaging/macos/release.env.local`
+- runs the release preflight checks
+- builds and notarizes the release archive
+- publishes the archive, dmg, and appcast to GitHub Releases
