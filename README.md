@@ -117,6 +117,7 @@ macOS self-update release flow:
 cp packaging/macos/release.env.example packaging/macos/release.env.local
 # fill in your real signing, notarytool, Sparkle, and GitHub values
 
+make mac-dev-update-artifacts
 make mac-release-preflight
 make mac-notarize-preflight
 make mac-publish-preflight RELEASE_TAG=v$(cat VERSION)
@@ -125,6 +126,7 @@ make mac-publish-github-release RELEASE_TAG=v$(cat VERSION)
 ```
 
 This keeps normal development builds credential-free while generating Sparkle-ready release artifacts under `build/macos-release/` for GitHub Releases hosting.
+`mac-dev-update-artifacts` is the local unsigned dry-run path for validating archive/appcast shape before you have Apple credentials ready.
 
 There is also a GitHub Actions path for this release flow:
 - `.github/workflows/macos-release.yml`

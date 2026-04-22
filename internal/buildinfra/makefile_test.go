@@ -314,6 +314,34 @@ func TestMacPreflightTargetsUseValidationScripts(t *testing.T) {
 	}
 }
 
+func TestMacDevUpdateArtifactsTargetProducesUnsignedLocalOutputs(t *testing.T) {
+	root := repoRoot(t)
+
+	cmd := makeCommand(root, "-n", "mac-dev-update-artifacts")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("make -n mac-dev-update-artifacts: %v\n%s", err, out)
+	}
+
+	text := string(out)
+	for _, required := range []string{
+		"scripts/release/macos_archive_dev.sh",
+		"scripts/release/macos_appcast.py",
+		"build/macos-dryrun-update/JoiceTyper-",
+		"-macos.zip",
+		"build/macos-dryrun-update/appcast.xml",
+		"https://example.invalid/joicetyper/appcast.xml",
+		"DEV_ONLY_UNSIGNED",
+	} {
+		if !strings.Contains(text, required) {
+			t.Fatalf("expected mac dry-run update flow to contain %q\noutput:\n%s", required, text)
+		}
+	}
+	if strings.Contains(text, "Version bumped:") {
+		t.Fatalf("expected mac dry-run update flow not to bump VERSION\noutput:\n%s", text)
+	}
+}
+
 func TestMakeWindowsBuildRunsFrontendBuild(t *testing.T) {
 	root := repoRoot(t)
 

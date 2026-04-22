@@ -11,6 +11,7 @@ MACOS_RELEASE_ENV_FILE ?= packaging/macos/release.env.local
 MACOS_RELEASE_ENV_SCRIPT := scripts/release/macos_release_env.sh
 MACOS_PREFLIGHT_SCRIPT := scripts/release/macos_preflight.sh
 MACOS_RELEASE_ARCHIVE_SCRIPT := scripts/release/macos_archive.sh
+MACOS_DEV_ARCHIVE_SCRIPT := scripts/release/macos_archive_dev.sh
 MACOS_APPCAST_SCRIPT := scripts/release/macos_appcast.py
 MACOS_PLIST_RENDER_SCRIPT := scripts/release/macos_render_info_plist.py
 MACOS_SPARKLE_STAGE_SCRIPT := scripts/release/macos_stage_sparkle.sh
@@ -25,6 +26,10 @@ MACOS_APPCAST_PATH := $(MACOS_RELEASE_DIR)/appcast.xml
 MACOS_RELEASE_DMG := $(MACOS_RELEASE_DIR)/JoiceTyper-$(VERSION).dmg
 MACOS_SPARKLE_STAGE_DIR := $(MACOS_RELEASE_DIR)/sparkle
 MACOS_RELEASE_DMG_STAGE := $(MACOS_RELEASE_DIR)/dmg-staging
+MACOS_DRYRUN_UPDATE_DIR := build/macos-dryrun-update
+MACOS_DRYRUN_ARCHIVE := $(MACOS_DRYRUN_UPDATE_DIR)/JoiceTyper-$(VERSION)-macos.zip
+MACOS_DRYRUN_METADATA := $(MACOS_DRYRUN_UPDATE_DIR)/JoiceTyper-$(VERSION)-macos.env
+MACOS_DRYRUN_APPCAST := $(MACOS_DRYRUN_UPDATE_DIR)/appcast.xml
 MACOS_SPARKLE_FEED_URL ?=
 MACOS_SPARKLE_PUBLIC_ED_KEY ?=
 
@@ -40,11 +45,15 @@ whisper:
 		-DCMAKE_BUILD_TYPE=Release
 	cd $(WHISPER_DIR) && cmake --build build --config Release -j$$(sysctl -n hw.ncpu)
 
-build: version-bump bridge-contract whisper frontend-build
+build: version-bump build-no-version-bump
+
+build-no-version-bump: bridge-contract whisper frontend-build
 	mkdir -p $(BUILD_DIR)
 	CGO_ENABLED=1 go build -ldflags "$(GO_LDFLAGS)" -o $(BIN_PATH) ./cmd/joicetyper
 
 app: build
+
+app-no-version-bump: build-no-version-bump
 	rm -rf $(APP_BUNDLE)
 	mkdir -p $(APP_BUNDLE)/Contents/MacOS
 	mkdir -p $(APP_BUNDLE)/Contents/Resources
@@ -59,6 +68,8 @@ app: build
 	codesign --force --sign - $(APP_BUNDLE)/Contents/Frameworks/libportaudio.2.dylib
 	codesign --force --sign - $(APP_BUNDLE)
 	@echo "Built $(APP_BUNDLE)"
+
+app: app-no-version-bump
 
 dmg: app
 	@echo "Creating $(DMG_NAME)..."
@@ -76,6 +87,11 @@ dmg: app
 mac-stage-sparkle:
 	@sh "$(MACOS_RELEASE_ENV_SCRIPT)" sparkle
 	@sh "$(MACOS_SPARKLE_STAGE_SCRIPT)" "$(MACOS_SPARKLE_STAGE_DIR)"
+
+mac-dev-update-artifacts: app-no-version-bump
+	mkdir -p "$(MACOS_DRYRUN_UPDATE_DIR)"
+	@sh "$(MACOS_DEV_ARCHIVE_SCRIPT)" "$(APP_BUNDLE)" "$(MACOS_DRYRUN_ARCHIVE)" "$(VERSION)" "$(MACOS_DRYRUN_METADATA)"
+	@python3 "$(MACOS_APPCAST_SCRIPT)" "$(MACOS_APPCAST_TEMPLATE)" "$(MACOS_DRYRUN_APPCAST)" "$(APP_NAME)" "https://example.invalid/joicetyper/appcast.xml" "https://example.invalid/joicetyper/$(notdir $(MACOS_DRYRUN_ARCHIVE))" "DEV_ONLY_UNSIGNED" "$(MACOS_DRYRUN_METADATA)"
 
 mac-release-preflight:
 	@sh "$(MACOS_PREFLIGHT_SCRIPT)" archive

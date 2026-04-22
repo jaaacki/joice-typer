@@ -9,6 +9,7 @@ Current roles:
 Normal development remains credential-free:
 - `make app`
 - `make dmg`
+- `make mac-dev-update-artifacts`
 
 Release/update targets are separate and fail closed when required inputs are missing:
 - `make mac-release-preflight`
@@ -34,6 +35,11 @@ Preflight targets are the quickest readiness check before a real release run:
 - `mac-release-preflight` validates codesign access and the Sparkle private key path
 - `mac-notarize-preflight` validates that `notarytool` can access the configured keychain profile
 - `mac-publish-preflight` validates `gh` authentication and that the tagged GitHub release is reachable
+
+Local dry-run updater validation:
+- `mac-dev-update-artifacts` produces an unsigned Sparkle-style archive and appcast under `build/macos-dryrun-update/`
+- this is for validating artifact shape and metadata only
+- it deliberately uses placeholder URLs and `EDDSA_SIGNATURE=UNSIGNED`
 
 GitHub Actions release automation now lives at:
 - `.github/workflows/macos-release.yml`

@@ -643,6 +643,9 @@ func TestMacReleaseSourcesContainUpdaterPaths(t *testing.T) {
 	makeSource := string(makeData)
 	for _, required := range []string{
 		"mac-stage-sparkle:",
+		"build-no-version-bump:",
+		"app-no-version-bump:",
+		"mac-dev-update-artifacts:",
 		"mac-release-preflight:",
 		"mac-notarize-preflight:",
 		"mac-publish-preflight:",
@@ -655,6 +658,8 @@ func TestMacReleaseSourcesContainUpdaterPaths(t *testing.T) {
 		"MACOS_RELEASE_DIR :=",
 		"MACOS_RELEASE_ENV_SCRIPT :=",
 		"MACOS_PREFLIGHT_SCRIPT :=",
+		"MACOS_DEV_ARCHIVE_SCRIPT :=",
+		"MACOS_DRYRUN_UPDATE_DIR :=",
 		"MACOS_PUBLISH_GITHUB_SCRIPT :=",
 		"MACOS_PREPARE_RELEASE_APP_SCRIPT :=",
 		"MACOS_NOTARIZE_SCRIPT :=",
@@ -698,6 +703,21 @@ func TestMacReleaseSourcesContainUpdaterPaths(t *testing.T) {
 	} {
 		if !strings.Contains(string(preflightScript), required) {
 			t.Fatalf("expected macos_preflight.sh to contain %q", required)
+		}
+	}
+
+	devArchiveScript, err := os.ReadFile(filepath.Join(root, "scripts", "release", "macos_archive_dev.sh"))
+	if err != nil {
+		t.Fatalf("read macos_archive_dev.sh: %v", err)
+	}
+	for _, required := range []string{
+		`usage: $0 <app-bundle> <archive-path> <version> <metadata-path>`,
+		`EDDSA_SIGNATURE=UNSIGNED`,
+		`ARCHIVE_SHA256=`,
+		`PUBLICATION_DATE=`,
+	} {
+		if !strings.Contains(string(devArchiveScript), required) {
+			t.Fatalf("expected macos_archive_dev.sh to contain %q", required)
 		}
 	}
 
