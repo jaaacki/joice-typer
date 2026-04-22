@@ -1,4 +1,4 @@
-import type { AppStateSnapshot, MachineInfoSnapshot } from "../../bridge";
+import type { AppStateSnapshot, MachineInfoSnapshot, UpdaterSnapshot } from "../../bridge";
 
 type AboutPaneProps = {
   activeModelName: string;
@@ -6,13 +6,25 @@ type AboutPaneProps = {
   machineInfo: MachineInfoSnapshot;
   runtimeStatus: string;
   saveAvailable: boolean;
+  updater: UpdaterSnapshot;
+  checkingForUpdates: boolean;
+  onCheckForUpdates: () => void;
 };
 
 function joinNonEmpty(values: string[]): string {
   return values.map((value) => value.trim()).filter((value) => value !== "").join(", ");
 }
 
-export default function AboutPane({ activeModelName, currentAppState, machineInfo, runtimeStatus, saveAvailable }: AboutPaneProps) {
+export default function AboutPane({
+  activeModelName,
+  currentAppState,
+  machineInfo,
+  runtimeStatus,
+  saveAvailable,
+  updater,
+  checkingForUpdates,
+  onCheckForUpdates,
+}: AboutPaneProps) {
   const graphics = joinNonEmpty(machineInfo.graphics ?? []);
   const inference = joinNonEmpty((machineInfo.inferenceBackends ?? []).map((backend) => backend.description || backend.name));
 
@@ -40,6 +52,12 @@ export default function AboutPane({ activeModelName, currentAppState, machineInf
             <dt>Bridge</dt>
             <dd>{saveAvailable ? "Connected" : "Unavailable"}</dd>
           </div>
+          {updater.enabled ? (
+            <div className="about-facts__row">
+              <dt>Updates</dt>
+              <dd>{updater.channel ? `${updater.channel} channel` : "Enabled"}</dd>
+            </div>
+          ) : null}
           {machineInfo.machineModel ? (
             <div className="about-facts__row">
               <dt>Machine</dt>
@@ -89,6 +107,14 @@ export default function AboutPane({ activeModelName, currentAppState, machineInf
             </div>
           ) : null}
         </dl>
+
+        {updater.enabled ? (
+          <div className="button-row button-row--wrap">
+            <button className="ui-button ui-button--secondary" type="button" onClick={onCheckForUpdates} disabled={checkingForUpdates || !updater.supportsManualCheck}>
+              {checkingForUpdates ? "Checking..." : "Check for updates"}
+            </button>
+          </div>
+        ) : null}
       </section>
     </div>
   );

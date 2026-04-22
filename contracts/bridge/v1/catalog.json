@@ -27,7 +27,9 @@
     { "goName": "OptionsGetMethod", "tsName": "optionsGet", "value": "options.get" },
     { "goName": "LogsGetMethod", "tsName": "logsGet", "value": "logs.get" },
     { "goName": "LogsCopyTailMethod", "tsName": "logsCopyTail", "value": "logs.copy_tail" },
-    { "goName": "LogsCopyAllMethod", "tsName": "logsCopyAll", "value": "logs.copy_all" }
+    { "goName": "LogsCopyAllMethod", "tsName": "logsCopyAll", "value": "logs.copy_all" },
+    { "goName": "UpdaterGetMethod", "tsName": "updaterGet", "value": "updater.get" },
+    { "goName": "UpdaterCheckMethod", "tsName": "updaterCheck", "value": "updater.check" }
   ],
   "events": [
     { "goName": "RuntimeStateChangedEvent", "tsName": "runtimeStateChanged", "value": "runtime.state_changed" },
@@ -62,6 +64,8 @@
     { "goName": "ErrorCodeHotkeyCaptureCancelFailed", "tsName": "hotkeyCaptureCancelFailed", "value": "hotkey.capture_cancel_failed" },
     { "goName": "ErrorCodeHotkeyCaptureConfirmFailed", "tsName": "hotkeyCaptureConfirmFailed", "value": "hotkey.capture_confirm_failed" },
     { "goName": "ErrorCodeLogsUnavailable", "tsName": "logsUnavailable", "value": "logs.unavailable" },
-    { "goName": "ErrorCodeRuntimeUnavailable", "tsName": "runtimeUnavailable", "value": "runtime.unavailable" }
+    { "goName": "ErrorCodeRuntimeUnavailable", "tsName": "runtimeUnavailable", "value": "runtime.unavailable" },
+    { "goName": "ErrorCodeUpdaterUnavailable", "tsName": "updaterUnavailable", "value": "updater.unavailable" },
+    { "goName": "ErrorCodeUpdaterCheckFailed", "tsName": "updaterCheckFailed", "value": "updater.check_failed" }
   ]
 }

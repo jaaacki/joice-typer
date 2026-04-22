@@ -32,6 +32,8 @@ export const METHODS = {
   logsGet: "logs.get",
   logsCopyTail: "logs.copy_tail",
   logsCopyAll: "logs.copy_all",
+  updaterGet: "updater.get",
+  updaterCheck: "updater.check",
 } as const;
 export type BridgeMethod = (typeof METHODS)[keyof typeof METHODS];
 
@@ -71,6 +73,8 @@ export const ERROR_CODES = {
   hotkeyCaptureConfirmFailed: "hotkey.capture_confirm_failed",
   logsUnavailable: "logs.unavailable",
   runtimeUnavailable: "runtime.unavailable",
+  updaterUnavailable: "updater.unavailable",
+  updaterCheckFailed: "updater.check_failed",
 } as const;
 export type BridgeErrorCode = (typeof ERROR_CODES)[keyof typeof ERROR_CODES];
 

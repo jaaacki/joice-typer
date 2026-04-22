@@ -58,6 +58,13 @@ type MachineInfoSnapshot struct {
 	WebViewRuntimeVersion string                   `json:"webViewRuntimeVersion"`
 }
 
+type UpdaterSnapshot struct {
+	Enabled             bool   `json:"enabled"`
+	SupportsManualCheck bool   `json:"supportsManualCheck"`
+	FeedURL             string `json:"feedURL"`
+	Channel             string `json:"channel"`
+}
+
 type BootstrapPayload struct {
 	Config      ConfigSnapshot          `json:"config"`
 	AppState    AppStateSnapshot        `json:"appState"`

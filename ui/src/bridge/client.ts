@@ -50,6 +50,13 @@ export type MachineInfoSnapshot = {
   webViewRuntimeVersion: string;
 };
 
+export type UpdaterSnapshot = {
+  enabled: boolean;
+  supportsManualCheck: boolean;
+  feedURL: string;
+  channel: string;
+};
+
 export type BootstrapPayload = {
   config: ConfigSnapshot;
   appState: AppStateSnapshot;
@@ -351,6 +358,10 @@ export function fetchRuntime(): Promise<AppStateSnapshot> {
   return query<AppStateSnapshot, Record<string, never>>(METHODS.runtimeGet, {});
 }
 
+export function fetchUpdater(): Promise<UpdaterSnapshot> {
+  return query<UpdaterSnapshot, Record<string, never>>(METHODS.updaterGet, {});
+}
+
 export function fetchLogs(): Promise<LogTailSnapshot> {
   return query<LogTailSnapshot, Record<string, never>>(METHODS.logsGet, {});
 }
@@ -407,6 +418,10 @@ export function setAudioInputMonitor(inputDevice: string): Promise<void> {
 
 export function stopAudioInputMonitor(): Promise<void> {
   return query<{ stopped: boolean }, Record<string, never>>(METHODS.audioInputMonitorStop, {}).then(() => undefined);
+}
+
+export function checkForUpdates(): Promise<void> {
+  return query<{ started: boolean }, Record<string, never>>(METHODS.updaterCheck, {}).then(() => undefined);
 }
 
 export function subscribeRuntimeStateChanged(handler: (appState: AppStateSnapshot) => void): () => void {

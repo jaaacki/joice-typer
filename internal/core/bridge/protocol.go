@@ -33,6 +33,8 @@ const (
 	LogsGetMethod                       = generated.LogsGetMethod
 	LogsCopyTailMethod                  = generated.LogsCopyTailMethod
 	LogsCopyAllMethod                   = generated.LogsCopyAllMethod
+	UpdaterGetMethod                    = generated.UpdaterGetMethod
+	UpdaterCheckMethod                  = generated.UpdaterCheckMethod
 	RuntimeStateChangedEvent            = generated.RuntimeStateChangedEvent
 	PermissionsChangedEvent             = generated.PermissionsChangedEvent
 	ModelChangedEvent                   = generated.ModelChangedEvent
@@ -64,6 +66,8 @@ const (
 	ErrorCodeHotkeyCaptureConfirmFailed = generated.ErrorCodeHotkeyCaptureConfirmFailed
 	ErrorCodeLogsUnavailable            = generated.ErrorCodeLogsUnavailable
 	ErrorCodeRuntimeUnavailable         = generated.ErrorCodeRuntimeUnavailable
+	ErrorCodeUpdaterUnavailable         = generated.ErrorCodeUpdaterUnavailable
+	ErrorCodeUpdaterCheckFailed         = generated.ErrorCodeUpdaterCheckFailed
 )
 
 type ErrorObject struct {

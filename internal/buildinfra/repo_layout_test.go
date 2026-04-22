@@ -315,6 +315,67 @@ func TestSettingsScreenSource_TracksModelDownloadCompletionAndFailure(t *testing
 	}
 }
 
+func TestSettingsScreenSource_UsesUpdaterBridge(t *testing.T) {
+	root := repoRoot(t)
+
+	aboutData, err := os.ReadFile(filepath.Join(root, "ui", "src", "settings", "panes", "AboutPane.tsx"))
+	if err != nil {
+		t.Fatalf("read AboutPane.tsx: %v", err)
+	}
+	aboutSource := string(aboutData)
+	for _, required := range []string{
+		`updater: UpdaterSnapshot;`,
+		`checkingForUpdates: boolean;`,
+		`onCheckForUpdates: () => void;`,
+		`Check for updates`,
+		`updater.enabled ? (`,
+	} {
+		if !strings.Contains(aboutSource, required) {
+			t.Fatalf("expected AboutPane.tsx to contain %q", required)
+		}
+	}
+
+	settingsData, err := os.ReadFile(filepath.Join(root, "ui", "src", "settings", "SettingsScreen.tsx"))
+	if err != nil {
+		t.Fatalf("read SettingsScreen.tsx: %v", err)
+	}
+	settingsSource := string(settingsData)
+	for _, required := range []string{
+		`checkForUpdates,`,
+		`fetchUpdater,`,
+		`type UpdaterSnapshot,`,
+		`const [updater, setUpdater] = useState<UpdaterSnapshot>({`,
+		`const [checkingForUpdates, setCheckingForUpdates] = useState(false);`,
+		`void fetchUpdater()`,
+		`async function handleCheckForUpdates()`,
+		`await checkForUpdates();`,
+		`updater={updater}`,
+		`checkingForUpdates={checkingForUpdates}`,
+		`onCheckForUpdates={() => void handleCheckForUpdates()}`,
+	} {
+		if !strings.Contains(settingsSource, required) {
+			t.Fatalf("expected SettingsScreen.tsx to contain %q", required)
+		}
+	}
+
+	bridgeData, err := os.ReadFile(filepath.Join(root, "ui", "src", "bridge", "client.ts"))
+	if err != nil {
+		t.Fatalf("read bridge/client.ts: %v", err)
+	}
+	bridgeSource := string(bridgeData)
+	for _, required := range []string{
+		`export type UpdaterSnapshot = {`,
+		`METHODS.updaterGet`,
+		`METHODS.updaterCheck`,
+		`fetchUpdater`,
+		`checkForUpdates`,
+	} {
+		if !strings.Contains(bridgeSource, required) {
+			t.Fatalf("expected bridge/client.ts to contain %q", required)
+		}
+	}
+}
+
 func TestPlatformSettingsSources_UseNativeClipboardAndAsyncModelDownload(t *testing.T) {
 	root := repoRoot(t)
 	checks := []struct {
@@ -629,6 +690,9 @@ func TestMacReleaseSourcesContainUpdaterPaths(t *testing.T) {
 		"func currentUpdaterConfig() updaterConfig",
 		"func updaterEnabled() bool",
 		"func StartUpdater()",
+		"func currentUpdaterSnapshot() bridgepkg.UpdaterSnapshot",
+		"func CheckForUpdates() error",
+		"checkSparkleUpdaterNativeFn",
 		"resolveUpdaterInfoPlistPath",
 		"parseUpdaterConfigFromInfoPlist",
 		"sparkleFeedURL",

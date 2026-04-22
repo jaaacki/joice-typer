@@ -29,6 +29,8 @@ const (
 	LogsGetMethod                       = "logs.get"
 	LogsCopyTailMethod                  = "logs.copy_tail"
 	LogsCopyAllMethod                   = "logs.copy_all"
+	UpdaterGetMethod                    = "updater.get"
+	UpdaterCheckMethod                  = "updater.check"
 	RuntimeStateChangedEvent            = "runtime.state_changed"
 	PermissionsChangedEvent             = "permissions.changed"
 	DevicesChangedEvent                 = "devices.changed"
@@ -60,4 +62,6 @@ const (
 	ErrorCodeHotkeyCaptureConfirmFailed = "hotkey.capture_confirm_failed"
 	ErrorCodeLogsUnavailable            = "logs.unavailable"
 	ErrorCodeRuntimeUnavailable         = "runtime.unavailable"
+	ErrorCodeUpdaterUnavailable         = "updater.unavailable"
+	ErrorCodeUpdaterCheckFailed         = "updater.check_failed"
 )

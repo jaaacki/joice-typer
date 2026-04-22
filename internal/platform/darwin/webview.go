@@ -256,6 +256,12 @@ func buildSettingsBridgeService(_ configpkg.Config) *bridgepkg.Service {
 		WriteClipboardText: func(_ context.Context, text string) error {
 			return copyTextToClipboard(text)
 		},
+		LoadUpdater: func(context.Context) (bridgepkg.UpdaterSnapshot, error) {
+			return currentUpdaterSnapshot(), nil
+		},
+		CheckForUpdates: func(context.Context) error {
+			return CheckForUpdates()
+		},
 		StartHotkeyCapture: func(context.Context) (bridgepkg.HotkeyCaptureSnapshot, error) {
 			return startWebSettingsHotkeyCapture(), nil
 		},

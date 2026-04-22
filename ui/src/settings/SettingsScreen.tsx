@@ -9,10 +9,12 @@ import {
   type BootstrapPayload,
   cancelHotkeyCapture,
   canPostNativeMessage,
+  checkForUpdates,
   confirmHotkeyCapture,
   copyFullLog,
   deleteModel,
   downloadModel,
+  fetchUpdater,
   fetchPermissions,
   fetchOptions,
   fetchLogs,
@@ -45,6 +47,7 @@ import {
   type ModelSnapshot,
   type PermissionsSnapshot,
   type SettingsOptionsSnapshot,
+  type UpdaterSnapshot,
 } from "../bridge";
 import AboutPane from "./panes/AboutPane";
 import PermissionsPane from "./panes/PermissionsPane";
@@ -176,8 +179,15 @@ export function SettingsScreen({ bootstrap }: SettingsScreenProps) {
   const [model, setModel] = useState<ModelSnapshot>(bootstrap.model);
   const [machineInfo] = useState<MachineInfoSnapshot>(bootstrap.machineInfo);
   const [options, setOptions] = useState<SettingsOptionsSnapshot>(bootstrap.options);
+  const [updater, setUpdater] = useState<UpdaterSnapshot>({
+    enabled: false,
+    supportsManualCheck: false,
+    feedURL: "",
+    channel: "",
+  });
   const [status, setStatus] = useState<string>("");
   const [saving, setSaving] = useState(false);
+  const [checkingForUpdates, setCheckingForUpdates] = useState(false);
   const [confirmDeleteModelSize, setConfirmDeleteModelSize] = useState<string | null>(null);
   const [hotkeyCapture, setHotkeyCapture] = useState<HotkeyCaptureSnapshot | null>(null);
   const [downloadProgress, setDownloadProgress] = useState<ModelDownloadProgressSnapshot | null>(null);
@@ -455,6 +465,32 @@ export function SettingsScreen({ bootstrap }: SettingsScreenProps) {
     };
   }, []);
 
+  useEffect(() => {
+    if (!saveAvailable) {
+      return;
+    }
+    let cancelled = false;
+    void fetchUpdater()
+      .then((snapshot) => {
+        if (!cancelled) {
+          setUpdater(snapshot);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setUpdater({
+            enabled: false,
+            supportsManualCheck: false,
+            feedURL: "",
+            channel: "",
+          });
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [saveAvailable]);
+
   async function handleSave() {
     setSaving(true);
     try {
@@ -545,6 +581,19 @@ export function SettingsScreen({ bootstrap }: SettingsScreenProps) {
       setStatus("Mic test stopped.");
     } catch (error) {
       setStatus(describeBridgeError(error, "Failed to stop mic test"));
+    }
+  }
+
+  async function handleCheckForUpdates() {
+    setCheckingForUpdates(true);
+    try {
+      setStatus("Checking for updates...");
+      await checkForUpdates();
+      setStatus("Update check started.");
+    } catch (error) {
+      setStatus(describeBridgeError(error, "Failed to check for updates"));
+    } finally {
+      setCheckingForUpdates(false);
     }
   }
 
@@ -786,6 +835,9 @@ export function SettingsScreen({ bootstrap }: SettingsScreenProps) {
             machineInfo={machineInfo}
             runtimeStatus={runtimeStatus}
             saveAvailable={saveAvailable}
+            updater={updater}
+            checkingForUpdates={checkingForUpdates}
+            onCheckForUpdates={() => void handleCheckForUpdates()}
           />
         );
     }

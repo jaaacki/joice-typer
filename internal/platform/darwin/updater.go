@@ -17,13 +17,17 @@ import (
 	"path/filepath"
 	"strings"
 	"unsafe"
+
+	bridgepkg "voicetype/internal/core/bridge"
 )
 
 var (
-	sparkleFeedURL          string
-	sparklePublicEDKey      string
-	sparkleAutomaticChecks  bool
+	sparkleFeedURL              string
+	sparklePublicEDKey          string
+	sparkleAutomaticChecks      bool
 	resolveUpdaterInfoPlistPath = defaultUpdaterInfoPlistPath
+	startSparkleUpdaterNativeFn = startSparkleUpdaterNative
+	checkSparkleUpdaterNativeFn = checkSparkleUpdaterNative
 )
 
 type updaterConfig struct {
@@ -60,20 +64,71 @@ func updaterEnabled() bool {
 	return currentUpdaterConfig().Enabled
 }
 
+func currentUpdaterSnapshot() bridgepkg.UpdaterSnapshot {
+	cfg := currentUpdaterConfig()
+	return bridgepkg.UpdaterSnapshot{
+		Enabled:             cfg.Enabled,
+		SupportsManualCheck: cfg.Enabled,
+		FeedURL:             cfg.FeedURL,
+		Channel:             "stable",
+	}
+}
+
 func StartUpdater() {
 	cfg := currentUpdaterConfig()
 	if !cfg.Enabled {
 		return
 	}
-	if err := startSparkleUpdaterNative(); err != nil {
+	if err := startSparkleUpdaterNativeFn(); err != nil {
 		currentSettingsLogger().Warn("failed to start sparkle updater", "operation", "StartUpdater", "error", err)
 		return
 	}
 	currentSettingsLogger().Info("sparkle updater ready", "operation", "StartUpdater", "feed_url", cfg.FeedURL)
 }
 
+func CheckForUpdates() error {
+	cfg := currentUpdaterConfig()
+	if !cfg.Enabled {
+		return bridgepkg.NewContractError(
+			bridgepkg.ErrorCodeUpdaterUnavailable,
+			"Self-update is unavailable for this build",
+			false,
+			nil,
+		)
+	}
+	if err := startSparkleUpdaterNativeFn(); err != nil {
+		return bridgepkg.WrapContractError(
+			bridgepkg.ErrorCodeUpdaterCheckFailed,
+			"Failed to start the Sparkle updater",
+			true,
+			nil,
+			err,
+		)
+	}
+	if err := checkSparkleUpdaterNativeFn(); err != nil {
+		return bridgepkg.WrapContractError(
+			bridgepkg.ErrorCodeUpdaterCheckFailed,
+			"Failed to start a Sparkle update check",
+			true,
+			nil,
+			err,
+		)
+	}
+	currentSettingsLogger().Info("sparkle updater manual check started", "operation", "CheckForUpdates", "feed_url", cfg.FeedURL)
+	return nil
+}
+
 func startSparkleUpdaterNative() error {
 	errText := C.startSparkleUpdater()
+	if errText == nil {
+		return nil
+	}
+	defer C.free(unsafe.Pointer(errText))
+	return fmt.Errorf("%s", C.GoString(errText))
+}
+
+func checkSparkleUpdaterNative() error {
+	errText := C.checkForSparkleUpdates()
 	if errText == nil {
 		return nil
 	}

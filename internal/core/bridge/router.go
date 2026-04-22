@@ -239,6 +239,23 @@ func (r *Router) HandleRequest(ctx context.Context, request RequestEnvelope) Res
 			return NewErrorResponseFromError(request.ID, err, ErrorCodeLogsUnavailable, "failed to load full logs", false, nil)
 		}
 		return NewSuccessResponse(request.ID, text)
+	case UpdaterGetMethod:
+		if response := ensureEmptyParams(request); response != nil {
+			return *response
+		}
+		updater, err := r.service.Updater(ctx)
+		if err != nil {
+			return NewErrorResponseFromError(request.ID, err, ErrorCodeUpdaterUnavailable, "failed to load updater state", false, nil)
+		}
+		return NewSuccessResponse(request.ID, updater)
+	case UpdaterCheckMethod:
+		if response := ensureEmptyParams(request); response != nil {
+			return *response
+		}
+		if err := r.service.CheckForUpdates(ctx); err != nil {
+			return NewErrorResponseFromError(request.ID, err, ErrorCodeUpdaterCheckFailed, "failed to check for updates", true, nil)
+		}
+		return NewSuccessResponse(request.ID, map[string]any{"started": true})
 	case OptionsGetMethod:
 		if response := ensureEmptyParams(request); response != nil {
 			return *response

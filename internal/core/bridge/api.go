@@ -29,6 +29,8 @@ type Dependencies struct {
 	LoadLogsTail           func(context.Context) (LogTailSnapshot, error)
 	LoadLogsFull           func(context.Context) (string, error)
 	WriteClipboardText     func(context.Context, string) error
+	LoadUpdater            func(context.Context) (UpdaterSnapshot, error)
+	CheckForUpdates        func(context.Context) error
 }
 
 type Service struct {
@@ -223,6 +225,20 @@ func (s *Service) LogsCopyTail(ctx context.Context) (string, error) {
 		}
 	}
 	return snapshot.Text, nil
+}
+
+func (s *Service) Updater(ctx context.Context) (UpdaterSnapshot, error) {
+	if s.deps.LoadUpdater == nil {
+		return UpdaterSnapshot{}, missingDependencyError(UpdaterGetMethod, "LoadUpdater")
+	}
+	return s.deps.LoadUpdater(ctx)
+}
+
+func (s *Service) CheckForUpdates(ctx context.Context) error {
+	if s.deps.CheckForUpdates == nil {
+		return missingDependencyError(UpdaterCheckMethod, "CheckForUpdates")
+	}
+	return s.deps.CheckForUpdates(ctx)
 }
 
 func (s *Service) Bootstrap(ctx context.Context) (BootstrapPayload, error) {

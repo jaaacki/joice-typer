@@ -291,6 +291,17 @@ func TestRouterHandleRequest_QueryMethods(t *testing.T) {
 		LoadLogsFull: func(context.Context) (string, error) {
 			return "line 001\nline 002\nline 003\n", nil
 		},
+		LoadUpdater: func(context.Context) (UpdaterSnapshot, error) {
+			return UpdaterSnapshot{
+				Enabled:             true,
+				SupportsManualCheck: true,
+				FeedURL:             "https://example.com/appcast.xml",
+				Channel:             "stable",
+			}, nil
+		},
+		CheckForUpdates: func(context.Context) error {
+			return nil
+		},
 	})
 	router := NewRouter(service)
 
@@ -305,6 +316,8 @@ func TestRouterHandleRequest_QueryMethods(t *testing.T) {
 		{method: LogsGetMethod, id: "req-logs-get"},
 		{method: LogsCopyTailMethod, id: "req-logs-copy-tail"},
 		{method: LogsCopyAllMethod, id: "req-logs-copy"},
+		{method: UpdaterGetMethod, id: "req-updater-get"},
+		{method: UpdaterCheckMethod, id: "req-updater-check"},
 	}
 
 	for _, tc := range tests {
@@ -355,6 +368,25 @@ func TestRouterHandleRequest_QueryMethods(t *testing.T) {
 				}
 				if payload != "line 499\nline 500\n" {
 					t.Fatalf("payload = %q, want tail log text", payload)
+				}
+			case UpdaterGetMethod:
+				payload, ok := response.Result.(UpdaterSnapshot)
+				if !ok {
+					t.Fatalf("Result = %#v, want UpdaterSnapshot", response.Result)
+				}
+				if !payload.Enabled || !payload.SupportsManualCheck {
+					t.Fatalf("payload = %#v, want enabled manual-check updater", payload)
+				}
+				if payload.FeedURL != "https://example.com/appcast.xml" {
+					t.Fatalf("payload.FeedURL = %q, want appcast URL", payload.FeedURL)
+				}
+			case UpdaterCheckMethod:
+				payload, ok := response.Result.(map[string]any)
+				if !ok {
+					t.Fatalf("Result = %#v, want result map", response.Result)
+				}
+				if payload["started"] != true {
+					t.Fatalf("payload[started] = %#v, want true", payload["started"])
 				}
 			}
 		})
@@ -665,5 +697,14 @@ func TestBridgeContractIncludesLogsMethods(t *testing.T) {
 	}
 	if LogsCopyAllMethod != "logs.copy_all" {
 		t.Fatalf("LogsCopyAllMethod = %q, want logs.copy_all", LogsCopyAllMethod)
+	}
+}
+
+func TestBridgeContractIncludesUpdaterMethods(t *testing.T) {
+	if UpdaterGetMethod != "updater.get" {
+		t.Fatalf("UpdaterGetMethod = %q, want updater.get", UpdaterGetMethod)
+	}
+	if UpdaterCheckMethod != "updater.check" {
+		t.Fatalf("UpdaterCheckMethod = %q, want updater.check", UpdaterCheckMethod)
 	}
 }

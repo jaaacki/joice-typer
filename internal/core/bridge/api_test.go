@@ -134,6 +134,19 @@ func TestBridge_ServiceMethodsFailWhenDependenciesMissing(t *testing.T) {
 				return err
 			},
 		},
+		{
+			name: "Updater",
+			run: func() error {
+				_, err := svc.Updater(context.Background())
+				return err
+			},
+		},
+		{
+			name: "CheckForUpdates",
+			run: func() error {
+				return svc.CheckForUpdates(context.Background())
+			},
+		},
 	}
 
 	for _, tc := range testCases {
@@ -341,5 +354,52 @@ func TestBridge_LogsCopyTailCopiesVisibleTextWhenNativeClipboardIsAvailable(t *t
 	}
 	if copied != text {
 		t.Fatalf("copied = %q, want %q", copied, text)
+	}
+}
+
+func TestBridge_UpdaterReturnsSnapshot(t *testing.T) {
+	svc := NewService(&Dependencies{
+		LoadUpdater: func(context.Context) (UpdaterSnapshot, error) {
+			return UpdaterSnapshot{
+				Enabled:             true,
+				SupportsManualCheck: true,
+				FeedURL:             "https://example.com/appcast.xml",
+				Channel:             "stable",
+			}, nil
+		},
+	})
+
+	snapshot, err := svc.Updater(context.Background())
+	if err != nil {
+		t.Fatalf("Updater returned error: %v", err)
+	}
+	if !snapshot.Enabled {
+		t.Fatal("expected updater to be enabled")
+	}
+	if !snapshot.SupportsManualCheck {
+		t.Fatal("expected updater manual check support to be true")
+	}
+	if snapshot.FeedURL != "https://example.com/appcast.xml" {
+		t.Fatalf("FeedURL = %q, want appcast URL", snapshot.FeedURL)
+	}
+	if snapshot.Channel != "stable" {
+		t.Fatalf("Channel = %q, want stable", snapshot.Channel)
+	}
+}
+
+func TestBridge_CheckForUpdatesUsesDependency(t *testing.T) {
+	called := false
+	svc := NewService(&Dependencies{
+		CheckForUpdates: func(context.Context) error {
+			called = true
+			return nil
+		},
+	})
+
+	if err := svc.CheckForUpdates(context.Background()); err != nil {
+		t.Fatalf("CheckForUpdates returned error: %v", err)
+	}
+	if !called {
+		t.Fatal("expected CheckForUpdates dependency to be called")
 	}
 }

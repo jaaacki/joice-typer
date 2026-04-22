@@ -2,6 +2,7 @@ export {
   BridgeRequestError,
   canPostNativeMessage,
   cancelHotkeyCapture,
+  checkForUpdates,
   confirmHotkeyCapture,
   deleteModel,
   downloadModel,
@@ -12,6 +13,7 @@ export {
   fetchOptions,
   fetchPermissions,
   fetchRuntime,
+  fetchUpdater,
   copyVisibleLogTail,
   copyFullLog,
   openPermissionSettings,
@@ -51,6 +53,7 @@ export type {
   ModelSnapshot,
   PermissionsSnapshot,
   SettingsOptionsSnapshot,
+  UpdaterSnapshot,
 } from "./client";
 export {
   BRIDGE_EVENT_NAME,

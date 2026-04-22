@@ -510,6 +510,12 @@ func buildSettingsBridgeService(_ configpkg.Config) *bridgepkg.Service {
 		WriteClipboardText: func(_ context.Context, text string) error {
 			return setWindowsClipboardText(text)
 		},
+		LoadUpdater: func(context.Context) (bridgepkg.UpdaterSnapshot, error) {
+			return loadWebSettingsUpdaterSnapshot(), nil
+		},
+		CheckForUpdates: func(context.Context) error {
+			return checkWebSettingsForUpdates()
+		},
 		StartHotkeyCapture: func(context.Context) (bridgepkg.HotkeyCaptureSnapshot, error) {
 			return webSettingsStartHotkeyCapture()
 		},
