@@ -39,16 +39,16 @@ func TestMakeBuildTargetsBumpVersion(t *testing.T) {
 	if err != nil {
 		t.Fatalf("make -n build: %v\n%s", err, macOut)
 	}
-	if !strings.Contains(string(macOut), "version-bump") {
-		t.Fatalf("expected macOS build target to invoke version-bump\noutput:\n%s", macOut)
+	if !strings.Contains(string(macOut), `printf '%s\n' "$next" > "VERSION"`) {
+		t.Fatalf("expected macOS build target to bump VERSION before building\noutput:\n%s", macOut)
 	}
 
 	winOut, err := makeCommand(root, "-n", "build-windows-runtime-amd64").CombinedOutput()
 	if err != nil {
 		t.Fatalf("make -n build-windows-runtime-amd64: %v\n%s", err, winOut)
 	}
-	if !strings.Contains(string(winOut), "version-bump") {
-		t.Fatalf("expected Windows runtime build target to invoke version-bump\noutput:\n%s", winOut)
+	if !strings.Contains(string(winOut), `printf '%s\n' "$next" > "VERSION"`) {
+		t.Fatalf("expected Windows runtime build target to bump VERSION before building\noutput:\n%s", winOut)
 	}
 }
 
@@ -141,6 +141,30 @@ func TestMakeAppUsesAssetPaths(t *testing.T) {
 	}
 }
 
+func TestMakefileHasMacReleaseTargets(t *testing.T) {
+	root := repoRoot(t)
+
+	cmd := makeCommand(root, "-n", "mac-release-archive", "mac-appcast")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("make -n mac-release-archive mac-appcast: %v\n%s", err, out)
+	}
+
+	text := string(out)
+	for _, required := range []string{
+		`sh "scripts/release/macos_prepare_release_app.sh"`,
+		`sh "scripts/release/macos_release_env.sh" archive`,
+		"scripts/release/macos_prepare_release_app.sh",
+		"scripts/release/macos_archive.sh",
+		`sh "scripts/release/macos_release_env.sh" appcast`,
+		"scripts/release/macos_appcast.py",
+	} {
+		if !strings.Contains(text, required) {
+			t.Fatalf("expected mac release flow to contain %q\noutput:\n%s", required, text)
+		}
+	}
+}
+
 func TestMakeBuildRunsFrontendBuild(t *testing.T) {
 	root := repoRoot(t)
 
@@ -153,6 +177,92 @@ func TestMakeBuildRunsFrontendBuild(t *testing.T) {
 	text := string(out)
 	if !strings.Contains(text, "cd ui && npm run build") {
 		t.Fatalf("expected build output to include frontend build step\noutput:\n%s", text)
+	}
+}
+
+func TestMacReleaseTargetsFailClosedWithoutCredentials(t *testing.T) {
+	root := repoRoot(t)
+
+	cmd := makeCommand(root, "-n", "mac-release-archive")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("make -n mac-release-archive: %v\n%s", err, out)
+	}
+
+	text := string(out)
+	if !strings.Contains(text, `sh "scripts/release/macos_release_env.sh" archive`) {
+		t.Fatalf("expected mac release archive to validate release credentials explicitly\noutput:\n%s", text)
+	}
+	if strings.Contains(text, "scripts/release/macos_release_env.sh dev") {
+		t.Fatalf("did not expect dev app path to require release credential validation\noutput:\n%s", text)
+	}
+}
+
+func TestMacReleaseArchiveTargetUsesVersionedArtifactNames(t *testing.T) {
+	root := repoRoot(t)
+
+	cmd := makeCommand(root, "-n", "mac-release-archive")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("make -n mac-release-archive: %v\n%s", err, out)
+	}
+
+	text := string(out)
+	for _, required := range []string{
+		"build/macos-release/JoiceTyper-",
+		"-macos.zip",
+		"build/macos-release/JoiceTyper.app",
+		"macos_prepare_release_app.sh",
+		"macos_archive.sh",
+	} {
+		if !strings.Contains(text, required) {
+			t.Fatalf("expected mac release archive flow to contain %q\noutput:\n%s", required, text)
+		}
+	}
+}
+
+func TestMacReleasePathStagesSparkleSeparatelyFromDevBuilds(t *testing.T) {
+	root := repoRoot(t)
+
+	releaseOut, err := makeCommand(root, "-n", "mac-stage-sparkle").CombinedOutput()
+	if err != nil {
+		t.Fatalf("make -n mac-stage-sparkle: %v\n%s", err, releaseOut)
+	}
+	if !strings.Contains(string(releaseOut), "scripts/release/macos_stage_sparkle.sh") {
+		t.Fatalf("expected mac release path to stage Sparkle explicitly\noutput:\n%s", releaseOut)
+	}
+
+	devOut, err := makeCommand(root, "-n", "app").CombinedOutput()
+	if err != nil {
+		t.Fatalf("make -n app: %v\n%s", err, devOut)
+	}
+	if strings.Contains(string(devOut), "scripts/release/macos_stage_sparkle.sh") {
+		t.Fatalf("expected normal dev app path not to stage Sparkle\noutput:\n%s", devOut)
+	}
+}
+
+func TestMacReleaseTargetsProduceGitHubReleaseFriendlyOutputs(t *testing.T) {
+	root := repoRoot(t)
+
+	cmd := makeCommand(root, "-n", "mac-release-artifacts", "mac-notarize-release")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("make -n mac-release-artifacts mac-notarize-release: %v\n%s", err, out)
+	}
+
+	text := string(out)
+	for _, required := range []string{
+		"build/macos-release/JoiceTyper.app",
+		"build/macos-release/JoiceTyper-",
+		"-macos.zip",
+		"appcast.xml",
+		"build/macos-release/JoiceTyper-",
+		".dmg",
+		"macos_notarize.sh",
+	} {
+		if !strings.Contains(text, required) {
+			t.Fatalf("expected mac release artifacts flow to contain %q\noutput:\n%s", required, text)
+		}
 	}
 }
 

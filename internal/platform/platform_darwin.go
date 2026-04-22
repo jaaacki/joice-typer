@@ -36,6 +36,10 @@ func InitStatusBar() {
 	darwinpkg.InitStatusBar()
 }
 
+func StartUpdater() {
+	darwinpkg.StartUpdater()
+}
+
 func UpdateStatusBar(state apppkg.AppState) {
 	darwinpkg.UpdateStatusBar(state)
 }

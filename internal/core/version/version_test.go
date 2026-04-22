@@ -93,6 +93,29 @@ func TestRenderInfoPlist(t *testing.T) {
 	}
 }
 
+func TestResolveVersionTemplateSupportsUpdaterPlaceholders(t *testing.T) {
+	rendered, err := RenderInfoPlist(
+		"<plist>{{VERSION}}|{{SPARKLE_FEED_URL}}|{{SPARKLE_PUBLIC_ED_KEY}}|{{SPARKLE_AUTOCHECK}}</plist>",
+		"1.0.0",
+	)
+	if err != nil {
+		t.Fatalf("RenderInfoPlist: %v", err)
+	}
+
+	if !strings.Contains(rendered, "1.0.0") {
+		t.Fatalf("expected rendered plist to contain version, got %q", rendered)
+	}
+	for _, placeholder := range []string{
+		"{{SPARKLE_FEED_URL}}",
+		"{{SPARKLE_PUBLIC_ED_KEY}}",
+		"{{SPARKLE_AUTOCHECK}}",
+	} {
+		if !strings.Contains(rendered, placeholder) {
+			t.Fatalf("expected RenderInfoPlist to preserve updater placeholder %q, got %q", placeholder, rendered)
+		}
+	}
+}
+
 func TestFormatVersion(t *testing.T) {
 	if got := FormatVersion("1.0.0"); got != "JoiceTyper 1.0.0" {
 		t.Fatalf("unexpected formatted version: %q", got)

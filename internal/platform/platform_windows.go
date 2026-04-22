@@ -37,6 +37,8 @@ func InitStatusBar() {
 	windowspkg.InitStatusBar()
 }
 
+func StartUpdater() {}
+
 func UpdateStatusBar(state apppkg.AppState) {
 	windowspkg.UpdateStatusBar(state)
 }

@@ -192,6 +192,7 @@ func runAppMode() {
 	// This is safe — the Accessibility dialog it may trigger is a
 	// system-level (WindowServer) dialog, not an AppKit dialog.
 	platformpkg.InitStatusBar()
+	platformpkg.StartUpdater()
 	platformpkg.InitPowerObserver()
 	platformpkg.UpdateStatusBar(apppkg.StateLoading)
 

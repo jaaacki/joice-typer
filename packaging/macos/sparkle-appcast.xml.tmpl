@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" xmlns:dc="http://purl.org/dc/elements/1.1/">
+  <channel>
+    <title>{{APP_NAME}} Updates</title>
+    <link>{{APPCAST_URL}}</link>
+    <description>Latest macOS updates for {{APP_NAME}}</description>
+    <language>en</language>
+    <item>
+      <title>Version {{VERSION}}</title>
+      <pubDate>{{PUBLICATION_DATE}}</pubDate>
+      <sparkle:version>{{VERSION}}</sparkle:version>
+      <sparkle:shortVersionString>{{VERSION}}</sparkle:shortVersionString>
+      <enclosure
+        url="{{DOWNLOAD_URL}}"
+        sparkle:edSignature="{{EDDSA_SIGNATURE}}"
+        length="{{DOWNLOAD_LENGTH}}"
+        type="application/octet-stream" />
+    </item>
+  </channel>
+</rss>

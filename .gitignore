@@ -32,6 +32,8 @@ JoiceTyper.app/
 *.dmg
 *.zip
 dmg-staging/
+packaging/macos/release.env.local
+packaging/macos/*.private
 
 # IDE
 .idea/

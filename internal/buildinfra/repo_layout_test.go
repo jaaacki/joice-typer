@@ -38,6 +38,38 @@ func TestRepoLayout_PackagingHomesDocumented(t *testing.T) {
 	}
 }
 
+func TestMacReleasePackagingHomeExists(t *testing.T) {
+	root := repoRoot(t)
+	for _, path := range []string{
+		"packaging/macos/sparkle-appcast.xml.tmpl",
+		"packaging/macos/release.env.example",
+		"scripts/release/macos_release_env.sh",
+		"scripts/release/macos_archive.sh",
+		"scripts/release/macos_appcast.py",
+		"scripts/release/macos_prepare_release_app.sh",
+		"scripts/release/macos_notarize.sh",
+		"scripts/release/macos_render_info_plist.py",
+		"scripts/release/macos_stage_sparkle.sh",
+	} {
+		if _, err := os.Stat(filepath.Join(root, path)); err != nil {
+			t.Fatalf("expected %s: %v", path, err)
+		}
+	}
+
+	gitignore, err := os.ReadFile(filepath.Join(root, ".gitignore"))
+	if err != nil {
+		t.Fatalf("read .gitignore: %v", err)
+	}
+	for _, required := range []string{
+		"packaging/macos/release.env.local",
+		"packaging/macos/*.private",
+	} {
+		if !strings.Contains(string(gitignore), required) {
+			t.Fatalf("expected .gitignore to contain %q", required)
+		}
+	}
+}
+
 func TestRepoLayout_FrontendToolchainFilesExist(t *testing.T) {
 	root := repoRoot(t)
 	for _, path := range []string{
@@ -515,7 +547,6 @@ func TestWindowsTranscriptionSource_UsesDedicatedWindowsCGOPath(t *testing.T) {
 	for _, required := range []string{
 		"build-windows-runtime-amd64:",
 		"package-windows-runtime:",
-		"version-bump:",
 		"CGO_ENABLED=1",
 		"WINDOWS_CC ?=",
 		"WINDOWS_CXX ?=",
@@ -536,6 +567,72 @@ func TestWindowsTranscriptionSource_UsesDedicatedWindowsCGOPath(t *testing.T) {
 	} {
 		if !strings.Contains(makefile, required) {
 			t.Fatalf("expected Makefile to contain %q", required)
+		}
+	}
+}
+
+func TestMacReleaseSourcesContainUpdaterPaths(t *testing.T) {
+	root := repoRoot(t)
+
+	makeData, err := os.ReadFile(filepath.Join(root, "scripts", "make", "macos.mk"))
+	if err != nil {
+		t.Fatalf("read scripts/make/macos.mk: %v", err)
+	}
+	makeSource := string(makeData)
+	for _, required := range []string{
+		"mac-stage-sparkle:",
+		"mac-release-app:",
+		"mac-release-archive:",
+		"mac-notarize-release:",
+		"mac-appcast:",
+		"mac-release-artifacts:",
+		"MACOS_RELEASE_DIR :=",
+		"MACOS_RELEASE_ENV_SCRIPT :=",
+		"MACOS_PREPARE_RELEASE_APP_SCRIPT :=",
+		"MACOS_NOTARIZE_SCRIPT :=",
+		"MACOS_RELEASE_APP_BUNDLE :=",
+		"MACOS_RELEASE_ARCHIVE :=",
+		"MACOS_APPCAST_PATH :=",
+	} {
+		if !strings.Contains(makeSource, required) {
+			t.Fatalf("expected macos.mk to contain %q", required)
+		}
+	}
+
+	appcastTemplate, err := os.ReadFile(filepath.Join(root, "packaging", "macos", "sparkle-appcast.xml.tmpl"))
+	if err != nil {
+		t.Fatalf("read sparkle-appcast.xml.tmpl: %v", err)
+	}
+	for _, required := range []string{
+		"{{APP_NAME}}",
+		"{{VERSION}}",
+		"{{PUBLICATION_DATE}}",
+		"{{DOWNLOAD_URL}}",
+		"{{DOWNLOAD_LENGTH}}",
+		"{{EDDSA_SIGNATURE}}",
+	} {
+		if !strings.Contains(string(appcastTemplate), required) {
+			t.Fatalf("expected sparkle-appcast.xml.tmpl to contain %q", required)
+		}
+	}
+
+	updaterData, err := os.ReadFile(filepath.Join(root, "internal", "platform", "darwin", "updater.go"))
+	if err != nil {
+		t.Fatalf("read internal/platform/darwin/updater.go: %v", err)
+	}
+	updaterSource := string(updaterData)
+	for _, required := range []string{
+		"type updaterConfig struct",
+		"func currentUpdaterConfig() updaterConfig",
+		"func updaterEnabled() bool",
+		"func StartUpdater()",
+		"resolveUpdaterInfoPlistPath",
+		"parseUpdaterConfigFromInfoPlist",
+		"sparkleFeedURL",
+		"sparklePublicEDKey",
+	} {
+		if !strings.Contains(updaterSource, required) {
+			t.Fatalf("expected updater.go to contain %q", required)
 		}
 	}
 }
