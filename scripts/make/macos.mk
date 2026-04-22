@@ -9,6 +9,7 @@ DMG_STAGING := dmg-staging
 MACOS_RELEASE_DIR := build/macos-release
 MACOS_RELEASE_ENV_FILE ?= packaging/macos/release.env.local
 MACOS_RELEASE_ENV_SCRIPT := scripts/release/macos_release_env.sh
+MACOS_PREFLIGHT_SCRIPT := scripts/release/macos_preflight.sh
 MACOS_RELEASE_ARCHIVE_SCRIPT := scripts/release/macos_archive.sh
 MACOS_APPCAST_SCRIPT := scripts/release/macos_appcast.py
 MACOS_PLIST_RENDER_SCRIPT := scripts/release/macos_render_info_plist.py
@@ -76,7 +77,17 @@ mac-stage-sparkle:
 	@sh "$(MACOS_RELEASE_ENV_SCRIPT)" sparkle
 	@sh "$(MACOS_SPARKLE_STAGE_SCRIPT)" "$(MACOS_SPARKLE_STAGE_DIR)"
 
-mac-release-app: app mac-stage-sparkle
+mac-release-preflight:
+	@sh "$(MACOS_PREFLIGHT_SCRIPT)" archive
+
+mac-notarize-preflight:
+	@sh "$(MACOS_PREFLIGHT_SCRIPT)" notarize
+
+mac-publish-preflight: release-check
+	@. "$(MACOS_RELEASE_ENV_FILE)"; \
+		RELEASE_TAG="$(RELEASE_TAG)" sh "$(MACOS_PREFLIGHT_SCRIPT)" publish
+
+mac-release-app: mac-release-preflight app mac-stage-sparkle
 	@sh "$(MACOS_RELEASE_ENV_SCRIPT)" archive
 	@sh "$(MACOS_RELEASE_ENV_SCRIPT)" appcast
 	mkdir -p "$(MACOS_RELEASE_DIR)"
@@ -112,7 +123,7 @@ mac-release-dmg: mac-release-app
 	rm -rf "$(MACOS_RELEASE_DMG_STAGE)"
 	@echo "Built $(MACOS_RELEASE_DMG)"
 
-mac-notarize-release: mac-release-archive
+mac-notarize-release: mac-notarize-preflight mac-release-archive
 	@sh "$(MACOS_RELEASE_ENV_SCRIPT)" notarize
 	@. "$(MACOS_RELEASE_ENV_FILE)"; \
 		sh "$(MACOS_NOTARIZE_SCRIPT)" "$(MACOS_RELEASE_ARCHIVE)" "$${MACOS_NOTARYTOOL_PROFILE}"
@@ -120,6 +131,6 @@ mac-notarize-release: mac-release-archive
 mac-release-artifacts: mac-appcast mac-release-dmg
 	mkdir -p "$(MACOS_RELEASE_DIR)"
 
-mac-publish-github-release: release-check mac-release-artifacts
+mac-publish-github-release: mac-publish-preflight mac-release-artifacts
 	@. "$(MACOS_RELEASE_ENV_FILE)"; \
 		RELEASE_TAG="$(RELEASE_TAG)" sh "$(MACOS_PUBLISH_GITHUB_SCRIPT)" "$(MACOS_RELEASE_ARCHIVE)" "$(MACOS_RELEASE_DMG)" "$(MACOS_APPCAST_PATH)"

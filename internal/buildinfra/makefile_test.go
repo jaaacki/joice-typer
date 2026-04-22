@@ -290,6 +290,30 @@ func TestMacPublishGitHubReleaseTargetUsesReleaseCheckAndGHUpload(t *testing.T) 
 	}
 }
 
+func TestMacPreflightTargetsUseValidationScripts(t *testing.T) {
+	root := repoRoot(t)
+
+	cmd := makeCommand(root, "-n", "mac-release-preflight", "mac-notarize-preflight", "mac-publish-preflight", "RELEASE_TAG=v1.1.10")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("make -n mac-release-preflight mac-notarize-preflight mac-publish-preflight: %v\n%s", err, out)
+	}
+
+	text := string(out)
+	for _, required := range []string{
+		"scripts/release/macos_preflight.sh",
+		`archive`,
+		`notarize`,
+		`publish`,
+		`RELEASE_TAG="v1.1.10"`,
+		`Release tag v1.1.10 matches VERSION 1.1.10`,
+	} {
+		if !strings.Contains(text, required) {
+			t.Fatalf("expected mac preflight flow to contain %q\noutput:\n%s", required, text)
+		}
+	}
+}
+
 func TestMakeWindowsBuildRunsFrontendBuild(t *testing.T) {
 	root := repoRoot(t)
 

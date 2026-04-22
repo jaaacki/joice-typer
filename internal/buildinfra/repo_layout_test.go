@@ -643,6 +643,9 @@ func TestMacReleaseSourcesContainUpdaterPaths(t *testing.T) {
 	makeSource := string(makeData)
 	for _, required := range []string{
 		"mac-stage-sparkle:",
+		"mac-release-preflight:",
+		"mac-notarize-preflight:",
+		"mac-publish-preflight:",
 		"mac-release-app:",
 		"mac-release-archive:",
 		"mac-notarize-release:",
@@ -651,6 +654,7 @@ func TestMacReleaseSourcesContainUpdaterPaths(t *testing.T) {
 		"mac-publish-github-release:",
 		"MACOS_RELEASE_DIR :=",
 		"MACOS_RELEASE_ENV_SCRIPT :=",
+		"MACOS_PREFLIGHT_SCRIPT :=",
 		"MACOS_PUBLISH_GITHUB_SCRIPT :=",
 		"MACOS_PREPARE_RELEASE_APP_SCRIPT :=",
 		"MACOS_NOTARIZE_SCRIPT :=",
@@ -677,6 +681,23 @@ func TestMacReleaseSourcesContainUpdaterPaths(t *testing.T) {
 	} {
 		if !strings.Contains(string(appcastTemplate), required) {
 			t.Fatalf("expected sparkle-appcast.xml.tmpl to contain %q", required)
+		}
+	}
+
+	preflightScript, err := os.ReadFile(filepath.Join(root, "scripts", "release", "macos_preflight.sh"))
+	if err != nil {
+		t.Fatalf("read macos_preflight.sh: %v", err)
+	}
+	for _, required := range []string{
+		`usage: $0 <archive|notarize|publish>`,
+		`security find-identity -v -p codesigning`,
+		`gh auth status`,
+		`xcrun notarytool`,
+		`MACOS_SPARKLE_PRIVATE_KEY_FILE`,
+		`MACOS_NOTARYTOOL_PROFILE`,
+	} {
+		if !strings.Contains(string(preflightScript), required) {
+			t.Fatalf("expected macos_preflight.sh to contain %q", required)
 		}
 	}
 

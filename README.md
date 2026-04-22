@@ -117,6 +117,9 @@ macOS self-update release flow:
 cp packaging/macos/release.env.example packaging/macos/release.env.local
 # fill in your real signing, notarytool, Sparkle, and GitHub values
 
+make mac-release-preflight
+make mac-notarize-preflight
+make mac-publish-preflight RELEASE_TAG=v$(cat VERSION)
 make mac-release-artifacts
 make mac-publish-github-release RELEASE_TAG=v$(cat VERSION)
 ```
