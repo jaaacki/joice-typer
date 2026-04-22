@@ -151,6 +151,14 @@ func openPreferences() error {
 		return fmt.Errorf("web preferences are disabled on Windows; unset JOICETYPER_USE_NATIVE_PREFERENCES or enable WebView2-backed settings")
 	}
 
+	cfg = migrateWindowsInputDeviceConfig(cfg)
+	monitor, monitorErr := audiopkg.NewInputLevelMonitor(cfg.SampleRate, cfg.InputDevice, currentSettingsLogger())
+	if monitorErr != nil {
+		currentSettingsLogger().Warn("failed to start preferences input monitor", "operation", "OpenPreferences", "error", monitorErr)
+	} else {
+		SetSettingsInputMonitor(monitor)
+	}
+
 	prefsCtx, prefsCancel := context.WithCancel(context.Background())
 	setPreferencesContext(prefsCtx, prefsCancel)
 
@@ -319,6 +327,42 @@ func buildSettingsBridgeService(_ configpkg.Config) *bridgepkg.Service {
 		},
 		RefreshDevices: func(context.Context) ([]bridgepkg.DeviceSnapshot, error) {
 			return webSettingsRefreshDevices()
+		},
+		SetAudioInputMonitor: func(_ context.Context, inputDevice string) error {
+			cfgPath, err := webSettingsDefaultConfigPath()
+			if err != nil {
+				return bridgepkg.WrapContractError(
+					bridgepkg.ErrorCodeSaveFailure,
+					"Failed to resolve config path",
+					false,
+					nil,
+					err,
+				)
+			}
+			cfg, err := webSettingsLoadConfig(cfgPath)
+			if err != nil {
+				return bridgepkg.WrapContractError(
+					bridgepkg.ErrorCodeConfigLoadFailure,
+					"Failed to load config",
+					false,
+					nil,
+					err,
+				)
+			}
+			cfg.InputDevice = inputDevice
+			cfg = migrateWindowsInputDeviceConfig(cfg)
+			if monitor := currentSettingsInputMonitor(); monitor != nil {
+				if err := monitor.SetInputDevice(cfg.InputDevice); err != nil {
+					return bridgepkg.WrapContractError(
+						bridgepkg.ErrorCodeDevicesRefreshFailed,
+						"Failed to switch monitored input device",
+						true,
+						nil,
+						err,
+					)
+				}
+			}
+			return nil
 		},
 		LoadModel: func(context.Context) (bridgepkg.ModelSnapshot, error) {
 			return loadActiveWebSettingsModelSnapshot()
@@ -766,29 +810,11 @@ func ensureWebSettingsInputLevelPublisher() {
 				if preferencesOpenLoad() == 0 {
 					continue
 				}
-				recorder := currentSettingsRecorder()
-				if recorder == nil {
+				monitor := currentSettingsInputMonitor()
+				if monitor == nil {
 					continue
 				}
-				samples := recorder.Snapshot()
-				var sumSq float64
-				for _, s := range samples {
-					sumSq += float64(s) * float64(s)
-				}
-				level := 0.0
-				if len(samples) > 0 {
-					level = math.Sqrt(sumSq / float64(len(samples))) * 12
-				}
-				if level > 1 {
-					level = 1
-				}
-				quality := "poor"
-				if level >= 0.35 {
-					quality = "good"
-				} else if level >= 0.12 {
-					quality = "acceptable"
-				}
-				publishInputLevelChanged(bridgepkg.InputLevelSnapshot{Level: level, Quality: quality})
+				publishInputLevelChanged(monitor.Snapshot())
 			}
 		}()
 	})

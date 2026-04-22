@@ -324,6 +324,10 @@ func publishInputLevelChanged(snapshot bridgepkg.InputLevelSnapshot) {
 
 func webSettingsWindowClosed() {
 	resetWebSettingsHotkeyCapture()
+	if monitor := currentSettingsInputMonitor(); monitor != nil {
+		_ = monitor.Close()
+		SetSettingsInputMonitor(nil)
+	}
 	cancelPreferencesContext()
 	clearActiveWebSettingsBridgeService()
 	preferencesOpenStore(0)

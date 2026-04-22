@@ -34,6 +34,10 @@ type modelCommandParams struct {
 	Size string `json:"size"`
 }
 
+type audioInputMonitorParams struct {
+	InputDevice string `json:"inputDevice"`
+}
+
 type saveConfigPayload struct {
 	TriggerKey      *[]string `json:"triggerKey"`
 	ModelSize       *string   `json:"modelSize"`
@@ -120,6 +124,15 @@ func (r *Router) HandleRequest(ctx context.Context, request RequestEnvelope) Res
 			return NewErrorResponseFromError(request.ID, err, ErrorCodeDevicesRefreshFailed, "failed to refresh input devices", true, nil)
 		}
 		return NewSuccessResponse(request.ID, DevicesRefreshResult{Devices: devices})
+	case AudioInputMonitorSetMethod:
+		var params audioInputMonitorParams
+		if response := decodeRequestParams(request, &params); response != nil {
+			return *response
+		}
+		if err := r.service.SetAudioInputMonitor(ctx, params.InputDevice); err != nil {
+			return NewErrorResponseFromError(request.ID, err, ErrorCodeDevicesRefreshFailed, "failed to update monitored audio input", true, nil)
+		}
+		return NewSuccessResponse(request.ID, map[string]any{"selected": true})
 	case ModelGetMethod:
 		if response := ensureEmptyParams(request); response != nil {
 			return *response

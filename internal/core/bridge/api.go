@@ -15,6 +15,7 @@ type Dependencies struct {
 	OpenPermissionSettings func(context.Context, string) error
 	ListDevices            func(context.Context) ([]DeviceSnapshot, error)
 	RefreshDevices         func(context.Context) ([]DeviceSnapshot, error)
+	SetAudioInputMonitor   func(context.Context, string) error
 	LoadModel              func(context.Context) (ModelSnapshot, error)
 	DownloadModel          func(context.Context, string) error
 	DeleteModel            func(context.Context, string) error
@@ -95,6 +96,13 @@ func (s *Service) RefreshDevices(ctx context.Context) ([]DeviceSnapshot, error) 
 		return nil, missingDependencyError(DevicesRefreshMethod, "RefreshDevices")
 	}
 	return s.deps.RefreshDevices(ctx)
+}
+
+func (s *Service) SetAudioInputMonitor(ctx context.Context, inputDevice string) error {
+	if s.deps.SetAudioInputMonitor == nil {
+		return missingDependencyError(AudioInputMonitorSetMethod, "SetAudioInputMonitor")
+	}
+	return s.deps.SetAudioInputMonitor(ctx, inputDevice)
 }
 
 func (s *Service) Model(ctx context.Context) (ModelSnapshot, error) {

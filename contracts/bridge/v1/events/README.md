@@ -8,6 +8,7 @@ Initial `v1` event surface:
 - `model.download_progress`
 - `config.saved`
 - `logs.updated`
+- `audio_input.level_changed`
 
 Event rules:
 

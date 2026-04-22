@@ -251,14 +251,7 @@ func startWindowsRuntimeCycle(startupCtx context.Context, cfg configpkg.Config, 
 		return windowsRuntimeCycle{hotkey: hotkey, recorder: recorder, audioInitialized: audioInitialized, err: err}
 	}
 
-	transcribeDecodeMode := cfg.DecodeMode
-	if transcribeDecodeMode == "" || transcribeDecodeMode == "beam" {
-		// Windows interactive dictation prioritizes responsiveness.
-		// Keep beam selectable in settings, but default runtime behavior to greedy
-		// unless the user explicitly picks a non-beam value later.
-		transcribeDecodeMode = "greedy"
-	}
-	transcriber, err := transcriptionpkg.NewTranscriber(startupCtx, modelPath, cfg.ModelSize, cfg.Language, cfg.SampleRate, transcribeDecodeMode, cfg.PunctuationMode, logger)
+	transcriber, err := transcriptionpkg.NewTranscriber(startupCtx, modelPath, cfg.ModelSize, cfg.Language, cfg.SampleRate, cfg.DecodeMode, cfg.PunctuationMode, logger)
 	if err != nil {
 		logger.Warn("transcriber backend unavailable", "component", "main", "operation", "startWindowsRuntimeCycle", "error", err)
 		return windowsRuntimeCycle{

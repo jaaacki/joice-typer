@@ -382,6 +382,10 @@ export function confirmHotkeyCapture(): Promise<HotkeyCaptureSnapshot> {
   return query<HotkeyCaptureSnapshot, Record<string, never>>(METHODS.hotkeyCaptureConfirm, {});
 }
 
+export function setAudioInputMonitor(inputDevice: string): Promise<void> {
+  return query<{ selected: boolean }, { inputDevice: string }>(METHODS.audioInputMonitorSet, { inputDevice }).then(() => undefined);
+}
+
 export function subscribeRuntimeStateChanged(handler: (appState: AppStateSnapshot) => void): () => void {
   return subscribeEvent(EVENTS.runtimeStateChanged, handler);
 }

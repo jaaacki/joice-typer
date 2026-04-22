@@ -18,6 +18,7 @@ export {
   readBootstrap,
   refreshDevices,
   saveConfig,
+  setAudioInputMonitor,
   startHotkeyCapture,
   subscribeConfigSaved,
   subscribeDevicesChanged,

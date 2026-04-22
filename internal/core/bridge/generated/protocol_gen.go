@@ -22,6 +22,7 @@ const (
 	HotkeyCaptureStartMethod            = "hotkey.capture_start"
 	HotkeyCaptureCancelMethod           = "hotkey.capture_cancel"
 	HotkeyCaptureConfirmMethod          = "hotkey.capture_confirm"
+	AudioInputMonitorSetMethod          = "audio_input.monitor_set"
 	RuntimeGetMethod                    = "runtime.get"
 	OptionsGetMethod                    = "options.get"
 	LogsGetMethod                       = "logs.get"

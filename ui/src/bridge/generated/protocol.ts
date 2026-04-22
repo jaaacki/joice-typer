@@ -25,6 +25,7 @@ export const METHODS = {
   hotkeyCaptureStart: "hotkey.capture_start",
   hotkeyCaptureCancel: "hotkey.capture_cancel",
   hotkeyCaptureConfirm: "hotkey.capture_confirm",
+  audioInputMonitorSet: "audio_input.monitor_set",
   runtimeGet: "runtime.get",
   optionsGet: "options.get",
   logsGet: "logs.get",

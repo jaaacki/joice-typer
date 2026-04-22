@@ -13,6 +13,7 @@ Initial `v1` method surface:
 - `model.download`
 - `model.delete`
 - `model.use`
+- `audio_input.monitor_set`
 - `runtime.get`
 - `options.get`
 - `logs.get`

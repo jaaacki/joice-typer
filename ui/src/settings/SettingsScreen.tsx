@@ -637,6 +637,7 @@ export function SettingsScreen({ bootstrap }: SettingsScreenProps) {
                         const selected = devices.find((device) => device.id === event.target.value);
                         update("inputDevice", event.target.value);
                         update("inputDeviceName", selected?.name ?? "");
+                        void setAudioInputMonitor(event.target.value);
                       }}
                     >
                       <option value="">System default</option>
