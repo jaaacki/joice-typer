@@ -1,6 +1,13 @@
 # Binary
 voicetype
 joicetyper
+joicetyper.exe
+
+# Windows path artifacts
+%SystemDrive%/
+
+# Scratch / temp
+tmp_audio_probe/
 
 # Build artifacts
 *.o
