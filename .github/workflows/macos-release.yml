@@ -97,11 +97,13 @@ jobs:
           cat > "$MACOS_RELEASE_ENV_FILE" <<EOF
           MACOS_CODESIGN_IDENTITY="$MACOS_CODESIGN_IDENTITY"
           MACOS_NOTARYTOOL_PROFILE="$MACOS_NOTARYTOOL_PROFILE"
-          MACOS_APPCAST_BASE_URL="https://github.com/${{ github.repository }}/releases/download/$RELEASE_TAG"
+          MACOS_APPCAST_URL="https://github.com/${{ github.repository }}/releases/latest/download/appcast.xml"
+          MACOS_RELEASE_DOWNLOAD_BASE_URL="https://github.com/${{ github.repository }}/releases/download/$RELEASE_TAG"
           GITHUB_REPOSITORY="${{ github.repository }}"
           MACOS_SPARKLE_PUBLIC_ED_KEY="$MACOS_SPARKLE_PUBLIC_ED_KEY"
           MACOS_SPARKLE_PRIVATE_KEY_FILE="$SPARKLE_KEY_PATH"
           MACOS_SPARKLE_DOWNLOAD_URL="https://github.com/sparkle-project/Sparkle/releases/download/2.6.4/Sparkle-2.6.4.tar.xz"
+          MACOS_SPARKLE_DOWNLOAD_SHA256="50612a06038abc931f16011d7903b8326a362c1074dabccb718404ce8e585f0b"
           EOF
 
       - name: Preflight release readiness
@@ -117,9 +119,7 @@ jobs:
             gh release create "$RELEASE_TAG" --repo "${{ github.repository }}" --verify-tag --title "$RELEASE_TAG" --generate-notes
 
       - name: Build notarized release artifacts
-        run: |
-          make mac-notarize-release
-          make mac-release-artifacts
+        run: make mac-release-artifacts
 
       - name: Publish release artifacts
         run: make mac-publish-github-release RELEASE_TAG="$RELEASE_TAG"

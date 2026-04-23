@@ -158,7 +158,9 @@ func TestSettingsScreenSource_UsesAckAwareSaveStates(t *testing.T) {
 	source := string(data)
 	for _, snippet := range []string{
 		"Waiting for native confirmation.",
-		"await saveConfig(draft)",
+		"await saveConfig({",
+		"inputDevice: resolvedInputDevice",
+		"inputDeviceName: resolvedInputDeviceName",
 		"Saved. JoiceTyper is reloading the runtime.",
 	} {
 		if !strings.Contains(source, snippet) {
@@ -646,6 +648,10 @@ func TestMacReleaseSourcesContainUpdaterPaths(t *testing.T) {
 		"build-no-version-bump:",
 		"app-no-version-bump:",
 		"mac-dev-update-artifacts:",
+		"mac-release-app: mac-release-preflight app-no-version-bump mac-stage-sparkle",
+		"mac-notarize-release: mac-notarize-preflight mac-release-app",
+		"mac-release-archive: mac-notarize-release",
+		"mac-release-dmg: mac-notarize-release",
 		"mac-release-preflight:",
 		"mac-notarize-preflight:",
 		"mac-publish-preflight:",
@@ -705,6 +711,9 @@ func TestMacReleaseSourcesContainUpdaterPaths(t *testing.T) {
 			t.Fatalf("expected macos_preflight.sh to contain %q", required)
 		}
 	}
+	if strings.Contains(string(preflightScript), `gh release view "$RELEASE_TAG"`) {
+		t.Fatal("expected macos_preflight.sh not to require an existing GitHub release during publish preflight")
+	}
 
 	devArchiveScript, err := os.ReadFile(filepath.Join(root, "scripts", "release", "macos_archive_dev.sh"))
 	if err != nil {
@@ -718,6 +727,20 @@ func TestMacReleaseSourcesContainUpdaterPaths(t *testing.T) {
 	} {
 		if !strings.Contains(string(devArchiveScript), required) {
 			t.Fatalf("expected macos_archive_dev.sh to contain %q", required)
+		}
+	}
+
+	notarizeScript, err := os.ReadFile(filepath.Join(root, "scripts", "release", "macos_notarize.sh"))
+	if err != nil {
+		t.Fatalf("read macos_notarize.sh: %v", err)
+	}
+	for _, required := range []string{
+		`ditto -c -k --keepParent`,
+		`xcrun notarytool submit "$submit_path" --keychain-profile "$profile" --wait`,
+		`xcrun stapler staple "$staple_path"`,
+	} {
+		if !strings.Contains(string(notarizeScript), required) {
+			t.Fatalf("expected macos_notarize.sh to contain %q", required)
 		}
 	}
 
@@ -741,10 +764,12 @@ func TestMacReleaseSourcesContainUpdaterPaths(t *testing.T) {
 		`MACOS_NOTARY_PASSWORD`,
 		`MACOS_SPARKLE_PUBLIC_ED_KEY`,
 		`MACOS_SPARKLE_PRIVATE_KEY`,
+		`MACOS_APPCAST_URL="https://github.com/${{ github.repository }}/releases/latest/download/appcast.xml"`,
+		`MACOS_RELEASE_DOWNLOAD_BASE_URL="https://github.com/${{ github.repository }}/releases/download/$RELEASE_TAG"`,
+		`MACOS_SPARKLE_DOWNLOAD_SHA256=`,
 		`make mac-release-preflight`,
 		`make mac-notarize-preflight`,
 		`make mac-publish-preflight`,
-		`make mac-notarize-release`,
 		`make mac-release-artifacts`,
 		`make mac-publish-github-release`,
 		`gh release create`,
@@ -752,6 +777,20 @@ func TestMacReleaseSourcesContainUpdaterPaths(t *testing.T) {
 	} {
 		if !strings.Contains(string(workflowData), required) {
 			t.Fatalf("expected macos-release workflow to contain %q", required)
+		}
+	}
+
+	releaseEnvData, err := os.ReadFile(filepath.Join(root, "packaging", "macos", "release.env.example"))
+	if err != nil {
+		t.Fatalf("read packaging/macos/release.env.example: %v", err)
+	}
+	for _, required := range []string{
+		`MACOS_APPCAST_URL="https://github.com/jaaacki/joice-typer/releases/latest/download/appcast.xml"`,
+		`MACOS_RELEASE_DOWNLOAD_BASE_URL="https://github.com/jaaacki/joice-typer/releases/download/v1.1.3"`,
+		`MACOS_SPARKLE_DOWNLOAD_SHA256=`,
+	} {
+		if !strings.Contains(string(releaseEnvData), required) {
+			t.Fatalf("expected release.env.example to contain %q", required)
 		}
 	}
 

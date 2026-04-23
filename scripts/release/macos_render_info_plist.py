@@ -1,6 +1,11 @@
 #!/usr/bin/env python3
 import pathlib
 import sys
+from xml.sax.saxutils import escape
+
+
+def xml_escape(value: str) -> str:
+    return escape(value, {'"': "&quot;", "'": "&apos;"})
 
 
 def main() -> int:
@@ -20,9 +25,9 @@ def main() -> int:
 
     rendered = template_path.read_text()
     replacements = {
-        "{{VERSION}}": version,
-        "{{SPARKLE_FEED_URL}}": feed_url,
-        "{{SPARKLE_PUBLIC_ED_KEY}}": public_ed_key,
+        "{{VERSION}}": xml_escape(version),
+        "{{SPARKLE_FEED_URL}}": xml_escape(feed_url),
+        "{{SPARKLE_PUBLIC_ED_KEY}}": xml_escape(public_ed_key),
         "{{SPARKLE_AUTOCHECK}}": autocheck,
     }
     for key, value in replacements.items():

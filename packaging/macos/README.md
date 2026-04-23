@@ -30,6 +30,9 @@ Local secret/config inputs are intentionally untracked:
 GitHub Releases remains the first hosting target:
 - `mac-release-artifacts` produces the archive, dmg, and appcast under `build/macos-release/`
 - `mac-publish-github-release` uploads those artifacts to the tagged GitHub release using `gh`
+- use a stable `MACOS_APPCAST_URL` for the embedded feed, for example `.../releases/latest/download/appcast.xml`
+- use `MACOS_RELEASE_DOWNLOAD_BASE_URL` for the versioned archive URLs referenced by each generated appcast item
+- when downloading Sparkle in release automation, pin `MACOS_SPARKLE_DOWNLOAD_SHA256` with the expected archive hash
 
 Preflight targets are the quickest readiness check before a real release run:
 - `mac-release-preflight` validates codesign access and the Sparkle private key path
@@ -59,5 +62,6 @@ The workflow:
 - creates the `notarytool` profile on the runner
 - writes `packaging/macos/release.env.local`
 - runs the release preflight checks
-- builds and notarizes the release archive
+- notarizes and staples the release app before the Sparkle archive is generated
+- signs, notarizes, and staples the release DMG before publishing
 - publishes the archive, dmg, and appcast to GitHub Releases

@@ -75,9 +75,6 @@ case "$mode" in
   publish)
     require_cmd gh
     require_var GITHUB_REPOSITORY
-    if [ -n "${RELEASE_TAG:-}" ]; then
-      gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null
-    fi
     gh auth status >/dev/null 2>&1 || {
       echo "fatal: GitHub CLI is not authenticated"
       exit 1

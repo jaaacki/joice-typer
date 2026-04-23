@@ -1,6 +1,11 @@
 #!/usr/bin/env python3
 import pathlib
 import sys
+from xml.sax.saxutils import escape
+
+
+def xml_escape(value: str) -> str:
+    return escape(value, {'"': "&quot;", "'": "&apos;"})
 
 
 def parse_metadata(path: pathlib.Path) -> dict[str, str]:
@@ -31,14 +36,14 @@ def main() -> int:
 
     metadata = parse_metadata(metadata_path)
     mapping = {
-        "{{APP_NAME}}": app_name,
-        "{{APPCAST_URL}}": appcast_url,
-        "{{VERSION}}": metadata["VERSION"],
-        "{{PUBLICATION_DATE}}": metadata["PUBLICATION_DATE"],
-        "{{DOWNLOAD_URL}}": download_url,
-        "{{DOWNLOAD_LENGTH}}": metadata["ARCHIVE_LENGTH"],
-        "{{EDDSA_SIGNATURE}}": metadata.get("EDDSA_SIGNATURE", "UNSIGNED"),
-        "{{SPARKLE_PUBLIC_ED_KEY}}": public_ed_key,
+        "{{APP_NAME}}": xml_escape(app_name),
+        "{{APPCAST_URL}}": xml_escape(appcast_url),
+        "{{VERSION}}": xml_escape(metadata["VERSION"]),
+        "{{PUBLICATION_DATE}}": xml_escape(metadata["PUBLICATION_DATE"]),
+        "{{DOWNLOAD_URL}}": xml_escape(download_url),
+        "{{DOWNLOAD_LENGTH}}": xml_escape(metadata["ARCHIVE_LENGTH"]),
+        "{{EDDSA_SIGNATURE}}": xml_escape(metadata.get("EDDSA_SIGNATURE", "UNSIGNED")),
+        "{{SPARKLE_PUBLIC_ED_KEY}}": xml_escape(public_ed_key),
     }
 
     rendered = template_path.read_text()

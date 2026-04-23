@@ -126,6 +126,8 @@ make mac-publish-github-release RELEASE_TAG=v$(cat VERSION)
 ```
 
 This keeps normal development builds credential-free while generating Sparkle-ready release artifacts under `build/macos-release/` for GitHub Releases hosting.
+The embedded updater feed URL should be stable, for example `.../releases/latest/download/appcast.xml`, while the appcast enclosure URLs stay versioned per release tag.
+Release automation pins the Sparkle download with `MACOS_SPARKLE_DOWNLOAD_SHA256`; local release env files should do the same when using `MACOS_SPARKLE_DOWNLOAD_URL`.
 `mac-dev-update-artifacts` is the local unsigned dry-run path for validating archive/appcast shape before you have Apple credentials ready.
 
 There is also a GitHub Actions path for this release flow:

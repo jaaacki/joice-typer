@@ -35,7 +35,8 @@ case "$mode" in
     require_var MACOS_SPARKLE_PRIVATE_KEY_FILE
     ;;
   appcast)
-    require_var MACOS_APPCAST_BASE_URL
+    require_var MACOS_APPCAST_URL
+    require_var MACOS_RELEASE_DOWNLOAD_BASE_URL
     require_var MACOS_SPARKLE_PUBLIC_ED_KEY
     ;;
   notarize)
@@ -47,6 +48,9 @@ case "$mode" in
     if [ -z "$archive_path" ] && [ -z "$download_url" ]; then
       echo "fatal: set MACOS_SPARKLE_ARCHIVE_PATH or MACOS_SPARKLE_DOWNLOAD_URL"
       exit 1
+    fi
+    if [ -z "$archive_path" ]; then
+      require_var MACOS_SPARKLE_DOWNLOAD_SHA256
     fi
     ;;
   *)

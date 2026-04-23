@@ -1,6 +1,7 @@
 package buildinfra
 
 import (
+	"encoding/xml"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -30,6 +31,15 @@ func repoRoot(t *testing.T) string {
 		t.Fatal("runtime.Caller failed")
 	}
 	return filepath.Clean(filepath.Join(filepath.Dir(file), "..", ".."))
+}
+
+func currentVersion(t *testing.T) string {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(repoRoot(t), "VERSION"))
+	if err != nil {
+		t.Fatalf("read VERSION: %v", err)
+	}
+	return strings.TrimSpace(string(data))
 }
 
 func TestMakeBuildTargetsBumpVersion(t *testing.T) {
@@ -244,10 +254,10 @@ func TestMacReleasePathStagesSparkleSeparatelyFromDevBuilds(t *testing.T) {
 func TestMacReleaseTargetsProduceGitHubReleaseFriendlyOutputs(t *testing.T) {
 	root := repoRoot(t)
 
-	cmd := makeCommand(root, "-n", "mac-release-artifacts", "mac-notarize-release")
+	cmd := makeCommand(root, "-n", "mac-release-artifacts")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		t.Fatalf("make -n mac-release-artifacts mac-notarize-release: %v\n%s", err, out)
+		t.Fatalf("make -n mac-release-artifacts: %v\n%s", err, out)
 	}
 
 	text := string(out)
@@ -264,12 +274,203 @@ func TestMacReleaseTargetsProduceGitHubReleaseFriendlyOutputs(t *testing.T) {
 			t.Fatalf("expected mac release artifacts flow to contain %q\noutput:\n%s", required, text)
 		}
 	}
+	if strings.Contains(text, "Version bumped:") {
+		t.Fatalf("expected mac release artifacts flow not to bump VERSION\noutput:\n%s", text)
+	}
+
+	notarizeIndex := strings.Index(text, "macos_notarize.sh")
+	appcastIndex := strings.Index(text, "macos_appcast.py")
+	if notarizeIndex == -1 || appcastIndex == -1 || notarizeIndex > appcastIndex {
+		t.Fatalf("expected notarization to happen before appcast generation\noutput:\n%s", text)
+	}
+}
+
+func TestMacReleaseDMGDependsOnNotarizedReleaseApp(t *testing.T) {
+	root := repoRoot(t)
+
+	data, err := os.ReadFile(filepath.Join(root, "scripts", "make", "macos.mk"))
+	if err != nil {
+		t.Fatalf("read scripts/make/macos.mk: %v", err)
+	}
+	source := string(data)
+	if !strings.Contains(source, "mac-release-dmg: mac-notarize-release") {
+		t.Fatalf("expected mac-release-dmg to depend on mac-notarize-release so it cannot package an unstapled app\nsource:\n%s", source)
+	}
+
+	cmd := makeCommand(root, "-n", "mac-release-dmg")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("make -n mac-release-dmg: %v\n%s", err, out)
+	}
+	text := string(out)
+	notarizeIndex := strings.Index(text, "macos_notarize.sh")
+	dmgIndex := strings.Index(text, "hdiutil create")
+	if notarizeIndex == -1 || dmgIndex == -1 || notarizeIndex > dmgIndex {
+		t.Fatalf("expected notarization to happen before DMG creation\noutput:\n%s", text)
+	}
+	dmgNotarizeIndex := strings.LastIndex(text, "macos_notarize.sh")
+	if dmgNotarizeIndex == notarizeIndex || dmgNotarizeIndex < dmgIndex {
+		t.Fatalf("expected DMG artifact to be notarized after DMG creation\noutput:\n%s", text)
+	}
+	if !strings.Contains(text, `codesign --force --sign "${MACOS_CODESIGN_IDENTITY}" --timestamp "build/macos-release/JoiceTyper-`) {
+		t.Fatalf("expected DMG artifact to be signed before notarization\noutput:\n%s", text)
+	}
+}
+
+func TestMacNotarizeScriptSubmitsZipWhenGivenAppBundle(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell script execution uses POSIX paths")
+	}
+	root := repoRoot(t)
+	tmp := t.TempDir()
+	appPath := filepath.Join(tmp, "JoiceTyper.app")
+	if err := os.MkdirAll(filepath.Join(appPath, "Contents", "MacOS"), 0755); err != nil {
+		t.Fatalf("create app bundle: %v", err)
+	}
+
+	binDir := filepath.Join(tmp, "bin")
+	if err := os.MkdirAll(binDir, 0755); err != nil {
+		t.Fatalf("create fake bin dir: %v", err)
+	}
+	logPath := filepath.Join(tmp, "xcrun.log")
+	fakeXcrun := filepath.Join(binDir, "xcrun")
+	fakeScript := "#!/bin/sh\n" +
+		"printf '%s\\n' \"$*\" >> \"" + logPath + "\"\n" +
+		"exit 0\n"
+	if err := os.WriteFile(fakeXcrun, []byte(fakeScript), 0755); err != nil {
+		t.Fatalf("write fake xcrun: %v", err)
+	}
+
+	cmd := exec.Command("sh", filepath.Join(root, "scripts", "release", "macos_notarize.sh"), appPath, "test-profile")
+	cmd.Env = append(os.Environ(), "PATH="+binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("macos_notarize.sh failed: %v\n%s", err, out)
+	}
+
+	logData, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("read fake xcrun log: %v", err)
+	}
+	logText := string(logData)
+	if strings.Contains(logText, "notarytool submit "+appPath+" ") {
+		t.Fatalf("expected script not to submit raw .app bundle\nxcrun log:\n%s", logText)
+	}
+	if !strings.Contains(logText, "notarytool submit ") || !strings.Contains(logText, ".zip --keychain-profile test-profile --wait") {
+		t.Fatalf("expected script to submit a temporary zip for app notarization\nxcrun log:\n%s", logText)
+	}
+	if !strings.Contains(logText, "stapler staple "+appPath) {
+		t.Fatalf("expected script to staple the original app bundle\nxcrun log:\n%s", logText)
+	}
+}
+
+func TestMacReleaseScriptsRequireSparkleDownloadChecksum(t *testing.T) {
+	root := repoRoot(t)
+
+	stageScript, err := os.ReadFile(filepath.Join(root, "scripts", "release", "macos_stage_sparkle.sh"))
+	if err != nil {
+		t.Fatalf("read macos_stage_sparkle.sh: %v", err)
+	}
+	stageSource := string(stageScript)
+	for _, required := range []string{
+		"MACOS_SPARKLE_DOWNLOAD_SHA256",
+		"shasum -a 256",
+		"fatal: set MACOS_SPARKLE_DOWNLOAD_SHA256",
+	} {
+		if !strings.Contains(stageSource, required) {
+			t.Fatalf("expected Sparkle staging script to contain %q\nsource:\n%s", required, stageSource)
+		}
+	}
+
+	for _, path := range []string{
+		filepath.Join(root, "packaging", "macos", "release.env.example"),
+		filepath.Join(root, ".github", "workflows", "macos-release.yml"),
+	} {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("read %s: %v", path, err)
+		}
+		if !strings.Contains(string(data), "MACOS_SPARKLE_DOWNLOAD_SHA256") {
+			t.Fatalf("expected %s to configure MACOS_SPARKLE_DOWNLOAD_SHA256", path)
+		}
+	}
+}
+
+func TestMacMetadataRenderersEscapeXMLValues(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("script execution uses POSIX paths")
+	}
+	root := repoRoot(t)
+	tmp := t.TempDir()
+
+	metadataPath := filepath.Join(tmp, "metadata.env")
+	if err := os.WriteFile(metadataPath, []byte(strings.Join([]string{
+		"VERSION=1.2.3",
+		"ARCHIVE_LENGTH=123",
+		"PUBLICATION_DATE=Thu, 23 Apr 2026 00:00:00 +0000",
+		"EDDSA_SIGNATURE=sig+with/slash=",
+	}, "\n")), 0644); err != nil {
+		t.Fatalf("write metadata: %v", err)
+	}
+
+	appcastPath := filepath.Join(tmp, "appcast.xml")
+	cmd := exec.Command(
+		"python3",
+		filepath.Join(root, "scripts", "release", "macos_appcast.py"),
+		filepath.Join(root, "packaging", "macos", "sparkle-appcast.xml.tmpl"),
+		appcastPath,
+		"Joice & Typer",
+		"https://example.invalid/appcast.xml?channel=stable&arch=arm64",
+		"https://example.invalid/download.zip?x=1&y=2",
+		"public&key",
+		metadataPath,
+	)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("macos_appcast.py failed: %v\n%s", err, out)
+	}
+	appcastData, err := os.ReadFile(appcastPath)
+	if err != nil {
+		t.Fatalf("read appcast: %v", err)
+	}
+	if err := xml.Unmarshal(appcastData, new(any)); err != nil {
+		t.Fatalf("expected appcast XML to parse after escaping values: %v\n%s", err, appcastData)
+	}
+	if !strings.Contains(string(appcastData), "x=1&amp;y=2") {
+		t.Fatalf("expected appcast URL attributes to be XML escaped\n%s", appcastData)
+	}
+
+	plistPath := filepath.Join(tmp, "Info.plist")
+	cmd = exec.Command(
+		"python3",
+		filepath.Join(root, "scripts", "release", "macos_render_info_plist.py"),
+		filepath.Join(root, "assets", "macos", "Info.plist.tmpl"),
+		plistPath,
+		"1.2.3",
+		"https://example.invalid/appcast.xml?channel=stable&arch=arm64",
+		"public&key",
+		"true",
+	)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("macos_render_info_plist.py failed: %v\n%s", err, out)
+	}
+	plistData, err := os.ReadFile(plistPath)
+	if err != nil {
+		t.Fatalf("read plist: %v", err)
+	}
+	if err := xml.Unmarshal(plistData, new(any)); err != nil {
+		t.Fatalf("expected plist XML to parse after escaping values: %v\n%s", err, plistData)
+	}
+	if !strings.Contains(string(plistData), "channel=stable&amp;arch=arm64") {
+		t.Fatalf("expected plist string values to be XML escaped\n%s", plistData)
+	}
 }
 
 func TestMacPublishGitHubReleaseTargetUsesReleaseCheckAndGHUpload(t *testing.T) {
 	root := repoRoot(t)
+	version := currentVersion(t)
+	releaseTag := "v" + version
 
-	cmd := makeCommand(root, "-n", "mac-publish-github-release", "RELEASE_TAG=v1.1.10")
+	cmd := makeCommand(root, "-n", "mac-publish-github-release", "RELEASE_TAG="+releaseTag)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("make -n mac-publish-github-release: %v\n%s", err, out)
@@ -277,11 +478,11 @@ func TestMacPublishGitHubReleaseTargetUsesReleaseCheckAndGHUpload(t *testing.T) 
 
 	text := string(out)
 	for _, required := range []string{
-		`Release tag v1.1.10 matches VERSION 1.1.10`,
+		`Release tag ` + releaseTag + ` matches VERSION ` + version,
 		"scripts/release/macos_publish_github.sh",
-		`RELEASE_TAG="v1.1.10"`,
-		"JoiceTyper-1.1.10-macos.zip",
-		"JoiceTyper-1.1.10.dmg",
+		`RELEASE_TAG="` + releaseTag + `"`,
+		"JoiceTyper-" + version + "-macos.zip",
+		"JoiceTyper-" + version + ".dmg",
 		"appcast.xml",
 	} {
 		if !strings.Contains(text, required) {
@@ -292,8 +493,10 @@ func TestMacPublishGitHubReleaseTargetUsesReleaseCheckAndGHUpload(t *testing.T) 
 
 func TestMacPreflightTargetsUseValidationScripts(t *testing.T) {
 	root := repoRoot(t)
+	version := currentVersion(t)
+	releaseTag := "v" + version
 
-	cmd := makeCommand(root, "-n", "mac-release-preflight", "mac-notarize-preflight", "mac-publish-preflight", "RELEASE_TAG=v1.1.10")
+	cmd := makeCommand(root, "-n", "mac-release-preflight", "mac-notarize-preflight", "mac-publish-preflight", "RELEASE_TAG="+releaseTag)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("make -n mac-release-preflight mac-notarize-preflight mac-publish-preflight: %v\n%s", err, out)
@@ -305,11 +508,33 @@ func TestMacPreflightTargetsUseValidationScripts(t *testing.T) {
 		`archive`,
 		`notarize`,
 		`publish`,
-		`RELEASE_TAG="v1.1.10"`,
-		`Release tag v1.1.10 matches VERSION 1.1.10`,
+		`RELEASE_TAG="` + releaseTag + `"`,
+		`Release tag ` + releaseTag + ` matches VERSION ` + version,
 	} {
 		if !strings.Contains(text, required) {
 			t.Fatalf("expected mac preflight flow to contain %q\noutput:\n%s", required, text)
+		}
+	}
+}
+
+func TestMacPublishPreflightDoesNotRequireExistingRelease(t *testing.T) {
+	root := repoRoot(t)
+
+	data, err := os.ReadFile(filepath.Join(root, "scripts", "release", "macos_preflight.sh"))
+	if err != nil {
+		t.Fatalf("read macos_preflight.sh: %v", err)
+	}
+
+	source := string(data)
+	if strings.Contains(source, `gh release view "$RELEASE_TAG"`) {
+		t.Fatalf("expected publish preflight not to require an existing GitHub release\nsource:\n%s", source)
+	}
+	for _, required := range []string{
+		`gh auth status`,
+		`require_var GITHUB_REPOSITORY`,
+	} {
+		if !strings.Contains(source, required) {
+			t.Fatalf("expected publish preflight to contain %q\nsource:\n%s", required, source)
 		}
 	}
 }

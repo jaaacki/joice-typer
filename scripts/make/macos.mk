@@ -30,7 +30,8 @@ MACOS_DRYRUN_UPDATE_DIR := build/macos-dryrun-update
 MACOS_DRYRUN_ARCHIVE := $(MACOS_DRYRUN_UPDATE_DIR)/JoiceTyper-$(VERSION)-macos.zip
 MACOS_DRYRUN_METADATA := $(MACOS_DRYRUN_UPDATE_DIR)/JoiceTyper-$(VERSION)-macos.env
 MACOS_DRYRUN_APPCAST := $(MACOS_DRYRUN_UPDATE_DIR)/appcast.xml
-MACOS_SPARKLE_FEED_URL ?=
+MACOS_APPCAST_URL ?=
+MACOS_RELEASE_DOWNLOAD_BASE_URL ?=
 MACOS_SPARKLE_PUBLIC_ED_KEY ?=
 
 setup:
@@ -103,15 +104,19 @@ mac-publish-preflight: release-check
 	@. "$(MACOS_RELEASE_ENV_FILE)"; \
 		RELEASE_TAG="$(RELEASE_TAG)" sh "$(MACOS_PREFLIGHT_SCRIPT)" publish
 
-mac-release-app: mac-release-preflight app mac-stage-sparkle
+mac-release-app: mac-release-preflight app-no-version-bump mac-stage-sparkle
 	@sh "$(MACOS_RELEASE_ENV_SCRIPT)" archive
 	@sh "$(MACOS_RELEASE_ENV_SCRIPT)" appcast
 	mkdir -p "$(MACOS_RELEASE_DIR)"
 	@. "$(MACOS_RELEASE_ENV_FILE)"; \
-		feed_url="$${MACOS_APPCAST_BASE_URL%/}/appcast.xml"; \
-		sh "$(MACOS_PREPARE_RELEASE_APP_SCRIPT)" "$(APP_BUNDLE)" "$(MACOS_RELEASE_APP_BUNDLE)" "$(MACOS_SPARKLE_STAGE_DIR)" "$(VERSION)" "$$feed_url" "$${MACOS_SPARKLE_PUBLIC_ED_KEY}" "$${MACOS_CODESIGN_IDENTITY}" "$(PLIST_TEMPLATE)" "$(MACOS_PLIST_RENDER_SCRIPT)"
+		sh "$(MACOS_PREPARE_RELEASE_APP_SCRIPT)" "$(APP_BUNDLE)" "$(MACOS_RELEASE_APP_BUNDLE)" "$(MACOS_SPARKLE_STAGE_DIR)" "$(VERSION)" "$${MACOS_APPCAST_URL}" "$${MACOS_SPARKLE_PUBLIC_ED_KEY}" "$${MACOS_CODESIGN_IDENTITY}" "$(PLIST_TEMPLATE)" "$(MACOS_PLIST_RENDER_SCRIPT)"
 
-mac-release-archive: mac-release-app
+mac-notarize-release: mac-notarize-preflight mac-release-app
+	@sh "$(MACOS_RELEASE_ENV_SCRIPT)" notarize
+	@. "$(MACOS_RELEASE_ENV_FILE)"; \
+		sh "$(MACOS_NOTARIZE_SCRIPT)" "$(MACOS_RELEASE_APP_BUNDLE)" "$${MACOS_NOTARYTOOL_PROFILE}"
+
+mac-release-archive: mac-notarize-release
 	@sh "$(MACOS_RELEASE_ENV_SCRIPT)" archive
 	mkdir -p "$(MACOS_RELEASE_DIR)"
 	@. "$(MACOS_RELEASE_ENV_FILE)"; \
@@ -122,11 +127,11 @@ mac-appcast: mac-release-archive
 	@sh "$(MACOS_RELEASE_ENV_SCRIPT)" appcast
 	mkdir -p "$(MACOS_RELEASE_DIR)"
 	@. "$(MACOS_RELEASE_ENV_FILE)"; \
-		download_url="$${MACOS_APPCAST_BASE_URL%/}/$(notdir $(MACOS_RELEASE_ARCHIVE))"; \
-		appcast_url="$${MACOS_APPCAST_BASE_URL%/}/appcast.xml"; \
+		download_url="$${MACOS_RELEASE_DOWNLOAD_BASE_URL%/}/$(notdir $(MACOS_RELEASE_ARCHIVE))"; \
+		appcast_url="$${MACOS_APPCAST_URL}"; \
 		python3 "$(MACOS_APPCAST_SCRIPT)" "$(MACOS_APPCAST_TEMPLATE)" "$(MACOS_APPCAST_PATH)" "$(APP_NAME)" "$$appcast_url" "$$download_url" "$${MACOS_SPARKLE_PUBLIC_ED_KEY}" "$(MACOS_RELEASE_METADATA)"
 
-mac-release-dmg: mac-release-app
+mac-release-dmg: mac-notarize-release
 	@echo "Creating $(MACOS_RELEASE_DMG)..."
 	rm -rf "$(MACOS_RELEASE_DMG_STAGE)" "$(MACOS_RELEASE_DMG)"
 	mkdir -p "$(MACOS_RELEASE_DMG_STAGE)"
@@ -137,12 +142,10 @@ mac-release-dmg: mac-release-app
 		-ov -format UDZO \
 		"$(MACOS_RELEASE_DMG)"
 	rm -rf "$(MACOS_RELEASE_DMG_STAGE)"
-	@echo "Built $(MACOS_RELEASE_DMG)"
-
-mac-notarize-release: mac-notarize-preflight mac-release-archive
-	@sh "$(MACOS_RELEASE_ENV_SCRIPT)" notarize
 	@. "$(MACOS_RELEASE_ENV_FILE)"; \
-		sh "$(MACOS_NOTARIZE_SCRIPT)" "$(MACOS_RELEASE_ARCHIVE)" "$${MACOS_NOTARYTOOL_PROFILE}"
+		codesign --force --sign "$${MACOS_CODESIGN_IDENTITY}" --timestamp "$(MACOS_RELEASE_DMG)"; \
+		sh "$(MACOS_NOTARIZE_SCRIPT)" "$(MACOS_RELEASE_DMG)" "$${MACOS_NOTARYTOOL_PROFILE}"
+	@echo "Built $(MACOS_RELEASE_DMG)"
 
 mac-release-artifacts: mac-appcast mac-release-dmg
 	mkdir -p "$(MACOS_RELEASE_DIR)"
