@@ -272,6 +272,47 @@ export function SettingsScreen({ bootstrap }: SettingsScreenProps) {
     }));
   }
 
+  function handleTranslateChange(value: boolean) {
+    setStatus("");
+    // If enabling translation and the *currently-saved* model is English-only,
+    // we need to swap it for its multilingual sibling. Do the prompt BEFORE
+    // any setDraft — prompts inside a state updater are a side effect in a
+    // pure function and can be replayed.
+    //
+    // The swap runs as a single atomic setDraft. We deliberately do NOT touch
+    // `language` here — the user owns that choice, and auto-picking was what
+    // caused the "language jumps to Chinese" issue.
+    if (!value) {
+      setDraft((current) => ({ ...current, translate: false }));
+      return;
+    }
+
+    // Enabling translation. Resolve whether the active model needs swapping.
+    const currentModel = draft.modelSize;
+    const activeOption = options.models.find((m) => m.code === currentModel);
+    if (activeOption?.englishOnly !== true) {
+      // Multilingual model already active — plain flip.
+      setDraft((current) => ({ ...current, translate: true }));
+      return;
+    }
+
+    // English-only model active. We need to switch to the multilingual sibling.
+    const baseCode = currentModel.replace(/\.en$/, "");
+    const confirmed = window.confirm(
+      `Translation can't run on "${currentModel}" — English-only models have no translation head.\n\n` +
+        `Switch the active model to "${baseCode}" (multilingual)? Your "${currentModel}" file stays on disk.`,
+    );
+    if (!confirmed) return;
+
+    // Apply both changes atomically using the updater form so we don't get bitten
+    // by a stale closure if the user also changed models just before this fires.
+    setDraft((current) => ({
+      ...current,
+      translate: true,
+      modelSize: current.modelSize.endsWith(".en") ? current.modelSize.replace(/\.en$/, "") : current.modelSize,
+    }));
+  }
+
   function setModelInstalled(size: string, installed: boolean) {
     setOptions((current) => ({
       ...current,
@@ -808,6 +849,7 @@ export function SettingsScreen({ bootstrap }: SettingsScreenProps) {
             onDownloadModel={handleDownloadModel}
             onLanguageChange={(value) => update("language", value)}
             onPunctuationModeChange={(value) => update("punctuationMode", value)}
+            onTranslateChange={handleTranslateChange}
             onUseModel={handleUseModel}
           />
         );
@@ -906,7 +948,7 @@ export function SettingsScreen({ bootstrap }: SettingsScreenProps) {
                 ) : null}
               </div>
               <button className="ui-button ui-button--primary ui-button--large" onClick={() => void handleSave()} disabled={!saveAvailable || saving}>
-                Save and Reload
+                {saving ? "Reloading engine…" : "Save and Reload"}
               </button>
             </footer>
           </div>

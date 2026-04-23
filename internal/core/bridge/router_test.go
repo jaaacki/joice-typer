@@ -59,6 +59,112 @@ func TestRouterHandleRequest_SaveConfig(t *testing.T) {
 	}
 }
 
+func TestRouterHandleRequest_SaveConfig_TranslateRoundTrip(t *testing.T) {
+	var saved ConfigSnapshot
+	service := NewService(&Dependencies{
+		SaveConfig: func(ctx context.Context, cfg configpkg.Config) error {
+			saved = configSnapshotFromConfig(cfg)
+			return nil
+		},
+	})
+	router := NewRouter(service)
+
+	// translate=true on a multilingual model — should round-trip
+	params, err := json.Marshal(map[string]ConfigSnapshot{
+		"config": {
+			TriggerKey:      []string{"fn", "shift"},
+			ModelSize:       "small",
+			Language:        "zh",
+			SampleRate:      16000,
+			SoundFeedback:   true,
+			InputDevice:     "Mic",
+			InputDeviceName: "Mic",
+			DecodeMode:      "greedy",
+			PunctuationMode: "conservative",
+			Vocabulary:      "",
+			Translate:       true,
+		},
+	})
+	if err != nil {
+		t.Fatalf("Marshal params: %v", err)
+	}
+
+	response := router.HandleRequest(context.Background(), RequestEnvelope{
+		V: ProtocolVersion, Kind: KindRequest, ID: "req-t1", Method: SaveConfigMethod, Params: params,
+	})
+	if !response.OK {
+		t.Fatalf("expected success, got %#v", response.Error)
+	}
+	if saved.Translate != true {
+		t.Fatalf("saved.Translate = %v, want true", saved.Translate)
+	}
+}
+
+func TestRouterHandleRequest_SaveConfig_TranslateOmittedDefaultsFalse(t *testing.T) {
+	var saved ConfigSnapshot
+	service := NewService(&Dependencies{
+		SaveConfig: func(ctx context.Context, cfg configpkg.Config) error {
+			saved = configSnapshotFromConfig(cfg)
+			return nil
+		},
+	})
+	router := NewRouter(service)
+
+	// Callers predating the translate field should still succeed. Build the
+	// payload manually so the JSON has no "translate" key at all.
+	raw := `{"config":{"triggerKey":["fn","shift"],"modelSize":"small","language":"en","sampleRate":16000,"soundFeedback":true,"inputDevice":"Mic","inputDeviceName":"Mic","decodeMode":"greedy","punctuationMode":"conservative","vocabulary":""}}`
+
+	response := router.HandleRequest(context.Background(), RequestEnvelope{
+		V: ProtocolVersion, Kind: KindRequest, ID: "req-t2", Method: SaveConfigMethod, Params: json.RawMessage(raw),
+	})
+	if !response.OK {
+		t.Fatalf("expected success even without translate field, got %#v", response.Error)
+	}
+	if saved.Translate != false {
+		t.Fatalf("missing translate should default to false, got %v", saved.Translate)
+	}
+}
+
+func TestRouterHandleRequest_SaveConfig_TranslateWithEnglishOnlyModelRejected(t *testing.T) {
+	service := NewService(&Dependencies{
+		SaveConfig: func(ctx context.Context, cfg configpkg.Config) error {
+			// Pass through to Validate; the service should reject before calling this
+			// if the snapshot is invalid. But we still stub to avoid nil panic.
+			if err := cfg.Validate(); err != nil {
+				return err
+			}
+			return nil
+		},
+	})
+	router := NewRouter(service)
+
+	params, err := json.Marshal(map[string]ConfigSnapshot{
+		"config": {
+			TriggerKey:      []string{"fn", "shift"},
+			ModelSize:       "small.en",
+			Language:        "en",
+			SampleRate:      16000,
+			SoundFeedback:   true,
+			InputDevice:     "Mic",
+			InputDeviceName: "Mic",
+			DecodeMode:      "greedy",
+			PunctuationMode: "conservative",
+			Vocabulary:      "",
+			Translate:       true,
+		},
+	})
+	if err != nil {
+		t.Fatalf("Marshal params: %v", err)
+	}
+
+	response := router.HandleRequest(context.Background(), RequestEnvelope{
+		V: ProtocolVersion, Kind: KindRequest, ID: "req-t3", Method: SaveConfigMethod, Params: params,
+	})
+	if response.OK {
+		t.Fatal("expected error for translate=true with .en model")
+	}
+}
+
 func TestRouterHandleRequest_UnsupportedMethod(t *testing.T) {
 	router := NewRouter(NewService(nil))
 

@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useMemo } from "react";
 import type { ConfigSnapshot, ModelDownloadProgressSnapshot, ModelSnapshot, SettingsOptionsSnapshot } from "../../bridge";
 import { Field, Panel, StatusBadge, parseModelOption } from "../shared";
 
@@ -21,10 +21,9 @@ type TranscriptionPaneProps = {
   onDownloadModel: (size: string) => void | Promise<void>;
   onLanguageChange: (value: string) => void;
   onPunctuationModeChange: (value: string) => void;
+  onTranslateChange: (value: boolean) => void;
   onUseModel: (size: string) => void | Promise<void>;
 };
-
-type OutputMode = "transcription" | "translation";
 
 export default function TranscriptionPane({
   confirmDeleteModelSize,
@@ -42,26 +41,28 @@ export default function TranscriptionPane({
   onDownloadModel,
   onLanguageChange,
   onPunctuationModeChange,
+  onTranslateChange,
   onUseModel,
 }: TranscriptionPaneProps) {
-  const [mode, setMode] = useState<OutputMode>("transcription");
+  const mode: "transcription" | "translation" = draft.translate ? "translation" : "transcription";
 
   const isEnglish = draft.language === "en";
-  const activeModelIsEnglishOnly =
-    options.models.find((m) => m.code === draft.modelSize)?.englishOnly === true;
 
-  // Show English-only models when: transcription + English language picked
-  // Show multilingual models everywhere else (translation, non-English, auto-detect)
+  // Tiny models are too inaccurate to recommend — hidden from the grid, still
+  // settable via manifest if someone forces it.
+  const hiddenCodes = new Set(["tiny", "tiny.en"]);
+
+  // Show English-only models when: transcription + English. All other cases
+  // (translation, non-English transcription) show multilingual models only.
   const showEnglishOnlyModels = mode === "transcription" && isEnglish;
 
   const filteredModels = useMemo(() => {
     return options.models.filter((option) => {
+      if (hiddenCodes.has(option.code)) return false;
       const isEn = option.englishOnly === true;
       return showEnglishOnlyModels ? isEn : !isEn;
     });
   }, [options.models, showEnglishOnlyModels]);
-
-  const translationDisabled = activeModelIsEnglishOnly;
 
   return (
     <div className="pane-stack">
@@ -73,7 +74,7 @@ export default function TranscriptionPane({
               role="radio"
               aria-checked={mode === "transcription"}
               className={`mode-segments__seg${mode === "transcription" ? " is-active" : ""}`}
-              onClick={() => setMode("transcription")}
+              onClick={() => onTranslateChange(false)}
             >
               <strong>Transcription</strong>
               <span>Speak and type in the same language</span>
@@ -82,13 +83,8 @@ export default function TranscriptionPane({
               type="button"
               role="radio"
               aria-checked={mode === "translation"}
-              className={`mode-segments__seg${mode === "translation" ? " is-active" : ""}${translationDisabled ? " is-disabled" : ""}`}
-              onClick={() => {
-                if (translationDisabled) return;
-                setMode("translation");
-              }}
-              disabled={translationDisabled}
-              title={translationDisabled ? "Translation requires a multilingual model (remove the English-only model first)" : undefined}
+              className={`mode-segments__seg${mode === "translation" ? " is-active" : ""}`}
+              onClick={() => onTranslateChange(true)}
             >
               <strong>Translation</strong>
               <span>Speak one language, type English</span>
@@ -110,13 +106,11 @@ export default function TranscriptionPane({
           <div className="lang-pair">
             <Field label="From" hint="Language you speak">
               <select className="ui-select" value={draft.language} onChange={(event) => onLanguageChange(event.target.value)}>
-                {options.languages
-                  .filter((option) => option.code !== "en")
-                  .map((option) => (
-                    <option key={option.code} value={option.code}>
-                      {option.name}
-                    </option>
-                  ))}
+                {options.languages.map((option) => (
+                  <option key={option.code} value={option.code}>
+                    {option.code === "en" ? `${option.name} — no-op in translation` : option.name}
+                  </option>
+                ))}
               </select>
             </Field>
             <div className="lang-pair__arrow" aria-hidden="true">→</div>
@@ -127,6 +121,10 @@ export default function TranscriptionPane({
             </Field>
           </div>
         )}
+
+        {mode === "translation" && isEnglish ? (
+          <p className="pane-hint">Heads up: translating English to English is a no-op. Pick a different source language unless this is intentional.</p>
+        ) : null}
 
         {mode === "transcription" && isEnglish ? (
           <p className="pane-hint">English-only models below are tuned specifically for English — faster and more accurate than multilingual ones.</p>

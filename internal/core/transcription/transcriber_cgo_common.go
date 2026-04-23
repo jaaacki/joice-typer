@@ -39,6 +39,7 @@ type whisperTranscriber struct {
 	vocab      string
 	decodeMode string
 	punctMode  string
+	translate  bool
 	sampleRate int
 	logger     *slog.Logger
 	inflight   chan struct{} // semaphore: capacity 1
@@ -68,7 +69,7 @@ func WhisperSystemInfo() string {
 	return strings.TrimSpace(C.GoString(C.whisper_print_system_info()))
 }
 
-func NewTranscriber(ctx context.Context, modelPath string, modelSize string, language string, sampleRate int, decodeMode string, punctuationMode string, logger *slog.Logger) (apppkg.Transcriber, error) {
+func NewTranscriber(ctx context.Context, modelPath string, modelSize string, language string, sampleRate int, decodeMode string, punctuationMode string, translate bool, logger *slog.Logger) (apppkg.Transcriber, error) {
 	l := logger.With("component", "transcriber")
 
 	if err := ensureModel(ctx, modelPath, modelSize, l); err != nil {
@@ -127,7 +128,9 @@ func NewTranscriber(ctx context.Context, modelPath string, modelSize string, lan
 		}
 	}
 
-	l.Info("model loaded", "operation", "NewTranscriber")
+	l.Info("model loaded", "operation", "NewTranscriber",
+		"model_size", modelSize, "language", language, "decode_mode", decodeMode,
+		"punctuation_mode", punctuationMode, "translate", translate)
 
 	// Pre-warm the GPU shader pipeline with two dummy inferences that match
 	// real usage sizes. Vulkan allocates compute scratch buffers per context
@@ -177,7 +180,8 @@ func NewTranscriber(ctx context.Context, modelPath string, modelSize string, lan
 	return &whisperTranscriber{
 		ctx: wctx, lang: language, sampleRate: sampleRate, logger: l,
 		decodeMode: decodeMode, punctMode: punctuationMode,
-		inflight: make(chan struct{}, 1), vocab: "",
+		translate: translate,
+		inflight:  make(chan struct{}, 1), vocab: "",
 	}, nil
 }
 
@@ -284,6 +288,7 @@ func (t *whisperTranscriber) transcribeBlocking(audio []float32) (string, error)
 	params.single_segment = C._Bool(true)
 	params.suppress_blank = C._Bool(true)
 	params.suppress_nst = C._Bool(true)
+	params.translate = C._Bool(t.translate)
 	if decodeCfg.strategy == "greedy" {
 		params.greedy.best_of = C.int(1)
 		params.temperature = C.float(0.0)
@@ -297,14 +302,34 @@ func (t *whisperTranscriber) transcribeBlocking(audio []float32) (string, error)
 		params.beam_search.beam_size = C.int(decodeCfg.beamSize)
 	}
 
-	// Cap the mel encoder context window to the actual audio duration.
-	// Default is 1500 frames (30s); 50 frames/s means a 2s clip only needs ~164.
-	// This is the single largest latency driver for short clips.
+	// Size the mel encoder context to the actual audio duration, but keep a
+	// minimum floor of silence padding. Whisper's decoder learns to terminate
+	// on a "speech → silence → end" pattern; if we shrink audio_ctx to exactly
+	// the speech length, the decoder loses the silence signal and can loop
+	// (repeating the last phrase until EOT is finally emitted, if ever).
+	//
+	// minAudioCtxFrames = 300 (≈6s of mel context) gives whisper enough trailing
+	// silence padding to end naturally on sub-6s clips, while still keeping
+	// encoder work an order of magnitude below the default 1500 frames (30s).
+	const minAudioCtxFrames = 300
 	audioCtxFrames := int(durationSeconds*50) + 64
+	if audioCtxFrames < minAudioCtxFrames {
+		audioCtxFrames = minAudioCtxFrames
+	}
 	if audioCtxFrames > 1500 {
 		audioCtxFrames = 1500
 	}
 	params.audio_ctx = C.int(audioCtxFrames)
+
+	// Cap tokens per segment to stop whisper's "hello. hello." repetition
+	// hallucination — with temperature=0 and no_timestamps=true on short
+	// clips, greedy decoding can get stuck looping before EOT. Conservatively:
+	// ~15 tokens/second of audio is already fast speech; add generous padding.
+	// Whisper's temperature_inc/entropy_thold defaults already trigger a
+	// retry at higher temperature when the segment's compression ratio spikes,
+	// so no need to override those here (verified against whisper.cpp source).
+	maxTokens := int(durationSeconds*15) + 32
+	params.max_tokens = C.int(maxTokens)
 
 	if t.lang != "" {
 		cLang := C.CString(t.lang)
@@ -346,10 +371,45 @@ func (t *whisperTranscriber) transcribeBlocking(audio []float32) (string, error)
 
 	text := sanitizeTranscript(strings.TrimSpace(sb.String()))
 	text = applyPunctuationMode(t.punctMode, text)
+
+	// Estimate the decoded token count. Whisper's BPE averages ~4 characters
+	// per token, so len(text)/4 is a decent proxy. When we're close to the
+	// cap, the output was likely truncated — log a warning so users can see
+	// why their sentence looks cut off.
+	estimatedTokens := len(text) / 4
+	if estimatedTokens >= int(params.max_tokens)-2 {
+		t.logger.Warn("output may be truncated by max_tokens cap",
+			"operation", "Transcribe",
+			"estimated_tokens", estimatedTokens,
+			"max_tokens", int(params.max_tokens),
+			"text_length", len(text))
+	}
+
+	decodeModeDetail := decodeCfg.strategy
+	if decodeCfg.strategy == "beam" {
+		decodeModeDetail = fmt.Sprintf("beam(size=%d)", decodeCfg.beamSize)
+	} else if decodeCfg.strategy == "greedy" {
+		decodeModeDetail = fmt.Sprintf("greedy(best_of=%d)", int(params.greedy.best_of))
+	}
 	t.logger.Info("transcribed", "operation", "Transcribe",
-		"segments", n, "text_length", len(text), "decode_ms", decodeMs, "threads", int(params.n_threads), "audio_ctx", audioCtxFrames)
+		"segments", n, "text_length", len(text), "decode_ms", decodeMs,
+		"threads", int(params.n_threads), "audio_ctx", audioCtxFrames,
+		"max_tokens", int(params.max_tokens),
+		"decode_mode", decodeModeDetail,
+		"temperature", float32(params.temperature),
+		"translate", t.translate,
+		"language", t.lang,
+		"long_form", longForm)
+
+	// Preview of the raw text at Debug level (privacy-sensitive; not in
+	// regular logs). Rune-safe truncation so CJK/accented text isn't split
+	// mid-codepoint.
+	t.logger.Debug("transcribed text preview", "operation", "Transcribe",
+		"text_preview", truncateRunes(text, 120))
+
 	return text, nil
 }
+
 
 // sanitizeTranscript ensures the output is valid UTF-8 with no control characters.
 func sanitizeTranscript(s string) string {

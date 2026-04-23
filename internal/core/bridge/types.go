@@ -11,6 +11,7 @@ type ConfigSnapshot struct {
 	DecodeMode      string   `json:"decodeMode"`
 	PunctuationMode string   `json:"punctuationMode"`
 	Vocabulary      string   `json:"vocabulary"`
+	Translate       bool     `json:"translate"`
 }
 
 type InputLevelSnapshot struct {

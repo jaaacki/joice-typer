@@ -187,6 +187,38 @@ func TestValidate_InvalidSampleRate(t *testing.T) {
 	}
 }
 
+func TestValidate_TranslateWithEnglishOnlyModelRejected(t *testing.T) {
+	cfg := Config{
+		TriggerKey:      []string{"fn", "shift"},
+		ModelSize:       "small.en",
+		SampleRate:      16000,
+		DecodeMode:      "greedy",
+		PunctuationMode: "conservative",
+		Translate:       true,
+	}
+	err := cfg.Validate()
+	if err == nil {
+		t.Fatal("expected error when translate=true with .en model")
+	}
+	if !strings.Contains(err.Error(), "translate") || !strings.Contains(err.Error(), "multilingual") {
+		t.Errorf("error should explain translate needs multilingual model, got: %v", err)
+	}
+}
+
+func TestValidate_TranslateWithMultilingualModelAccepted(t *testing.T) {
+	cfg := Config{
+		TriggerKey:      []string{"fn", "shift"},
+		ModelSize:       "small",
+		SampleRate:      16000,
+		DecodeMode:      "greedy",
+		PunctuationMode: "conservative",
+		Translate:       true,
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("expected valid config with translate+multilingual, got: %v", err)
+	}
+}
+
 func TestValidate_InvalidDecodeMode(t *testing.T) {
 	cfg := Config{
 		TriggerKey:      []string{"fn", "shift"},

@@ -284,6 +284,7 @@ func configSnapshotFromConfig(cfg configpkg.Config) ConfigSnapshot {
 		DecodeMode:      cfg.DecodeMode,
 		PunctuationMode: cfg.PunctuationMode,
 		Vocabulary:      cfg.Vocabulary,
+		Translate:       cfg.Translate,
 	}
 }
 
@@ -299,5 +300,6 @@ func configFromSnapshot(snapshot ConfigSnapshot) configpkg.Config {
 		DecodeMode:      snapshot.DecodeMode,
 		PunctuationMode: snapshot.PunctuationMode,
 		Vocabulary:      snapshot.Vocabulary,
+		Translate:       snapshot.Translate,
 	}
 }

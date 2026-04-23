@@ -261,7 +261,7 @@ func startWindowsRuntimeCycle(startupCtx context.Context, cfg configpkg.Config, 
 		return windowsRuntimeCycle{hotkey: hotkey, recorder: recorder, audioInitialized: audioInitialized, err: err}
 	}
 
-	transcriber, err := transcriptionpkg.NewTranscriber(startupCtx, modelPath, cfg.ModelSize, cfg.Language, cfg.SampleRate, cfg.DecodeMode, cfg.PunctuationMode, logger)
+	transcriber, err := transcriptionpkg.NewTranscriber(startupCtx, modelPath, cfg.ModelSize, cfg.Language, cfg.SampleRate, cfg.DecodeMode, cfg.PunctuationMode, cfg.Translate, logger)
 	if err != nil {
 		logger.Warn("transcriber backend unavailable", "component", "main", "operation", "startWindowsRuntimeCycle", "error", err)
 		return windowsRuntimeCycle{

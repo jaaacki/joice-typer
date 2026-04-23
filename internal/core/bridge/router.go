@@ -49,6 +49,7 @@ type saveConfigPayload struct {
 	DecodeMode      *string   `json:"decodeMode"`
 	PunctuationMode *string   `json:"punctuationMode"`
 	Vocabulary      *string   `json:"vocabulary"`
+	Translate       *bool     `json:"translate"`
 }
 
 func (r *Router) HandleRequest(ctx context.Context, request RequestEnvelope) ResponseEnvelope {
@@ -342,6 +343,8 @@ func (p saveConfigPayload) snapshot(requestID string) (ConfigSnapshot, *Response
 		{name: "decodeMode", present: p.DecodeMode != nil},
 		{name: "punctuationMode", present: p.PunctuationMode != nil},
 		{name: "vocabulary", present: p.Vocabulary != nil},
+		// translate is optional — defaults to false when absent, for backwards
+		// compatibility with bridge callers that predate the field.
 	}
 	for _, field := range required {
 		if !field.present {
@@ -350,6 +353,10 @@ func (p saveConfigPayload) snapshot(requestID string) (ConfigSnapshot, *Response
 			})
 			return ConfigSnapshot{}, &response
 		}
+	}
+	translate := false
+	if p.Translate != nil {
+		translate = *p.Translate
 	}
 	return ConfigSnapshot{
 		TriggerKey:      append([]string(nil), (*p.TriggerKey)...),
@@ -362,6 +369,7 @@ func (p saveConfigPayload) snapshot(requestID string) (ConfigSnapshot, *Response
 		DecodeMode:      *p.DecodeMode,
 		PunctuationMode: *p.PunctuationMode,
 		Vocabulary:      *p.Vocabulary,
+		Translate:       translate,
 	}, nil
 }
 

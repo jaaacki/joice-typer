@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"slices"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 	"voicetype/internal/keys"
@@ -37,6 +38,7 @@ type Config struct {
 	DecodeMode      string   `yaml:"decode_mode"`
 	PunctuationMode string   `yaml:"punctuation_mode"`
 	Vocabulary      string   `yaml:"vocabulary"`
+	Translate       bool     `yaml:"translate"`
 }
 
 var validModelSizes = map[string]bool{
@@ -266,6 +268,13 @@ func LoadConfig(path string) (Config, error) {
 	// carry the deprecated field forward when the config is later re-saved.
 	cfg.LegacyTypeMode = ""
 
+	// Heal invalid combinations rather than failing startup. Bad state can
+	// leak in from hand-edited files, older app versions, or migrated
+	// configs. A warning-and-coerce is more forgiving than a hard boot error.
+	if cfg.Translate && strings.HasSuffix(cfg.ModelSize, ".en") {
+		cfg.Translate = false
+	}
+
 	if err := cfg.Validate(); err != nil {
 		return Config{}, err
 	}
@@ -331,6 +340,9 @@ func (c Config) Validate() error {
 	}
 	if c.Language != "" && !validLanguages[c.Language] {
 		return fmt.Errorf("config.Validate: unsupported language %q", c.Language)
+	}
+	if c.Translate && strings.HasSuffix(c.ModelSize, ".en") {
+		return fmt.Errorf("config.Validate: translate mode requires a multilingual model (%q has no translation head)", c.ModelSize)
 	}
 	return nil
 }

@@ -25,6 +25,7 @@ export type ConfigSnapshot = {
   decodeMode: string;
   punctuationMode: string;
   vocabulary: string;
+  translate: boolean;
 };
 
 export type AppStateSnapshot = {
