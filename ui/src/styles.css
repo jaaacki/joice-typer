@@ -990,6 +990,16 @@ svg {
   max-width: 980px;
 }
 
+.about-logo {
+  padding: 8px 0 4px;
+}
+
+.about-logo__img {
+  height: 48px;
+  width: auto;
+  display: block;
+}
+
 .about-summary {
   display: grid;
   gap: 24px;

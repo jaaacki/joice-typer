@@ -2,7 +2,7 @@ WINDOWS_BUILD_DIR := build/windows-amd64
 WINDOWS_BIN_PATH := $(WINDOWS_BUILD_DIR)/joicetyper.exe
 WINDOWS_RUNTIME_DIR := $(WHISPER_DIR)/build/bin/Release
 WINDOWS_RUNTIME_IMPORT_DIR := $(WHISPER_DIR)/build/src/Release
-WINDOWS_RUNTIME_DLLS := whisper.dll ggml.dll ggml-base.dll ggml-cpu.dll
+WINDOWS_RUNTIME_DLLS := whisper.dll ggml.dll ggml-base.dll ggml-cpu.dll ggml-vulkan.dll
 WINDOWS_CC ?= x86_64-w64-mingw32-gcc
 WINDOWS_CXX ?= x86_64-w64-mingw32-g++
 WINDOWS_PORTAUDIO_SRC_DIR := third_party/portaudio-windows-src
@@ -18,7 +18,8 @@ WINDOWS_LIBGOMP_DLL ?= $(shell find "$(dir $(WINDOWS_LIBGCC_DLL))/.." -name 'lib
 WINDOWS_LIBDL_DLL ?= $(shell find "$(dir $(WINDOWS_LIBGCC_DLL))/.." -name 'libdl.dll' -print -quit 2>/dev/null)
 WINDOWS_EXTRA_RUNTIME_DLLS := libwhisper.dll libgcc_s_seh-1.dll libstdc++-6.dll libgomp-1.dll libdl.dll
 WINDOWS_OPTIONAL_RUNTIME_DLLS := libwinpthread-1.dll
-WINDOWS_RUNTIME_STAGE_FILES := joicetyper.exe $(WINDOWS_RUNTIME_DLLS) $(WINDOWS_EXTRA_RUNTIME_DLLS)
+WINDOWS_APP_ICON := assets/windows/joicetyper.ico
+WINDOWS_RUNTIME_STAGE_FILES := joicetyper.exe joicetyper.ico $(WINDOWS_RUNTIME_DLLS) $(WINDOWS_EXTRA_RUNTIME_DLLS)
 WINDOWS_INSTALLER_SCRIPT := packaging/windows/joicetyper.iss
 WINDOWS_INSTALLER_NAME := JoiceTyper-$(VERSION)-setup.exe
 WINDOWS_INSTALLER_PATH := $(WINDOWS_BUILD_DIR)/$(WINDOWS_INSTALLER_NAME)
@@ -78,6 +79,7 @@ windows-whisper-runtime-stage:
 		-DGGML_AVX2=ON \
 		-DGGML_FMA=ON \
 		-DGGML_F16C=ON \
+		-DGGML_VULKAN=ON \
 		-DCMAKE_BUILD_TYPE=Release
 	cmake --build "$(WHISPER_BUILD)" --config Release --parallel 8
 	mkdir -p "$(WINDOWS_RUNTIME_DIR)" "$(WINDOWS_RUNTIME_IMPORT_DIR)" "$(WHISPER_BUILD)/ggml/src/Release" "$(WHISPER_BUILD)/ggml/src/ggml-cpu/Release"
@@ -85,6 +87,7 @@ windows-whisper-runtime-stage:
 	cp "$(WHISPER_BUILD)/bin/ggml.dll" "$(WINDOWS_RUNTIME_DIR)/ggml.dll"
 	cp "$(WHISPER_BUILD)/bin/ggml-base.dll" "$(WINDOWS_RUNTIME_DIR)/ggml-base.dll"
 	cp "$(WHISPER_BUILD)/bin/ggml-cpu.dll" "$(WINDOWS_RUNTIME_DIR)/ggml-cpu.dll"
+	cp "$(WHISPER_BUILD)/bin/ggml-vulkan.dll" "$(WINDOWS_RUNTIME_DIR)/ggml-vulkan.dll"
 	cp "$(WHISPER_BUILD)/src/libwhisper.dll.a" "$(WINDOWS_RUNTIME_IMPORT_DIR)/libwhisper.dll.a"
 	cp "$(WHISPER_BUILD)/ggml/src/libggml.dll.a" "$(WHISPER_BUILD)/ggml/src/Release/libggml.dll.a"
 	cp "$(WHISPER_BUILD)/ggml/src/libggml-base.dll.a" "$(WHISPER_BUILD)/ggml/src/Release/libggml-base.dll.a"
@@ -128,6 +131,7 @@ build-windows-runtime-amd64: version-bump bridge-contract frontend-build windows
 	@if [ -n "$(WINDOWS_LIBWINPTHREAD_DLL)" ] && [ -f "$(WINDOWS_LIBWINPTHREAD_DLL)" ]; then \
 		cp "$(WINDOWS_LIBWINPTHREAD_DLL)" "$(WINDOWS_BUILD_DIR)/libwinpthread-1.dll"; \
 	fi
+	cp "$(WINDOWS_APP_ICON)" "$(WINDOWS_BUILD_DIR)/joicetyper.ico"
 	@$(MAKE) windows-runtime-stage-check
 
 package-windows: build-windows-runtime-amd64 windows-runtime-stage-check

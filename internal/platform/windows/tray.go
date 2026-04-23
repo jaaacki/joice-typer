@@ -4,6 +4,8 @@ package windows
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"runtime"
 	"sync"
 	"time"
@@ -84,6 +86,7 @@ var (
 	procDestroyMenu            = user32.NewProc("DestroyMenu")
 	procGetCursorPos           = user32.NewProc("GetCursorPos")
 	procLoadIconW              = user32.NewProc("LoadIconW")
+	procLoadImageW             = user32.NewProc("LoadImageW")
 	windowsTrayWndProcCallback = windows.NewCallback(windowsTrayWndProc)
 	sharedWindowsTrayHost      = newWindowsTrayHost()
 	statusBarHotkeyMu          sync.Mutex
@@ -182,6 +185,22 @@ func (h *trayHost) run() {
 	}
 }
 
+func loadAppIcon() windows.Handle {
+	const imageIcon = 1
+	const lrLoadFromFile = 0x00000010
+	if exePath, err := os.Executable(); err == nil {
+		icoPath := filepath.Join(filepath.Dir(exePath), "joicetyper.ico")
+		if pathPtr, err := windows.UTF16PtrFromString(icoPath); err == nil {
+			icon, _, _ := procLoadImageW.Call(0, uintptr(unsafe.Pointer(pathPtr)), imageIcon, 0, 0, lrLoadFromFile)
+			if icon != 0 {
+				return windows.Handle(icon)
+			}
+		}
+	}
+	icon, _, _ := procLoadIconW.Call(0, idiApplication)
+	return windows.Handle(icon)
+}
+
 func (h *trayHost) initWindow() error {
 	className, err := windows.UTF16PtrFromString(windowsTrayClassName)
 	if err != nil {
@@ -219,8 +238,7 @@ func (h *trayHost) initWindow() error {
 	}
 	h.hwnd = hwnd
 
-	icon, _, _ := procLoadIconW.Call(0, idiApplication)
-	h.icon = windows.Handle(icon)
+	h.icon = loadAppIcon()
 
 	data := h.notifyIconData()
 	ret, _, callErr := procShellNotifyIconW.Call(nimAdd, uintptr(unsafe.Pointer(&data)))

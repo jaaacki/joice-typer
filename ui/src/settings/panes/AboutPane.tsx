@@ -1,15 +1,31 @@
-import type { AppStateSnapshot } from "../../bridge";
+import logoLight from "../../assets/joicetyper-logo.svg";
+import logoDark from "../../assets/joicetyper-logo-dark.svg";
+import type { AppStateSnapshot, MachineInfoSnapshot } from "../../bridge";
 
 type AboutPaneProps = {
   activeModelName: string;
   currentAppState: AppStateSnapshot;
+  machineInfo: MachineInfoSnapshot;
   runtimeStatus: string;
   saveAvailable: boolean;
 };
 
-export default function AboutPane({ activeModelName, currentAppState, runtimeStatus, saveAvailable }: AboutPaneProps) {
+function joinNonEmpty(values: string[]): string {
+  return values.map((value) => value.trim()).filter((value) => value !== "").join(", ");
+}
+
+export default function AboutPane({ activeModelName, currentAppState, machineInfo, runtimeStatus, saveAvailable }: AboutPaneProps) {
+  const graphics = joinNonEmpty(machineInfo.graphics ?? []);
+  const inference = joinNonEmpty((machineInfo.inferenceBackends ?? []).map((backend) => backend.description || backend.name));
+
   return (
     <div className="pane-stack pane-stack--about">
+      <section className="about-logo" aria-hidden="true">
+        <picture>
+          <source srcSet={logoDark} media="(prefers-color-scheme: dark)" />
+          <img src={logoLight} alt="JoiceTyper" className="about-logo__img" />
+        </picture>
+      </section>
       <section className="about-summary" aria-label="Version and runtime details">
         <p className="about-summary__lede">
           A quiet voice-to-text companion for coding. Hold your hotkey, speak naturally, and JoiceTyper types into the focused app.
@@ -32,16 +48,55 @@ export default function AboutPane({ activeModelName, currentAppState, runtimeSta
             <dt>Bridge</dt>
             <dd>{saveAvailable ? "Connected" : "Unavailable"}</dd>
           </div>
+          {machineInfo.machineModel ? (
+            <div className="about-facts__row">
+              <dt>Machine</dt>
+              <dd>{machineInfo.machineModel}</dd>
+            </div>
+          ) : null}
+          {machineInfo.chip ? (
+            <div className="about-facts__row">
+              <dt>Chip</dt>
+              <dd>{machineInfo.chip}</dd>
+            </div>
+          ) : null}
+          {machineInfo.cpuModel && machineInfo.cpuModel !== machineInfo.chip ? (
+            <div className="about-facts__row">
+              <dt>CPU</dt>
+              <dd>{machineInfo.cpuModel}</dd>
+            </div>
+          ) : null}
+          {machineInfo.integratedGpu ? (
+            <div className="about-facts__row">
+              <dt>iGPU</dt>
+              <dd>{machineInfo.integratedGpu}</dd>
+            </div>
+          ) : null}
+          {graphics ? (
+            <div className="about-facts__row">
+              <dt>Graphics</dt>
+              <dd>{graphics}</dd>
+            </div>
+          ) : null}
+          {inference ? (
+            <div className="about-facts__row">
+              <dt>Inference</dt>
+              <dd>{inference}</dd>
+            </div>
+          ) : null}
+          {machineInfo.webViewRuntimeVersion ? (
+            <div className="about-facts__row">
+              <dt>WebView2</dt>
+              <dd>{machineInfo.webViewRuntimeVersion}</dd>
+            </div>
+          ) : null}
+          {machineInfo.whisperSystemInfo ? (
+            <div className="about-facts__row">
+              <dt>Whisper</dt>
+              <dd>{machineInfo.whisperSystemInfo}</dd>
+            </div>
+          ) : null}
         </dl>
-
-        {/* Future template slot: keep the product links and update action from the prototype for later wiring.
-        <div className="button-row button-row--wrap">
-          <button className="ui-button ui-button--secondary" type="button">Check for updates</button>
-          <button className="ui-button ui-button--secondary" type="button">Documentation</button>
-          <button className="ui-button ui-button--secondary" type="button">Changelog</button>
-          <button className="ui-button ui-button--secondary" type="button">Report an issue</button>
-        </div>
-        */}
       </section>
     </div>
   );

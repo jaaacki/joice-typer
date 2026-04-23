@@ -14,6 +14,7 @@
 #define MyAppPublisher "JoiceTyper"
 #define MyAppExeName "joicetyper.exe"
 #define MyAppSourceDir AddBackslash(RepoRoot) + "build\\windows-amd64"
+#define MyAppIcon AddBackslash(RepoRoot) + "assets\\windows\\joicetyper.ico"
 #define MyWebView2Bootstrapper AddBackslash(RepoRoot) + "packaging\\windows\\MicrosoftEdgeWebview2Setup.exe"
 
 #ifexist "{#MyWebView2Bootstrapper}"
@@ -32,6 +33,7 @@ DefaultGroupName=JoiceTyper
 DisableProgramGroupPage=yes
 OutputDir={#OutputDir}
 OutputBaseFilename=JoiceTyper-{#AppVersion}-setup
+SetupIconFile={#MyAppIcon}
 Compression=lzma
 SolidCompression=yes
 ArchitecturesAllowed=x64
@@ -41,11 +43,13 @@ PrivilegesRequired=lowest
 
 [Files]
 Source: "{#MyAppSourceDir}\{#MyAppExeName}"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#MyAppIcon}"; DestDir: "{app}"; DestName: "joicetyper.ico"; Flags: ignoreversion
 Source: "{#MyAppSourceDir}\whisper.dll"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#MyAppSourceDir}\libwhisper.dll"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#MyAppSourceDir}\ggml.dll"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#MyAppSourceDir}\ggml-base.dll"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#MyAppSourceDir}\ggml-cpu.dll"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#MyAppSourceDir}\ggml-vulkan.dll"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#MyAppSourceDir}\libgcc_s_seh-1.dll"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#MyAppSourceDir}\libstdc++-6.dll"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#MyAppSourceDir}\libgomp-1.dll"; DestDir: "{app}"; Flags: ignoreversion
