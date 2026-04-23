@@ -7,5 +7,5 @@ language: "en"
 sample_rate: 16000
 sound_feedback: true
 input_device: ""  # empty = system default. Run 'voicetype --list-devices' to see options.
-decode_mode: "beam"  # "beam" for better sentence quality, "greedy" for lower latency
+decode_mode: "greedy"  # "beam" for better sentence quality, "greedy" for lower latency
 punctuation_mode: "conservative"  # "off", "conservative", or "opinionated"

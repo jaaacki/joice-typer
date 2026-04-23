@@ -29,7 +29,7 @@ const (
 	maxTranscribeBytes    = 50000            // cap output text to ~50KB
 	transcribeTimeout     = 90 * time.Second // hard deadline for whisper_full
 	whisperBeamSize       = 5
-	longFormSeconds       = 15               // long utterances need less aggressive fast-path params
+	longFormSeconds       = 8                // medium utterances should preserve more context than short push-to-talk clips
 )
 
 type whisperTranscriber struct {
@@ -56,8 +56,16 @@ func decodeConfigForMode(mode string) decodeConfig {
 	return decodeConfig{strategy: "beam", beamSize: whisperBeamSize}
 }
 
-func whisperThreadCount() int {
-	return max(1, runtime.NumCPU())
+func whisperThreadCount(longForm bool) int {
+	n := max(1, runtime.NumCPU())
+	if longForm {
+		return min(n, 4)
+	}
+	return min(n, 2)
+}
+
+func WhisperSystemInfo() string {
+	return strings.TrimSpace(C.GoString(C.whisper_print_system_info()))
 }
 
 func NewTranscriber(ctx context.Context, modelPath string, modelSize string, language string, sampleRate int, decodeMode string, punctuationMode string, logger *slog.Logger) (apppkg.Transcriber, error) {
@@ -68,12 +76,13 @@ func NewTranscriber(ctx context.Context, modelPath string, modelSize string, lan
 	}
 
 	l.Info("loading model", "operation", "NewTranscriber", "model_path", modelPath)
-	sysInfo := C.GoString(C.whisper_print_system_info())
+	sysInfo := WhisperSystemInfo()
 	if sysInfo != "" {
 		l.Info("whisper system info", "operation", "NewTranscriber", "system_info", sysInfo)
 	}
 	if runtime.GOOS == "windows" {
-		logWindowsBackendInventory(modelPath, l)
+		logWindowsBackendInventory(l)
+		beginWindowsWhisperBackendLogging(l)
 	}
 
 	cPath := C.CString(modelPath)
@@ -81,11 +90,28 @@ func NewTranscriber(ctx context.Context, modelPath string, modelSize string, lan
 
 	cparams := C.whisper_context_default_params()
 	if runtime.GOOS == "windows" {
+		gpuIndex, gpuBackend, ok := windowsSelectedGPUDevice()
+		if !ok {
+			return nil, &apppkg.ErrDependencyUnavailable{
+				Component: "transcriber",
+				Operation: "NewTranscriber",
+				Wrapped:   fmt.Errorf("no Vulkan-capable GPU or iGPU backend available"),
+			}
+		}
 		cparams.use_gpu = C.bool(true)
-		cparams.gpu_device = 0
-		l.Info("requesting GPU backend", "operation", "NewTranscriber", "gpu_device", 0)
+		cparams.gpu_device = C.int(gpuIndex)
+		cparams.flash_attn = C.bool(false)
+		l.Info("requesting GPU backend", "operation", "NewTranscriber", "gpu_device", gpuIndex, "gpu_name", gpuBackend.Name, "gpu_description", gpuBackend.Description, "flash_attn", false)
 	}
 	wctx := C.whisper_init_from_file_with_params(cPath, cparams)
+	if runtime.GOOS == "windows" {
+		backendState := endWindowsWhisperBackendLogging()
+		if backendState.noGPUFound {
+			l.Warn("GPU backend reported no GPU found — performance will be degraded", "operation", "NewTranscriber")
+		} else if backendState.usingBackend != "" {
+			l.Info("GPU backend activated", "operation", "NewTranscriber", "backend", backendState.usingBackend, "using_vulkan", backendState.usingVulkan)
+		}
+	}
 	if wctx == nil {
 		quarantineModel(modelPath, "", l, "NewTranscriber")
 		return nil, &apppkg.ErrBadPayload{Component: "transcriber", Operation: "NewTranscriber", Detail: "model corrupt or incompatible"}
@@ -102,6 +128,52 @@ func NewTranscriber(ctx context.Context, modelPath string, modelSize string, lan
 	}
 
 	l.Info("model loaded", "operation", "NewTranscriber")
+
+	// Pre-warm the GPU shader pipeline with two dummy inferences that match
+	// real usage sizes. Vulkan allocates compute scratch buffers per context
+	// size, so we must warm with audio_ctx values close to what real
+	// dictation will actually use — not a minimal stub.
+	//
+	// Pass 1 (audio_ctx=200, ~4s): covers typical short push-to-talk clips.
+	// Pass 2 (audio_ctx=500, ~10s): covers long-form clips; second pass is
+	// fast because shaders and buffers from pass 1 are already resident.
+	if runtime.GOOS == "windows" {
+		l.Info("warming GPU pipeline — pass 1 (short-form)", "operation", "NewTranscriber")
+		warmStart := time.Now()
+		warmSamples := make([]float32, 3200) // 0.2s of silence at 16kHz
+
+		warmParams := C.whisper_full_default_params(C.WHISPER_SAMPLING_GREEDY)
+		warmParams.print_progress = C._Bool(false)
+		warmParams.print_realtime = C._Bool(false)
+		warmParams.print_special = C._Bool(false)
+		warmParams.n_threads = C.int(2)
+		warmParams.no_timestamps = C._Bool(true)
+		warmParams.no_context = C._Bool(true)
+		warmParams.single_segment = C._Bool(true)
+		warmParams.suppress_blank = C._Bool(true)
+		warmParams.suppress_nst = C._Bool(true)
+		warmParams.temperature = C.float(0.0)
+		warmParams.greedy.best_of = C.int(1)
+
+		warmParams.audio_ctx = C.int(200)
+		if r := C.whisper_full(wctx, warmParams, (*C.float)(unsafe.Pointer(&warmSamples[0])), C.int(len(warmSamples))); r != 0 {
+			l.Warn("GPU warmup pass 1 returned non-zero", "operation", "NewTranscriber", "result", int(r))
+		}
+		l.Info("GPU warmup pass 1 done", "operation", "NewTranscriber", "ms", time.Since(warmStart).Milliseconds())
+
+		l.Info("warming GPU pipeline — pass 2 (long-form)", "operation", "NewTranscriber")
+		pass2Start := time.Now()
+		warmParams.audio_ctx = C.int(500)
+		warmParams.single_segment = C._Bool(false)
+		warmParams.no_timestamps = C._Bool(false)
+		warmParams.no_context = C._Bool(false)
+		if r := C.whisper_full(wctx, warmParams, (*C.float)(unsafe.Pointer(&warmSamples[0])), C.int(len(warmSamples))); r != 0 {
+			l.Warn("GPU warmup pass 2 returned non-zero", "operation", "NewTranscriber", "result", int(r))
+		}
+		l.Info("GPU warmup pass 2 done", "operation", "NewTranscriber", "ms", time.Since(pass2Start).Milliseconds())
+		l.Info("GPU pipeline fully warmed", "operation", "NewTranscriber", "total_ms", time.Since(warmStart).Milliseconds())
+	}
+
 	return &whisperTranscriber{
 		ctx: wctx, lang: language, sampleRate: sampleRate, logger: l,
 		decodeMode: decodeMode, punctMode: punctuationMode,
@@ -206,18 +278,33 @@ func (t *whisperTranscriber) transcribeBlocking(audio []float32) (string, error)
 	params.print_timestamps = C._Bool(false)
 	params.print_realtime = C._Bool(false)
 	params.print_special = C._Bool(false)
-	params.n_threads = C.int(whisperThreadCount())
+	params.n_threads = C.int(whisperThreadCount(longForm))
 	params.no_timestamps = C._Bool(true)
+	params.no_context = C._Bool(true)
+	params.single_segment = C._Bool(true)
+	params.suppress_blank = C._Bool(true)
+	params.suppress_nst = C._Bool(true)
+	if decodeCfg.strategy == "greedy" {
+		params.greedy.best_of = C.int(1)
+		params.temperature = C.float(0.0)
+	}
 	if longForm {
 		params.no_context = C._Bool(false)
-		params.single_segment = C._Bool(false)
-	} else {
-		params.no_context = C._Bool(true)
+		params.no_timestamps = C._Bool(false)
 		params.single_segment = C._Bool(false)
 	}
 	if decodeCfg.strategy == "beam" {
 		params.beam_search.beam_size = C.int(decodeCfg.beamSize)
 	}
+
+	// Cap the mel encoder context window to the actual audio duration.
+	// Default is 1500 frames (30s); 50 frames/s means a 2s clip only needs ~164.
+	// This is the single largest latency driver for short clips.
+	audioCtxFrames := int(durationSeconds*50) + 64
+	if audioCtxFrames > 1500 {
+		audioCtxFrames = 1500
+	}
+	params.audio_ctx = C.int(audioCtxFrames)
 
 	if t.lang != "" {
 		cLang := C.CString(t.lang)
@@ -260,7 +347,7 @@ func (t *whisperTranscriber) transcribeBlocking(audio []float32) (string, error)
 	text := sanitizeTranscript(strings.TrimSpace(sb.String()))
 	text = applyPunctuationMode(t.punctMode, text)
 	t.logger.Info("transcribed", "operation", "Transcribe",
-		"segments", n, "text_length", len(text), "decode_ms", decodeMs, "threads", int(params.n_threads))
+		"segments", n, "text_length", len(text), "decode_ms", decodeMs, "threads", int(params.n_threads), "audio_ctx", audioCtxFrames)
 	return text, nil
 }
 

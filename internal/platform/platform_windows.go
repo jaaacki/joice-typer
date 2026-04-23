@@ -6,6 +6,7 @@ import (
 	"context"
 	"log/slog"
 
+	configpkg "voicetype/internal/core/config"
 	apppkg "voicetype/internal/core/runtime"
 	windowspkg "voicetype/internal/platform/windows"
 )
@@ -66,6 +67,10 @@ func SetSettingsLogger(logger *slog.Logger) {
 
 func SetSettingsRecorder(rec apppkg.Recorder) {
 	windowspkg.SetSettingsRecorder(rec)
+}
+
+func MigrateWindowsInputDeviceConfig(cfg configpkg.Config) configpkg.Config {
+	return windowspkg.MigrateWindowsInputDeviceConfig(cfg)
 }
 
 func SetQuitHandler(fn func()) {

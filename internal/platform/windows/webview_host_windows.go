@@ -4,6 +4,8 @@ package windows
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
@@ -104,6 +106,7 @@ var (
 	procDestroyWindow              = user32.NewProc("DestroyWindow")
 	procGetModuleHandleW           = kernel32.NewProc("GetModuleHandleW")
 	procGetCurrentThreadID         = kernel32.NewProc("GetCurrentThreadId")
+	procSendMessageW               = user32.NewProc("SendMessageW")
 	windowsWebView2WndProcCallback = windows.NewCallback(windowsWebView2WndProc)
 )
 
@@ -367,6 +370,29 @@ func (h *windowsWebView2Host) ensureWindow() error {
 	)
 	if hwnd == 0 {
 		return fmt.Errorf("%s: create window: %w", webView2RuntimeError, createErr)
+	}
+
+	// Set the window icon: small (16px) for title bar, big (32px) for taskbar/Alt-Tab.
+	// Must load at distinct sizes — using one handle for both causes Windows to
+	// stretch the 16px icon to 32px for the taskbar, which looks wrong or fails.
+	const wmSetIcon = 0x0080
+	const iconSmall = 0
+	const iconBig = 1
+	const imageIcon = 1
+	const lrLoadFromFile = 0x00000010
+	if exePath, err := os.Executable(); err == nil {
+		icoPath := filepath.Join(filepath.Dir(exePath), "joicetyper.ico")
+		if pathPtr, err := windows.UTF16PtrFromString(icoPath); err == nil {
+			ptr := uintptr(unsafe.Pointer(pathPtr))
+			smallIcon, _, _ := procLoadImageW.Call(0, ptr, imageIcon, 16, 16, lrLoadFromFile)
+			bigIcon, _, _ := procLoadImageW.Call(0, ptr, imageIcon, 32, 32, lrLoadFromFile)
+			if smallIcon != 0 {
+				procSendMessageW.Call(hwnd, wmSetIcon, iconSmall, smallIcon)
+			}
+			if bigIcon != 0 {
+				procSendMessageW.Call(hwnd, wmSetIcon, iconBig, bigIcon)
+			}
+		}
 	}
 
 	chromium := edgepkg.NewChromium()

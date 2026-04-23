@@ -156,6 +156,10 @@ func runWindowsDesktopMode(configPath string) {
 			platformpkg.UpdateStatusBar(apppkg.StateDependencyStuck)
 			return
 		}
+		cfg = platformpkg.MigrateWindowsInputDeviceConfig(cfg)
+		if err := configpkg.SaveConfig(configPath, cfg); err != nil {
+			logger.Warn("failed to persist migrated input device config", "component", "main", "operation", "runWindowsDesktopMode", "error", err)
+		}
 
 		runtimeResult := startWindowsRuntimeCycle(startupCtx, cfg, logger)
 		if runtimeResult.app == nil {
@@ -167,10 +171,16 @@ func runWindowsDesktopMode(configPath string) {
 				)
 			}
 			runtimeResult.hotkey.RunMainLoopOnly()
+			logger.Info("windows hotkey main loop exited", "component", "main", "operation", "runWindowsDesktopMode", "with_hook", false)
 		} else {
-			runtimeResult.hotkey.Start(runtimeResult.events)
+			if err := runtimeResult.hotkey.Start(runtimeResult.events); err != nil {
+				logger.Error("windows hotkey loop failed", "component", "main", "operation", "runWindowsDesktopMode", "error", err)
+			} else {
+				logger.Info("windows hotkey loop exited", "component", "main", "operation", "runWindowsDesktopMode", "with_hook", true)
+			}
 		}
 
+		logger.Info("windows runtime cycle cleanup starting", "component", "main", "operation", "runWindowsDesktopMode")
 		platformpkg.ClearHotkeyEvents()
 		if runtimeResult.events != nil {
 			close(runtimeResult.events)

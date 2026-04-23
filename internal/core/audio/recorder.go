@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"math"
 	"runtime"
 	"sync"
 	"time"
@@ -45,29 +46,69 @@ func NewRecorder(sampleRate int, deviceName string, logger *slog.Logger) apppkg.
 	}
 }
 
-// resampleLinear resamples audio from srcRate to dstRate using linear interpolation.
+// resampleLinear resamples audio between sample rates.
+// For downsampling, it uses a band-limited windowed-sinc kernel to preserve
+// speech quality. For upsampling, it falls back to linear interpolation.
 func resampleLinear(src []float32, srcRate, dstRate float64) []float32 {
 	if srcRate == dstRate || len(src) == 0 {
 		return src
 	}
-	ratio := srcRate / dstRate
-	outLen := int(float64(len(src)) / ratio)
-	if outLen == 0 {
+	outLen := int(math.Round(float64(len(src)) * dstRate / srcRate))
+	if outLen <= 0 {
 		return nil
 	}
+	if dstRate >= srcRate {
+		ratio := srcRate / dstRate
+		out := make([]float32, outLen)
+		for i := range out {
+			pos := float64(i) * ratio
+			lo := int(pos)
+			hi := lo + 1
+			frac := float32(pos - float64(lo))
+			if hi >= len(src) {
+				out[i] = src[lo]
+			} else {
+				out[i] = src[lo]*(1-frac) + src[hi]*frac
+			}
+		}
+		return out
+	}
+
+	const filterRadius = 16.0
+	cutoff := dstRate / srcRate
 	out := make([]float32, outLen)
 	for i := range out {
-		pos := float64(i) * ratio
-		lo := int(pos)
-		hi := lo + 1
-		frac := float32(pos - float64(lo))
-		if hi >= len(src) {
-			out[i] = src[lo]
-		} else {
-			out[i] = src[lo]*(1-frac) + src[hi]*frac
+		center := float64(i) * srcRate / dstRate
+		start := int(math.Floor(center-filterRadius+1))
+		end := int(math.Ceil(center + filterRadius))
+		var sum float64
+		var norm float64
+		for j := start; j <= end; j++ {
+			if j < 0 || j >= len(src) {
+				continue
+			}
+			x := center - float64(j)
+			if math.Abs(x) > filterRadius {
+				continue
+			}
+			weight := cutoff * windowedSinc(x*cutoff) * (0.5 + 0.5*math.Cos(math.Pi*x/filterRadius))
+			sum += float64(src[j]) * weight
+			norm += weight
 		}
+		if norm != 0 {
+			sum /= norm
+		}
+		out[i] = float32(sum)
 	}
 	return out
+}
+
+func windowedSinc(x float64) float64 {
+	if x == 0 {
+		return 1
+	}
+	pix := math.Pi * x
+	return math.Sin(pix) / pix
 }
 
 func InitAudio() error {

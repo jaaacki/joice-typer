@@ -22,6 +22,7 @@
     { "goName": "HotkeyCaptureCancelMethod", "tsName": "hotkeyCaptureCancel", "value": "hotkey.capture_cancel" },
     { "goName": "HotkeyCaptureConfirmMethod", "tsName": "hotkeyCaptureConfirm", "value": "hotkey.capture_confirm" },
     { "goName": "AudioInputMonitorSetMethod", "tsName": "audioInputMonitorSet", "value": "audio_input.monitor_set" },
+    { "goName": "AudioInputMonitorStopMethod", "tsName": "audioInputMonitorStop", "value": "audio_input.monitor_stop" },
     { "goName": "RuntimeGetMethod", "tsName": "runtimeGet", "value": "runtime.get" },
     { "goName": "OptionsGetMethod", "tsName": "optionsGet", "value": "options.get" },
     { "goName": "LogsGetMethod", "tsName": "logsGet", "value": "logs.get" },

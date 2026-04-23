@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"runtime"
 	"testing"
 
 	configpkg "voicetype/internal/core/config"
@@ -29,6 +30,7 @@ func TestRouterHandleRequest_SaveConfig(t *testing.T) {
 			SampleRate:      16000,
 			SoundFeedback:   true,
 			InputDevice:     "Built-in Microphone",
+			InputDeviceName: "Built-in Microphone",
 			DecodeMode:      "beam",
 			PunctuationMode: "conservative",
 			Vocabulary:      "git rebase",
@@ -89,7 +91,7 @@ func TestRouterHandleRequest_SaveConfigFailure(t *testing.T) {
 		Kind:   KindRequest,
 		ID:     "req-3",
 		Method: SaveConfigMethod,
-		Params: json.RawMessage(`{"config":{"triggerKey":["fn","shift"],"modelSize":"small","language":"en","sampleRate":16000,"soundFeedback":true,"inputDevice":"","decodeMode":"beam","punctuationMode":"conservative","vocabulary":""}}`),
+		Params: json.RawMessage(`{"config":{"triggerKey":["fn","shift"],"modelSize":"small","language":"en","sampleRate":16000,"soundFeedback":true,"inputDevice":"","inputDeviceName":"","decodeMode":"beam","punctuationMode":"conservative","vocabulary":""}}`),
 	})
 
 	if response.OK {
@@ -631,14 +633,26 @@ func TestRouterHandleRequest_OptionsGet(t *testing.T) {
 	if len(options.Hotkey.Modifiers) == 0 || len(options.Hotkey.Keys) == 0 {
 		t.Fatalf("expected hotkey capability options, got %#v", options.Hotkey)
 	}
-	if options.Hotkey.Modifiers[0] != "fn" {
-		t.Fatalf("expected Darwin host modifiers to start with fn, got %#v", options.Hotkey.Modifiers)
-	}
-	if !options.Permissions.Accessibility.Required || !options.Permissions.Accessibility.Actionable {
-		t.Fatalf("expected Darwin accessibility permission to be required/actionable, got %#v", options.Permissions.Accessibility)
-	}
-	if !options.Permissions.InputMonitoring.Required || !options.Permissions.InputMonitoring.Actionable {
-		t.Fatalf("expected Darwin input monitoring permission to be required/actionable, got %#v", options.Permissions.InputMonitoring)
+	if runtime.GOOS == "windows" {
+		if options.Hotkey.Modifiers[0] != "shift" {
+			t.Fatalf("expected Windows host modifiers to start with shift, got %#v", options.Hotkey.Modifiers)
+		}
+		if options.Permissions.Accessibility.Required || options.Permissions.Accessibility.Actionable {
+			t.Fatalf("expected Windows accessibility permission to be optional/non-actionable, got %#v", options.Permissions.Accessibility)
+		}
+		if options.Permissions.InputMonitoring.Required || options.Permissions.InputMonitoring.Actionable {
+			t.Fatalf("expected Windows input monitoring permission to be optional/non-actionable, got %#v", options.Permissions.InputMonitoring)
+		}
+	} else {
+		if options.Hotkey.Modifiers[0] != "fn" {
+			t.Fatalf("expected Darwin host modifiers to start with fn, got %#v", options.Hotkey.Modifiers)
+		}
+		if !options.Permissions.Accessibility.Required || !options.Permissions.Accessibility.Actionable {
+			t.Fatalf("expected Darwin accessibility permission to be required/actionable, got %#v", options.Permissions.Accessibility)
+		}
+		if !options.Permissions.InputMonitoring.Required || !options.Permissions.InputMonitoring.Actionable {
+			t.Fatalf("expected Darwin input monitoring permission to be required/actionable, got %#v", options.Permissions.InputMonitoring)
+		}
 	}
 }
 

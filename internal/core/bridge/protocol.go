@@ -27,6 +27,7 @@ const (
 	HotkeyCaptureCancelMethod           = generated.HotkeyCaptureCancelMethod
 	HotkeyCaptureConfirmMethod          = generated.HotkeyCaptureConfirmMethod
 	AudioInputMonitorSetMethod          = generated.AudioInputMonitorSetMethod
+	AudioInputMonitorStopMethod         = generated.AudioInputMonitorStopMethod
 	RuntimeGetMethod                    = generated.RuntimeGetMethod
 	OptionsGetMethod                    = generated.OptionsGetMethod
 	LogsGetMethod                       = generated.LogsGetMethod

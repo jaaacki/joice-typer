@@ -7,7 +7,6 @@ import (
 	"log/slog"
 	"math"
 	"sync"
-	"time"
 
 	bridgepkg "voicetype/internal/core/bridge"
 
@@ -40,6 +39,7 @@ func NewInputLevelMonitor(sampleRate int, deviceID string, logger *slog.Logger) 
 	if err := m.start(); err != nil {
 		return nil, err
 	}
+	m.logger.Info("input monitor started", "operation", "NewInputLevelMonitor", "device", deviceID)
 	return m, nil
 }
 
@@ -68,7 +68,8 @@ func (m *windowsInputLevelMonitor) start() error {
 	m.stream = stream
 	m.stopCh = make(chan struct{})
 	m.doneCh = make(chan struct{})
-	go m.readLoop()
+	m.logger.Info("input monitor stream started", "operation", "start", "device", m.deviceID, "sample_rate", params.SampleRate, "frames_per_buffer", params.FramesPerBuffer)
+	go m.readLoop(stream, m.stopCh, m.doneCh)
 	return nil
 }
 
@@ -79,15 +80,22 @@ func (m *windowsInputLevelMonitor) resolveDevice() (*portaudio.DeviceInfo, error
 	return findInputDeviceByID(m.deviceID)
 }
 
-func (m *windowsInputLevelMonitor) readLoop() {
-	defer close(m.doneCh)
+func (m *windowsInputLevelMonitor) readLoop(stream *portaudio.Stream, stopCh <-chan struct{}, doneCh chan<- struct{}) {
+	defer func() {
+		if err := stream.Close(); err != nil {
+			m.logger.Warn("input monitor close failed", "operation", "readLoop", "error", err)
+		}
+		close(doneCh)
+	}()
 	for {
 		select {
-		case <-m.stopCh:
+		case <-stopCh:
+			m.logger.Info("input monitor stopping", "operation", "readLoop")
 			return
 		default:
 		}
-		if err := m.stream.Read(); err != nil {
+		if err := stream.Read(); err != nil {
+			m.logger.Warn("input monitor read failed", "operation", "readLoop", "error", err)
 			return
 		}
 		var sumSq float64
@@ -110,7 +118,6 @@ func (m *windowsInputLevelMonitor) readLoop() {
 		m.mu.Lock()
 		m.level = bridgepkg.InputLevelSnapshot{Level: level, Quality: quality}
 		m.mu.Unlock()
-		time.Sleep(50 * time.Millisecond)
 	}
 }
 
@@ -127,14 +134,21 @@ func (m *windowsInputLevelMonitor) SetInputDevice(deviceID string) error {
 		return nil
 	}
 	if m.stream != nil {
-		close(m.stopCh)
-		m.stream.Abort()
-		<-m.doneCh
-		m.stream.Close()
+		stream := m.stream
+		stopCh := m.stopCh
+		doneCh := m.doneCh
 		m.stream = nil
+		m.stopCh = nil
+		m.doneCh = nil
+		close(stopCh)
+		stream.Abort()
+		m.mu.Unlock()
+		<-doneCh
+		m.mu.Lock()
 	}
 	m.deviceID = deviceID
 	m.level = bridgepkg.InputLevelSnapshot{Level: 0, Quality: "poor"}
+	m.logger.Info("switching monitored input device", "operation", "SetInputDevice", "device", deviceID)
 	return m.start()
 }
 
@@ -144,10 +158,16 @@ func (m *windowsInputLevelMonitor) Close() error {
 	if m.stream == nil {
 		return nil
 	}
-	close(m.stopCh)
-	m.stream.Abort()
-	<-m.doneCh
-	err := m.stream.Close()
+	stream := m.stream
+	stopCh := m.stopCh
+	doneCh := m.doneCh
 	m.stream = nil
-	return err
+	m.stopCh = nil
+	m.doneCh = nil
+	close(stopCh)
+	stream.Abort()
+	m.mu.Unlock()
+	<-doneCh
+	m.mu.Lock()
+	return nil
 }

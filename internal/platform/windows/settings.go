@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"math"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -152,12 +153,6 @@ func openPreferences() error {
 	}
 
 	cfg = migrateWindowsInputDeviceConfig(cfg)
-	monitor, monitorErr := audiopkg.NewInputLevelMonitor(cfg.SampleRate, cfg.InputDevice, currentSettingsLogger())
-	if monitorErr != nil {
-		currentSettingsLogger().Warn("failed to start preferences input monitor", "operation", "OpenPreferences", "error", monitorErr)
-	} else {
-		SetSettingsInputMonitor(monitor)
-	}
 
 	prefsCtx, prefsCancel := context.WithCancel(context.Background())
 	setPreferencesContext(prefsCtx, prefsCancel)
@@ -169,6 +164,7 @@ func openPreferences() error {
 		return fmt.Errorf("failed to start the Windows preferences host: %w", err)
 	}
 
+	publishInputLevelChanged(bridgepkg.InputLevelSnapshot{Level: 0, Quality: "poor"})
 	notifyWebSettingsLogsUpdated()
 	return nil
 }
@@ -221,12 +217,97 @@ func loadWebSettingsPermissionsSnapshot() bridgepkg.PermissionsSnapshot {
 	return bridgepkg.PermissionsSnapshot{Accessibility: true, InputMonitoring: true}
 }
 
-func migrateWindowsInputDeviceConfig(cfg configpkg.Config) configpkg.Config {
-	if cfg.InputDevice == "" {
-		return cfg
+func loadWebSettingsMachineInfo() bridgepkg.MachineInfoSnapshot {
+	snapshot := bridgepkg.MachineInfoSnapshot{
+		Platform:          "windows",
+		WhisperSystemInfo: transcriptionpkg.WhisperSystemInfo(),
 	}
+	if version, err := detectInstalledWebView2Version(); err == nil {
+		snapshot.WebViewRuntimeVersion = version
+	}
+	if cpuModel, err := windowsCPUModel(); err == nil {
+		snapshot.CPUModel = cpuModel
+	}
+	if machineModel, err := windowsMachineModel(); err == nil {
+		snapshot.MachineModel = machineModel
+	}
+	if modelPath, err := defaultModelPath("small"); err == nil {
+		_ = modelPath
+		backends := transcriptionpkg.WindowsBackendInventory()
+		snapshot.InferenceBackends = backends
+		for _, backend := range backends {
+			label := backend.Description
+			if label == "" {
+				label = backend.Name
+			}
+			if label != "" {
+				snapshot.Graphics = append(snapshot.Graphics, label)
+			}
+			if snapshot.IntegratedGPU == "" && backend.Kind == "igpu" {
+				snapshot.IntegratedGPU = label
+			}
+		}
+	}
+	if snapshot.Chip == "" {
+		snapshot.Chip = snapshot.CPUModel
+	}
+	return snapshot
+}
+
+func windowsCPUModel() (string, error) {
+	out, err := exec.Command("cmd", "/C", "wmic cpu get Name /value").Output()
+	if err != nil {
+		return "", err
+	}
+	for _, line := range strings.Split(string(out), "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "Name=") {
+			return strings.TrimSpace(strings.TrimPrefix(line, "Name=")), nil
+		}
+	}
+	return "", fmt.Errorf("cpu model not found")
+}
+
+func windowsMachineModel() (string, error) {
+	out, err := exec.Command("cmd", "/C", "wmic computersystem get Manufacturer,Model /value").Output()
+	if err != nil {
+		return "", err
+	}
+	manufacturer := ""
+	model := ""
+	for _, line := range strings.Split(string(out), "\n") {
+		line = strings.TrimSpace(line)
+		switch {
+		case strings.HasPrefix(line, "Manufacturer="):
+			manufacturer = strings.TrimSpace(strings.TrimPrefix(line, "Manufacturer="))
+		case strings.HasPrefix(line, "Model="):
+			model = strings.TrimSpace(strings.TrimPrefix(line, "Model="))
+		}
+	}
+	value := strings.TrimSpace(strings.TrimSpace(manufacturer + " " + model))
+	if value == "" {
+		return "", fmt.Errorf("machine model not found")
+	}
+	return value, nil
+}
+
+func migrateWindowsInputDeviceConfig(cfg configpkg.Config) configpkg.Config {
 	devices, err := listWebSettingsInputDevices()
 	if err != nil {
+		return cfg
+	}
+	defaultDevice := bridgepkg.DeviceSnapshot{}
+	for _, device := range devices {
+		if device.IsDefault {
+			defaultDevice = device
+			break
+		}
+	}
+	if cfg.InputDevice == "" {
+		if defaultDevice.ID != "" {
+			cfg.InputDevice = defaultDevice.ID
+			cfg.InputDeviceName = defaultDevice.Name
+		}
 		return cfg
 	}
 	for _, device := range devices {
@@ -244,7 +325,15 @@ func migrateWindowsInputDeviceConfig(cfg configpkg.Config) configpkg.Config {
 			return cfg
 		}
 	}
+	if defaultDevice.ID != "" {
+		cfg.InputDevice = defaultDevice.ID
+		cfg.InputDeviceName = defaultDevice.Name
+	}
 	return cfg
+}
+
+func MigrateWindowsInputDeviceConfig(cfg configpkg.Config) configpkg.Config {
+	return migrateWindowsInputDeviceConfig(cfg)
 }
 
 func buildSettingsBridgeService(_ configpkg.Config) *bridgepkg.Service {
@@ -312,6 +401,9 @@ func buildSettingsBridgeService(_ configpkg.Config) *bridgepkg.Service {
 		LoadPermissions: func(context.Context) (bridgepkg.PermissionsSnapshot, error) {
 			return webSettingsLoadPermissions(), nil
 		},
+		LoadMachineInfo: func(context.Context) (bridgepkg.MachineInfoSnapshot, error) {
+			return loadWebSettingsMachineInfo(), nil
+		},
 		OpenPermissionSettings: func(_ context.Context, target string) error {
 			// Windows does not require the macOS-specific accessibility/input-monitoring grants.
 			return bridgepkg.WrapContractError(
@@ -352,16 +444,49 @@ func buildSettingsBridgeService(_ configpkg.Config) *bridgepkg.Service {
 			cfg.InputDevice = inputDevice
 			cfg = migrateWindowsInputDeviceConfig(cfg)
 			if monitor := currentSettingsInputMonitor(); monitor != nil {
-				if err := monitor.SetInputDevice(cfg.InputDevice); err != nil {
+				if err := monitor.Close(); err != nil {
 					return bridgepkg.WrapContractError(
 						bridgepkg.ErrorCodeDevicesRefreshFailed,
-						"Failed to switch monitored input device",
+						"Failed to stop previous monitored input device",
 						true,
 						nil,
 						err,
 					)
 				}
+				SetSettingsInputMonitor(nil)
 			}
+			monitor, err := audiopkg.NewInputLevelMonitor(cfg.SampleRate, cfg.InputDevice, currentSettingsLogger())
+			if err != nil {
+				currentSettingsLogger().Warn("failed to start monitored input device", "operation", "SetAudioInputMonitor", "device", cfg.InputDevice, "error", err)
+				return bridgepkg.WrapContractError(
+					bridgepkg.ErrorCodeDevicesRefreshFailed,
+					"Failed to start monitored input device",
+					true,
+					nil,
+					err,
+				)
+			}
+			SetSettingsInputMonitor(monitor)
+			publishInputLevelChanged(monitor.Snapshot())
+			return nil
+		},
+		StopAudioInputMonitor: func(context.Context) error {
+			monitor := currentSettingsInputMonitor()
+			if monitor == nil {
+				publishInputLevelChanged(bridgepkg.InputLevelSnapshot{Level: 0, Quality: "poor"})
+				return nil
+			}
+			if err := monitor.Close(); err != nil {
+				return bridgepkg.WrapContractError(
+					bridgepkg.ErrorCodeDevicesRefreshFailed,
+					"Failed to stop monitored input device",
+					true,
+					nil,
+					err,
+				)
+			}
+			SetSettingsInputMonitor(nil)
+			publishInputLevelChanged(bridgepkg.InputLevelSnapshot{Level: 0, Quality: "poor"})
 			return nil
 		},
 		LoadModel: func(context.Context) (bridgepkg.ModelSnapshot, error) {

@@ -15,6 +15,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -23,6 +24,7 @@ import (
 
 	bridgepkg "voicetype/internal/core/bridge"
 	configpkg "voicetype/internal/core/config"
+	transcriptionpkg "voicetype/internal/core/transcription"
 	versionpkg "voicetype/internal/core/version"
 	uiembed "voicetype/ui"
 )
@@ -130,6 +132,23 @@ func clearActiveWebSettingsBridgeService() {
 	webSettingsServiceMu.Unlock()
 }
 
+func loadWebSettingsMachineInfo() bridgepkg.MachineInfoSnapshot {
+	snapshot := bridgepkg.MachineInfoSnapshot{
+		Platform:          "darwin",
+		WhisperSystemInfo: transcriptionpkg.WhisperSystemInfo(),
+	}
+	if out, err := exec.Command("/usr/sbin/sysctl", "-n", "machdep.cpu.brand_string").Output(); err == nil {
+		snapshot.CPUModel = strings.TrimSpace(string(out))
+	}
+	if out, err := exec.Command("/usr/sbin/sysctl", "-n", "hw.model").Output(); err == nil {
+		snapshot.MachineModel = strings.TrimSpace(string(out))
+	}
+	if snapshot.Chip == "" {
+		snapshot.Chip = snapshot.CPUModel
+	}
+	return snapshot
+}
+
 func buildSettingsBridgeService(_ configpkg.Config) *bridgepkg.Service {
 	return bridgepkg.NewService(&bridgepkg.Dependencies{
 		LoadConfig: func(context.Context) (configpkg.Config, error) {
@@ -191,6 +210,9 @@ func buildSettingsBridgeService(_ configpkg.Config) *bridgepkg.Service {
 		},
 		LoadPermissions: func(context.Context) (bridgepkg.PermissionsSnapshot, error) {
 			return webSettingsLoadPermissions(), nil
+		},
+		LoadMachineInfo: func(context.Context) (bridgepkg.MachineInfoSnapshot, error) {
+			return loadWebSettingsMachineInfo(), nil
 		},
 		OpenPermissionSettings: func(ctx context.Context, target string) error {
 			if err := webSettingsOpenPermissionSettings(target); err != nil {

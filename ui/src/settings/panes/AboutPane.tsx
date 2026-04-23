@@ -1,5 +1,3 @@
-import logoLight from "../../assets/joicetyper-logo.svg";
-import logoDark from "../../assets/joicetyper-logo-dark.svg";
 import type { AppStateSnapshot, MachineInfoSnapshot } from "../../bridge";
 
 type AboutPaneProps = {
@@ -20,12 +18,6 @@ export default function AboutPane({ activeModelName, currentAppState, machineInf
 
   return (
     <div className="pane-stack pane-stack--about">
-      <section className="about-logo" aria-hidden="true">
-        <picture>
-          <source srcSet={logoDark} media="(prefers-color-scheme: dark)" />
-          <img src={logoLight} alt="JoiceTyper" className="about-logo__img" />
-        </picture>
-      </section>
       <section className="about-summary" aria-label="Version and runtime details">
         <p className="about-summary__lede">
           A quiet voice-to-text companion for coding. Hold your hotkey, speak naturally, and JoiceTyper types into the focused app.

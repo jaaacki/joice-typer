@@ -32,11 +32,30 @@ export type AppStateSnapshot = {
   version: string;
 };
 
+export type MachineBackendSnapshot = {
+  kind: string;
+  name: string;
+  description: string;
+};
+
+export type MachineInfoSnapshot = {
+  platform: string;
+  machineModel: string;
+  chip: string;
+  cpuModel: string;
+  integratedGpu: string;
+  graphics: string[];
+  whisperSystemInfo: string;
+  inferenceBackends: MachineBackendSnapshot[];
+  webViewRuntimeVersion: string;
+};
+
 export type BootstrapPayload = {
   config: ConfigSnapshot;
   appState: AppStateSnapshot;
   permissions: PermissionsSnapshot;
   model: ModelSnapshot;
+  machineInfo: MachineInfoSnapshot;
   options: SettingsOptionsSnapshot;
 };
 
@@ -384,6 +403,10 @@ export function confirmHotkeyCapture(): Promise<HotkeyCaptureSnapshot> {
 
 export function setAudioInputMonitor(inputDevice: string): Promise<void> {
   return query<{ selected: boolean }, { inputDevice: string }>(METHODS.audioInputMonitorSet, { inputDevice }).then(() => undefined);
+}
+
+export function stopAudioInputMonitor(): Promise<void> {
+  return query<{ stopped: boolean }, Record<string, never>>(METHODS.audioInputMonitorStop, {}).then(() => undefined);
 }
 
 export function subscribeRuntimeStateChanged(handler: (appState: AppStateSnapshot) => void): () => void {

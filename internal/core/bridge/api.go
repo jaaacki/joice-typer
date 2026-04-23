@@ -15,7 +15,9 @@ type Dependencies struct {
 	OpenPermissionSettings func(context.Context, string) error
 	ListDevices            func(context.Context) ([]DeviceSnapshot, error)
 	RefreshDevices         func(context.Context) ([]DeviceSnapshot, error)
+	LoadMachineInfo        func(context.Context) (MachineInfoSnapshot, error)
 	SetAudioInputMonitor   func(context.Context, string) error
+	StopAudioInputMonitor  func(context.Context) error
 	LoadModel              func(context.Context) (ModelSnapshot, error)
 	DownloadModel          func(context.Context, string) error
 	DeleteModel            func(context.Context, string) error
@@ -98,11 +100,25 @@ func (s *Service) RefreshDevices(ctx context.Context) ([]DeviceSnapshot, error) 
 	return s.deps.RefreshDevices(ctx)
 }
 
+func (s *Service) MachineInfo(ctx context.Context) (MachineInfoSnapshot, error) {
+	if s.deps.LoadMachineInfo == nil {
+		return MachineInfoSnapshot{}, nil
+	}
+	return s.deps.LoadMachineInfo(ctx)
+}
+
 func (s *Service) SetAudioInputMonitor(ctx context.Context, inputDevice string) error {
 	if s.deps.SetAudioInputMonitor == nil {
 		return missingDependencyError(AudioInputMonitorSetMethod, "SetAudioInputMonitor")
 	}
 	return s.deps.SetAudioInputMonitor(ctx, inputDevice)
+}
+
+func (s *Service) StopAudioInputMonitor(ctx context.Context) error {
+	if s.deps.StopAudioInputMonitor == nil {
+		return missingDependencyError(AudioInputMonitorStopMethod, "StopAudioInputMonitor")
+	}
+	return s.deps.StopAudioInputMonitor(ctx)
 }
 
 func (s *Service) Model(ctx context.Context) (ModelSnapshot, error) {
@@ -226,11 +242,16 @@ func (s *Service) Bootstrap(ctx context.Context) (BootstrapPayload, error) {
 	if err != nil {
 		return BootstrapPayload{}, err
 	}
+	machineInfoSnapshot, err := s.MachineInfo(ctx)
+	if err != nil {
+		return BootstrapPayload{}, err
+	}
 	return BootstrapPayload{
 		Config:      configSnapshot,
 		AppState:    appStateSnapshot,
 		Permissions: permissionsSnapshot,
 		Model:       modelSnapshot,
+		MachineInfo: machineInfoSnapshot,
 		Options:     settingsOptionsSnapshot(),
 	}, nil
 }

@@ -40,11 +40,30 @@ type AppStateSnapshot struct {
 	Version string `json:"version"`
 }
 
+type MachineBackendSnapshot struct {
+	Kind        string `json:"kind"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+}
+
+type MachineInfoSnapshot struct {
+	Platform              string                   `json:"platform"`
+	MachineModel          string                   `json:"machineModel"`
+	Chip                  string                   `json:"chip"`
+	CPUModel              string                   `json:"cpuModel"`
+	IntegratedGPU         string                   `json:"integratedGpu"`
+	Graphics              []string                 `json:"graphics"`
+	WhisperSystemInfo     string                   `json:"whisperSystemInfo"`
+	InferenceBackends     []MachineBackendSnapshot `json:"inferenceBackends"`
+	WebViewRuntimeVersion string                   `json:"webViewRuntimeVersion"`
+}
+
 type BootstrapPayload struct {
 	Config      ConfigSnapshot          `json:"config"`
 	AppState    AppStateSnapshot        `json:"appState"`
 	Permissions PermissionsSnapshot     `json:"permissions"`
 	Model       ModelSnapshot           `json:"model"`
+	MachineInfo MachineInfoSnapshot     `json:"machineInfo"`
 	Options     SettingsOptionsSnapshot `json:"options"`
 }
 

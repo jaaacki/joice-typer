@@ -78,8 +78,15 @@ func currentSettingsRecorder() Recorder {
 
 func SetSettingsInputMonitor(m audiopkg.InputLevelMonitor) {
 	runtimeSingleton.mu.Lock()
+	old := runtimeSingleton.settingsMonitor
 	runtimeSingleton.settingsMonitor = m
+	logger := runtimeSingleton.settingsLogger
 	runtimeSingleton.mu.Unlock()
+	if old != nil && old != m {
+		if err := old.Close(); err != nil {
+			logger.Warn("failed to close replaced settings input monitor", "operation", "SetSettingsInputMonitor", "error", err)
+		}
+	}
 }
 
 func currentSettingsInputMonitor() audiopkg.InputLevelMonitor {

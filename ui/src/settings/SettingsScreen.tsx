@@ -1,4 +1,8 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
+import logoLightRaw from "../assets/joicetyper-logo.svg?raw";
+import logoDarkRaw from "../assets/joicetyper-logo-dark.svg?raw";
+const logoLight = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(logoLightRaw)}`;
+const logoDark = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(logoDarkRaw)}`;
 import {
   BridgeRequestError,
   copyVisibleLogTail,
@@ -15,6 +19,8 @@ import {
   openPermissionSettings,
   refreshDevices,
   saveConfig,
+  setAudioInputMonitor,
+  stopAudioInputMonitor,
   startHotkeyCapture,
   subscribeConfigSaved,
   subscribeDevicesChanged,
@@ -33,6 +39,7 @@ import {
   type DeviceSnapshot,
   type HotkeyCaptureSnapshot,
   type InputLevelSnapshot,
+  type MachineInfoSnapshot,
   type ModelDownloadProgressSnapshot,
   type ModelDownloadFailedSnapshot,
   type ModelSnapshot,
@@ -88,21 +95,10 @@ function SidebarButton({
 
 function JoiceLogo() {
   return (
-    <svg width="22" height="22" viewBox="0 0 32 32" fill="none" aria-hidden="true">
-      <path
-        d="M5 9a4 4 0 0 1 4-4h14a4 4 0 0 1 4 4v9a4 4 0 0 1-4 4h-7.5L10 27.5V22H9a4 4 0 0 1-4-4V9z"
-        className="settings-logo__bubble"
-        strokeWidth="2"
-        strokeLinejoin="round"
-      />
-      <path
-        d="M18 10v6.2a2.8 2.8 0 0 1-5.6 0"
-        className="settings-logo__mark"
-        strokeWidth="2"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
+    <picture>
+      <source srcSet={logoDark} media="(prefers-color-scheme: dark)" />
+      <img src={logoLight} alt="JoiceTyper" width="28" height="28" style={{ display: "block", objectFit: "contain" }} />
+    </picture>
   );
 }
 
@@ -155,6 +151,20 @@ function MicLevelMeter({ level }: { level: number }) {
   );
 }
 
+function effectiveInputDevice(config: ConfigSnapshot, devices: DeviceSnapshot[]): string {
+  if (config.inputDevice !== "") {
+    return config.inputDevice;
+  }
+  return devices.find((device) => device.isDefault)?.id ?? "";
+}
+
+function effectiveInputDeviceName(config: ConfigSnapshot, devices: DeviceSnapshot[]): string {
+  if (config.inputDeviceName !== "") {
+    return config.inputDeviceName;
+  }
+  return devices.find((device) => device.isDefault)?.name ?? "";
+}
+
 export function SettingsScreen({ bootstrap }: SettingsScreenProps) {
   const initialConfig = sanitizeConfigSnapshot(bootstrap.config);
   const [activePane, setActivePane] = useState<PaneId>("capture");
@@ -164,6 +174,7 @@ export function SettingsScreen({ bootstrap }: SettingsScreenProps) {
   const [permissions, setPermissions] = useState<PermissionsSnapshot>(bootstrap.permissions);
   const [devices, setDevices] = useState<DeviceSnapshot[]>([]);
   const [model, setModel] = useState<ModelSnapshot>(bootstrap.model);
+  const [machineInfo] = useState<MachineInfoSnapshot>(bootstrap.machineInfo);
   const [options, setOptions] = useState<SettingsOptionsSnapshot>(bootstrap.options);
   const [status, setStatus] = useState<string>("");
   const [saving, setSaving] = useState(false);
@@ -171,6 +182,7 @@ export function SettingsScreen({ bootstrap }: SettingsScreenProps) {
   const [hotkeyCapture, setHotkeyCapture] = useState<HotkeyCaptureSnapshot | null>(null);
   const [downloadProgress, setDownloadProgress] = useState<ModelDownloadProgressSnapshot | null>(null);
   const [inputLevel, setInputLevel] = useState<InputLevelSnapshot>({ level: 0, quality: "poor" });
+  const [micTestActive, setMicTestActive] = useState(false);
 
   const modelOptionsByCode = useMemo(
     () => new Map(options.models.map((option) => [option.code, option])),
@@ -238,6 +250,9 @@ export function SettingsScreen({ bootstrap }: SettingsScreenProps) {
       label: "Available",
     };
   }, [downloadProgress, draft.modelSize, model.ready, model.size, modelActionSize, modelMatchesTarget]);
+
+  const resolvedInputDevice = useMemo(() => effectiveInputDevice(draft, devices), [draft, devices]);
+  const resolvedInputDeviceName = useMemo(() => effectiveInputDeviceName(draft, devices), [draft, devices]);
 
   function update<K extends keyof ConfigSnapshot>(key: K, value: ConfigSnapshot[K]) {
     setStatus("");
@@ -444,7 +459,11 @@ export function SettingsScreen({ bootstrap }: SettingsScreenProps) {
     setSaving(true);
     try {
       setStatus("Save request sent. Waiting for native confirmation.");
-      await saveConfig(draft);
+      await saveConfig({
+        ...draft,
+        inputDevice: resolvedInputDevice,
+        inputDeviceName: resolvedInputDeviceName,
+      });
       setStatus("Saved. JoiceTyper is reloading the runtime.");
     } catch (error) {
       setStatus(describeBridgeError(error, "Failed to save settings"));
@@ -503,6 +522,29 @@ export function SettingsScreen({ bootstrap }: SettingsScreenProps) {
       setStatus("Input devices refreshed.");
     } catch (error) {
       setStatus(describeBridgeError(error, "Failed to refresh input devices"));
+    }
+  }
+
+  async function handleStartMicTest() {
+    try {
+      setStatus("Starting mic test...");
+      await setAudioInputMonitor(draft.inputDevice);
+      setMicTestActive(true);
+      setStatus("Mic test is running.");
+    } catch (error) {
+      setMicTestActive(false);
+      setStatus(describeBridgeError(error, "Failed to start mic test"));
+    }
+  }
+
+  async function handleStopMicTest() {
+    try {
+      await stopAudioInputMonitor();
+      setMicTestActive(false);
+      setInputLevel({ level: 0, quality: "poor" });
+      setStatus("Mic test stopped.");
+    } catch (error) {
+      setStatus(describeBridgeError(error, "Failed to stop mic test"));
     }
   }
 
@@ -632,15 +674,15 @@ export function SettingsScreen({ bootstrap }: SettingsScreenProps) {
                   {devices.length > 0 ? (
                     <select
                       className="ui-select"
-                      value={draft.inputDevice}
+                      value={resolvedInputDevice}
                       onChange={(event) => {
                         const selected = devices.find((device) => device.id === event.target.value);
-                        update("inputDevice", event.target.value);
+                        update("inputDevice", selected?.id ?? "");
                         update("inputDeviceName", selected?.name ?? "");
-                        void setAudioInputMonitor(event.target.value);
+                        setMicTestActive(false);
+                        setInputLevel({ level: 0, quality: "poor" });
                       }}
                     >
-                      <option value="">System default</option>
                       {devices.map((device) => (
                         <option key={device.id} value={device.id}>
                           {device.name}
@@ -651,7 +693,7 @@ export function SettingsScreen({ bootstrap }: SettingsScreenProps) {
                   ) : (
                     <input
                       className="ui-input"
-                      value={draft.inputDevice}
+                      value={resolvedInputDevice}
                       onChange={(event) => update("inputDevice", event.target.value)}
                       placeholder="System default"
                     />
@@ -668,13 +710,22 @@ export function SettingsScreen({ bootstrap }: SettingsScreenProps) {
                 </span>
                 <div className="mic-preview__content">
                   <div className="mic-preview__instruction">
-                    Leave the mic where you normally use it and speak a short phrase in your normal voice.
+                    Click Start mic test, then speak a short phrase in your normal voice. Click Stop when done.
                   </div>
                   <MicLevelMeter level={inputLevel.level} />
                 </div>
                 <span className="mic-preview__label">
                   <StatusBadge tone={micQualityTone(inputLevel.quality)}>{inputLevel.quality === "good" ? "Good" : inputLevel.quality === "acceptable" ? "Acceptable" : "Poor"}</StatusBadge>
                 </span>
+                {!micTestActive ? (
+                  <button className="ui-button ui-button--secondary" type="button" onClick={() => void handleStartMicTest()}>
+                    Start Mic Test
+                  </button>
+                ) : (
+                  <button className="ui-button ui-button--ghost" type="button" onClick={() => void handleStopMicTest()}>
+                    Stop Mic Test
+                  </button>
+                )}
               </div>
 
               {/* Future template slot: advanced capture tuning is intentionally hidden until the backend has hard constraints instead of accepting arbitrary integers.
@@ -732,6 +783,7 @@ export function SettingsScreen({ bootstrap }: SettingsScreenProps) {
           <AboutPane
             activeModelName={activeModelName}
             currentAppState={currentAppState}
+            machineInfo={machineInfo}
             runtimeStatus={runtimeStatus}
             saveAvailable={saveAvailable}
           />

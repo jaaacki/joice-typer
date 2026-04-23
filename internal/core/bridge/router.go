@@ -133,6 +133,14 @@ func (r *Router) HandleRequest(ctx context.Context, request RequestEnvelope) Res
 			return NewErrorResponseFromError(request.ID, err, ErrorCodeDevicesRefreshFailed, "failed to update monitored audio input", true, nil)
 		}
 		return NewSuccessResponse(request.ID, map[string]any{"selected": true})
+	case AudioInputMonitorStopMethod:
+		if response := ensureEmptyParams(request); response != nil {
+			return *response
+		}
+		if err := r.service.StopAudioInputMonitor(ctx); err != nil {
+			return NewErrorResponseFromError(request.ID, err, ErrorCodeDevicesRefreshFailed, "failed to stop monitored audio input", true, nil)
+		}
+		return NewSuccessResponse(request.ID, map[string]any{"stopped": true})
 	case ModelGetMethod:
 		if response := ensureEmptyParams(request); response != nil {
 			return *response
