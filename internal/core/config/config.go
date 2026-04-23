@@ -41,19 +41,27 @@ type Config struct {
 
 var validModelSizes = map[string]bool{
 	"tiny": true, "base": true, "small": true, "medium": true,
+	"tiny.en": true, "base.en": true, "small.en": true, "medium.en": true,
 }
 
 type ModelInfo struct {
 	Size        string
 	Description string
 	Bytes       int64
+	EnglishOnly bool
 }
 
 var ModelOptions = []ModelInfo{
-	{"tiny", "Tiny — 75 MB · Fastest, basic accuracy", 77691713},
-	{"base", "Base — 142 MB · Faster, fair accuracy (good balance)", 147951465},
-	{"small", "Small — 466 MB · Fast, good accuracy (recommended)", 487601967},
-	{"medium", "Medium — 1.5 GB · Slow, very accurate (worth trying)", 1533763059},
+	// Multilingual — all languages + translation
+	{"tiny", "Tiny — 75 MB · Fastest, basic accuracy", 77691713, false},
+	{"base", "Base — 142 MB · Fast, fair accuracy", 147951465, false},
+	{"small", "Small — 466 MB · Good accuracy · Supports translation", 487601967, false},
+	{"medium", "Medium — 1.5 GB · Best accuracy · Supports translation", 1533763059, false},
+	// English-only — better accuracy for English, no translation
+	{"tiny.en", "Tiny · English only — 74 MB · Fastest", 77704715, true},
+	{"base.en", "Base · English only — 141 MB · Fast, good accuracy", 147964211, true},
+	{"small.en", "Small · English only — 465 MB · Better accuracy for English", 487614201, true},
+	{"medium.en", "Medium · English only — 1.5 GB · Best accuracy for English", 1533774781, true},
 }
 
 var validModifiers = map[string]bool{

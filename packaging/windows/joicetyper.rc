@@ -1,0 +1,4 @@
+// Windows resource script — embeds the app icon into the exe.
+// Resource ID 1 is the standard primary app icon slot Windows uses
+// for the taskbar, Alt+Tab, and title bar.
+1 ICON "..\\..\\assets\\windows\\joicetyper.ico"

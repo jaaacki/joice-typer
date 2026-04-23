@@ -186,6 +186,17 @@ func (h *trayHost) run() {
 }
 
 func loadAppIcon() windows.Handle {
+	// Prefer the icon embedded in the exe as resource ID 1 (compiled from joicetyper.rc).
+	// Windows uses this automatically for the taskbar, Alt+Tab, and title bar.
+	instance, _, _ := procGetModuleHandleW.Call(0)
+	if instance != 0 {
+		const idiAppIcon = 1
+		icon, _, _ := procLoadIconW.Call(instance, uintptr(idiAppIcon))
+		if icon != 0 {
+			return windows.Handle(icon)
+		}
+	}
+	// Fall back to loading from file beside the exe
 	const imageIcon = 1
 	const lrLoadFromFile = 0x00000010
 	if exePath, err := os.Executable(); err == nil {

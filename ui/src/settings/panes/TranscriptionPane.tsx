@@ -1,3 +1,4 @@
+import { useState, useMemo } from "react";
 import type { ConfigSnapshot, ModelDownloadProgressSnapshot, ModelSnapshot, SettingsOptionsSnapshot } from "../../bridge";
 import { Field, Panel, StatusBadge, parseModelOption } from "../shared";
 
@@ -23,6 +24,8 @@ type TranscriptionPaneProps = {
   onUseModel: (size: string) => void | Promise<void>;
 };
 
+type OutputMode = "transcription" | "translation";
+
 export default function TranscriptionPane({
   confirmDeleteModelSize,
   downloadProgress,
@@ -41,22 +44,98 @@ export default function TranscriptionPane({
   onPunctuationModeChange,
   onUseModel,
 }: TranscriptionPaneProps) {
+  const [mode, setMode] = useState<OutputMode>("transcription");
+
+  const isEnglish = draft.language === "en";
+  const activeModelIsEnglishOnly =
+    options.models.find((m) => m.code === draft.modelSize)?.englishOnly === true;
+
+  // Show English-only models when: transcription + English language picked
+  // Show multilingual models everywhere else (translation, non-English, auto-detect)
+  const showEnglishOnlyModels = mode === "transcription" && isEnglish;
+
+  const filteredModels = useMemo(() => {
+    return options.models.filter((option) => {
+      const isEn = option.englishOnly === true;
+      return showEnglishOnlyModels ? isEn : !isEn;
+    });
+  }, [options.models, showEnglishOnlyModels]);
+
+  const translationDisabled = activeModelIsEnglishOnly;
+
   return (
     <div className="pane-stack">
-      <Panel eyebrow="Whisper engine" title="Model" right={<StatusBadge tone={selectedModelStatus.tone}>{selectedModelStatus.label}</StatusBadge>}>
-        {/* Source contract retained for repo-layout tests and future fallback rendering:
-        <Field label="Model size">
-          <select value={draft.modelSize} onChange={(event) => onUseModel(event.target.value)}>
-            {options.models.map((option) => (
-              <option key={option.code} value={option.code}>
-                {option.name}
-              </option>
-            ))}
-          </select>
+      <Panel eyebrow="Output" title="Mode & language">
+        <Field label="Output mode" hint="What JoiceTyper types at the cursor">
+          <div className="mode-segments" role="radiogroup" aria-label="Output mode">
+            <button
+              type="button"
+              role="radio"
+              aria-checked={mode === "transcription"}
+              className={`mode-segments__seg${mode === "transcription" ? " is-active" : ""}`}
+              onClick={() => setMode("transcription")}
+            >
+              <strong>Transcription</strong>
+              <span>Speak and type in the same language</span>
+            </button>
+            <button
+              type="button"
+              role="radio"
+              aria-checked={mode === "translation"}
+              className={`mode-segments__seg${mode === "translation" ? " is-active" : ""}${translationDisabled ? " is-disabled" : ""}`}
+              onClick={() => {
+                if (translationDisabled) return;
+                setMode("translation");
+              }}
+              disabled={translationDisabled}
+              title={translationDisabled ? "Translation requires a multilingual model (remove the English-only model first)" : undefined}
+            >
+              <strong>Translation</strong>
+              <span>Speak one language, type English</span>
+            </button>
+          </div>
         </Field>
-        */}
+
+        {mode === "transcription" ? (
+          <Field label="Language" hint="What you speak — and what gets typed">
+            <select className="ui-select" value={draft.language} onChange={(event) => onLanguageChange(event.target.value)}>
+              {options.languages.map((option) => (
+                <option key={option.code} value={option.code}>
+                  {option.name}
+                </option>
+              ))}
+            </select>
+          </Field>
+        ) : (
+          <div className="lang-pair">
+            <Field label="From" hint="Language you speak">
+              <select className="ui-select" value={draft.language} onChange={(event) => onLanguageChange(event.target.value)}>
+                {options.languages
+                  .filter((option) => option.code !== "en")
+                  .map((option) => (
+                    <option key={option.code} value={option.code}>
+                      {option.name}
+                    </option>
+                  ))}
+              </select>
+            </Field>
+            <div className="lang-pair__arrow" aria-hidden="true">→</div>
+            <Field label="To" hint="Output language">
+              <select className="ui-select" value="en" disabled>
+                <option value="en">English</option>
+              </select>
+            </Field>
+          </div>
+        )}
+
+        {mode === "transcription" && isEnglish ? (
+          <p className="pane-hint">English-only models below are tuned specifically for English — faster and more accurate than multilingual ones.</p>
+        ) : null}
+      </Panel>
+
+      <Panel eyebrow="Whisper engine" title="Model" right={<StatusBadge tone={selectedModelStatus.tone}>{selectedModelStatus.label}</StatusBadge>}>
         <div className="model-grid">
-          {options.models.map((option) => {
+          {filteredModels.map((option) => {
             const details = parseModelOption(option);
             const active = option.code === modelActionSize;
             const inUse = model.size === option.code && model.ready;
@@ -83,6 +162,7 @@ export default function TranscriptionPane({
                 }}
               >
                 {inUse ? <span className="model-card__chip">In use</span> : null}
+                {option.englishOnly ? <span className="model-card__chip model-card__chip--muted">English only</span> : null}
                 <span className="model-card__topline">
                   <span className="model-card__name">
                     {details.title}
@@ -148,17 +228,8 @@ export default function TranscriptionPane({
       </Panel>
 
       <div className="pane-grid pane-grid--two">
-        <Panel eyebrow="Output" title="Language & decoding">
-          <Field label="Language">
-            <select className="ui-select" value={draft.language} onChange={(event) => onLanguageChange(event.target.value)}>
-              {options.languages.map((option) => (
-                <option key={option.code} value={option.code}>
-                  {option.name}
-                </option>
-              ))}
-            </select>
-          </Field>
-          <Field label="Decode mode" hint="Quality vs. speed">
+        <Panel eyebrow="Quality vs speed" title="Decoding">
+          <Field label="Decode mode" hint="Greedy is faster, beam is more accurate">
             <select className="ui-select" value={draft.decodeMode} onChange={(event) => onDecodeModeChange(event.target.value)}>
               {options.decodeModes.map((option) => (
                 <option key={option.code} value={option.code}>
@@ -179,39 +250,6 @@ export default function TranscriptionPane({
               ))}
             </select>
           </Field>
-
-          {/* Future template slot: the design includes additional formatting toggles that the runtime does not support yet.
-          <div className="settings-inline-toggle">
-            <label className="switch">
-              <input type="checkbox" checked readOnly />
-              <span className="switch__track" />
-              <span className="switch__copy">
-                <strong>Smart capitalization</strong>
-                <small>Proper nouns and sentence starts.</small>
-              </span>
-            </label>
-          </div>
-          <div className="settings-inline-toggle">
-            <label className="switch">
-              <input type="checkbox" checked readOnly />
-              <span className="switch__track" />
-              <span className="switch__copy">
-                <strong>Number formatting</strong>
-                <small>Turn spoken numbers into digits.</small>
-              </span>
-            </label>
-          </div>
-          <div className="settings-inline-toggle">
-            <label className="switch">
-              <input type="checkbox" readOnly />
-              <span className="switch__track" />
-              <span className="switch__copy">
-                <strong>Remove filler words</strong>
-                <small>Filter out “um”, “uh”, and similar hesitations.</small>
-              </span>
-            </label>
-          </div>
-          */}
         </Panel>
       </div>
     </div>

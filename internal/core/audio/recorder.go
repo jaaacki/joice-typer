@@ -310,12 +310,6 @@ func (r *portaudioRecorder) resolveDevice() (*portaudio.DeviceInfo, error) {
 // Warm pre-opens the audio stream so Start() is near-instant.
 // Call after the app is ready. Safe to call multiple times.
 func (r *portaudioRecorder) Warm() {
-	if runtime.GOOS == "windows" {
-		// Windows warm-stream reuse has been causing intermittent near-silent/blank
-		// captures. Prefer reliability over startup speed on Windows.
-		return
-	}
-
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -401,11 +395,13 @@ func (r *portaudioRecorder) Start(ctx context.Context) error {
 
 	var stream *portaudio.Stream
 	var err error
+	wasWarm := false
 
 	// Use pre-warmed stream if available (near-instant start)
 	if r.warmStream != nil {
 		stream = r.warmStream
 		r.warmStream = nil
+		wasWarm = true
 		r.logger.Debug("using pre-warmed stream", "operation", "Start",
 			"elapsed_us", time.Since(startTime).Microseconds())
 	} else {
@@ -437,6 +433,13 @@ func (r *portaudioRecorder) Start(ctx context.Context) error {
 	}
 	r.logger.Debug("stream started", "operation", "Start",
 		"stream_start_ms", time.Since(streamStartTime).Milliseconds())
+
+	// Flush one buffer on warm-stream reuse to discard stale WASAPI frames
+	// that may have accumulated while the stream sat idle. Done before
+	// readLoop starts so the goroutine never sees the stale samples.
+	if wasWarm {
+		_ = stream.Read()
+	}
 
 	r.stream = stream
 	r.activeStream = stream

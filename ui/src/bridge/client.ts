@@ -105,6 +105,7 @@ export type OptionSnapshot = {
   name: string;
   bytes?: number;
   installed: boolean;
+  englishOnly?: boolean;
 };
 
 export type SettingsOptionsSnapshot = {

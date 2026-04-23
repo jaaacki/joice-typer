@@ -371,10 +371,11 @@ func settingsOptionsSnapshot() SettingsOptionsSnapshot {
 		modelPath, _ := configpkg.DefaultModelPath(option.Size)
 		_, statErr := os.Stat(modelPath)
 		models = append(models, OptionSnapshot{
-			Code:      option.Size,
-			Name:      option.Description,
-			Bytes:     option.Bytes,
-			Installed: statErr == nil,
+			Code:        option.Size,
+			Name:        option.Description,
+			Bytes:       option.Bytes,
+			Installed:   statErr == nil,
+			EnglishOnly: option.EnglishOnly,
 		})
 	}
 

@@ -69,7 +69,7 @@ type NavItem = {
 
 const NAV_ITEMS: NavItem[] = [
   { id: "capture", label: "Capture", sublabel: "Hotkey & mic", icon: <MicIcon /> },
-  { id: "transcription", label: "Transcription", sublabel: "Model & language", icon: <WaveformIcon /> },
+  { id: "transcription", label: "Mode", sublabel: "Model & language", icon: <WaveformIcon /> },
   { id: "vocabulary", label: "Vocabulary", sublabel: "Terms & fixes", icon: <BookIcon /> },
   { id: "permissions", label: "Permissions", sublabel: "System access", icon: <ShieldIcon /> },
   { id: "logs", label: "Logs", sublabel: "Live tail", icon: <ConsoleIcon /> },

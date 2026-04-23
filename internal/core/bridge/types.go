@@ -75,10 +75,11 @@ type BootstrapPayload struct {
 }
 
 type OptionSnapshot struct {
-	Code      string `json:"code"`
-	Name      string `json:"name"`
-	Bytes     int64  `json:"bytes,omitempty"`
-	Installed bool   `json:"installed"`
+	Code        string `json:"code"`
+	Name        string `json:"name"`
+	Bytes       int64  `json:"bytes,omitempty"`
+	Installed   bool   `json:"installed"`
+	EnglishOnly bool   `json:"englishOnly,omitempty"`
 }
 
 type SettingsOptionsSnapshot struct {
