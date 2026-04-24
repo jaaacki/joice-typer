@@ -1,7 +1,9 @@
 #import "webview_darwin.h"
+#import "hotkey_darwin.h"
 
 #import <Cocoa/Cocoa.h>
 #import <WebKit/WebKit.h>
+#import <ApplicationServices/ApplicationServices.h>
 #import <string.h>
 
 static NSWindow *sWebSettingsWindow = nil;
@@ -10,6 +12,8 @@ static id sWebSettingsWindowDelegate = nil;
 static id sWebSettingsNavigationDelegate = nil;
 static id sWebHotkeyFlagsMonitor = nil;
 static id sWebHotkeyLocalMonitor = nil;
+static CFMachPortRef sWebHotkeyTap = NULL;
+static CFRunLoopSourceRef sWebHotkeyTapSource = NULL;
 static uint64_t sWebRecordedFlags = 0;
 static int sWebRecordedKeycode = -1;
 static NSString * const kJoiceTyperBridgeEventName = @"joicetyper-bridge-message";
@@ -38,6 +42,39 @@ static void reportWebSettingsNativeTransportWarning(NSString *operation, NSStrin
     webSettingsNativeTransportWarning(op, msg);
 }
 
+// describeJSEvalError extracts the real JavaScript exception detail from a
+// WebKit NSError. Without unwrapping, WebKit returns the useless string
+// "A JavaScript exception occurred" for every script error. The actual cause
+// lives in userInfo under WKJavaScriptExceptionMessage / LineNumber /
+// ColumnNumber / SourceURL. Returns a single-line summary suitable for the
+// native transport warning channel. Truncates long exception messages at
+// 400 chars so we never risk flooding the log with a giant stack.
+static NSString *describeJSEvalError(NSError *error) {
+    if (error == nil) {
+        return @"unknown JavaScript evaluation error";
+    }
+    NSString *exMsg = error.userInfo[@"WKJavaScriptExceptionMessage"];
+    if (exMsg.length == 0) {
+        return error.localizedDescription ?: @"unknown JavaScript evaluation error";
+    }
+    NSString *truncated = exMsg.length > 400
+        ? [[exMsg substringToIndex:400] stringByAppendingString:@"…"]
+        : exMsg;
+    NSNumber *line = error.userInfo[@"WKJavaScriptExceptionLineNumber"];
+    NSNumber *col  = error.userInfo[@"WKJavaScriptExceptionColumnNumber"];
+    NSString *src  = error.userInfo[@"WKJavaScriptExceptionSourceURL"];
+    NSMutableString *out = [NSMutableString stringWithString:truncated];
+    if (line != nil || col != nil) {
+        [out appendFormat:@" (line %@ col %@)",
+            line ? [line stringValue] : @"?",
+            col ? [col stringValue] : @"?"];
+    }
+    if (src.length > 0) {
+        [out appendFormat:@" src=%@", src];
+    }
+    return out;
+}
+
 static void dispatchBridgeEnvelopeJSON(NSString *payloadJSON, BOOL closeWindow) {
     if (sWebSettingsView == nil || payloadJSON == nil) {
         return;
@@ -49,15 +86,19 @@ static void dispatchBridgeEnvelopeJSON(NSString *payloadJSON, BOOL closeWindow) 
                         "  window.dispatchEvent(new CustomEvent('%@', { detail }));"
                         "  return 'ok';"
                         "} catch (error) {"
-                        "  return 'dispatch_error:' + (error && error.message ? error.message : String(error));"
+                        "  const name = (error && error.name) ? error.name : 'Error';"
+                        "  const msg = (error && error.message) ? error.message : String(error);"
+                        "  const stack = (error && error.stack) ? String(error.stack).split('\\n').slice(0,3).join(' | ') : '';"
+                        "  return 'dispatch_error:' + name + ': ' + msg + ' @ ' + stack;"
                         "}"
                         "})();",
                         payloadJSON,
                         kJoiceTyperBridgeEventName];
     [sWebSettingsView evaluateJavaScript:script completionHandler:^(id result, NSError *error) {
         if (error != nil) {
-            reportWebSettingsNativeTransportWarning(@"failed to evaluate bridge envelope dispatch",
-                                                    error.localizedDescription ?: @"unknown JavaScript evaluation error");
+            reportWebSettingsNativeTransportWarning(
+                @"failed to evaluate bridge envelope dispatch",
+                describeJSEvalError(error));
             return;
         }
         if ([result isKindOfClass:[NSString class]] && [(NSString *)result hasPrefix:@"dispatch_error:"]) {
@@ -147,8 +188,9 @@ static void dispatchBridgeErrorResponse(NSString *requestID, NSString *message) 
         "})";
     [webView evaluateJavaScript:domProbe completionHandler:^(id result, NSError *error) {
         if (error != nil) {
-            reportWebSettingsNativeTransportWarning(@"failed to probe web settings DOM",
-                                                    error.localizedDescription ?: @"unknown DOM probe error");
+            reportWebSettingsNativeTransportWarning(
+                @"failed to probe web settings DOM",
+                describeJSEvalError(error));
             return;
         }
         NSString *snapshot = nil;
@@ -390,18 +432,27 @@ void focusWebSettingsWindow(void) {
 }
 
 void dispatchWebSettingsEnvelope(const char *payloadJSON, int closeWindow) {
+    // Copy payloadJSON into an NSString BEFORE dispatch_async. The char* comes
+    // from a C.CString allocated in Go and freed via defer once the cgo call
+    // returns — which happens before the async block executes on the main queue.
+    // Capturing the raw pointer in the block produces a use-after-free.
+    if (payloadJSON == NULL) {
+        return;
+    }
+    NSString *payloadString = [NSString stringWithUTF8String:payloadJSON];
+    if (payloadString == nil || payloadString.length == 0) {
+        return;
+    }
+    BOOL shouldClose = closeWindow == 1;
     dispatch_async(dispatch_get_main_queue(), ^{
-        if (payloadJSON == NULL || sWebSettingsView == nil) {
+        if (sWebSettingsView == nil) {
             return;
         }
-
-        NSString *payloadString = [NSString stringWithUTF8String:payloadJSON];
-        if (payloadString == nil || payloadString.length == 0) {
-            return;
-        }
-        dispatchBridgeEnvelopeJSON(payloadString, closeWindow == 1);
+        dispatchBridgeEnvelopeJSON(payloadString, shouldClose);
     });
 }
+
+static BOOL sWebHotkeySuspendedRuntime = NO;
 
 static void stopWebHotkeyCaptureRecorder(void) {
     if (sWebHotkeyFlagsMonitor != nil) {
@@ -412,6 +463,62 @@ static void stopWebHotkeyCaptureRecorder(void) {
         [NSEvent removeMonitor:sWebHotkeyLocalMonitor];
         sWebHotkeyLocalMonitor = nil;
     }
+    if (sWebHotkeyTap != NULL) {
+        CGEventTapEnable(sWebHotkeyTap, false);
+    }
+    if (sWebHotkeyTapSource != NULL) {
+        CFRunLoopRemoveSource(CFRunLoopGetMain(), sWebHotkeyTapSource, kCFRunLoopCommonModes);
+        CFRelease(sWebHotkeyTapSource);
+        sWebHotkeyTapSource = NULL;
+    }
+    if (sWebHotkeyTap != NULL) {
+        CFRelease(sWebHotkeyTap);
+        sWebHotkeyTap = NULL;
+    }
+    if (sWebHotkeySuspendedRuntime) {
+        setHotkeyListenerEnabled(1);
+        sWebHotkeySuspendedRuntime = NO;
+    }
+}
+
+static CGEventRef webHotkeyTapCallback(
+    CGEventTapProxy proxy,
+    CGEventType type,
+    CGEventRef event,
+    void *userInfo
+) {
+    if (type == kCGEventTapDisabledByTimeout || type == kCGEventTapDisabledByUserInput) {
+        if (sWebHotkeyTap != NULL) CGEventTapEnable(sWebHotkeyTap, true);
+        return event;
+    }
+    if (type == kCGEventFlagsChanged) {
+        uint64_t flags = CGEventGetFlags(event);
+        uint64_t cgFlags = flags & (0x800000 | 0x20000 | 0x40000 | 0x80000 | 0x100000);
+        // Before a regular key is captured, track the max flags ever held in the
+        // current press. If the user releases everything (cgFlags==0), reset the
+        // max so they can retry a different combo.
+        if (sWebRecordedKeycode < 0) {
+            if (cgFlags == 0) {
+                if (sWebRecordedFlags != 0) {
+                    sWebRecordedFlags = 0;
+                    webSettingsHotkeyCaptureChanged(0, -1, 1);
+                }
+            } else if (cgFlags > sWebRecordedFlags) {
+                sWebRecordedFlags = cgFlags;
+                webSettingsHotkeyCaptureChanged(sWebRecordedFlags, -1, 1);
+            }
+        }
+    } else if (type == kCGEventKeyDown) {
+        int keycode = (int)CGEventGetIntegerValueField(event, kCGKeyboardEventKeycode);
+        // Snapshot current physical modifier state at keyDown — this is the
+        // combination the user actually pressed together.
+        uint64_t flags = CGEventGetFlags(event);
+        uint64_t cgFlags = flags & (0x800000 | 0x20000 | 0x40000 | 0x80000 | 0x100000);
+        sWebRecordedFlags = cgFlags;
+        sWebRecordedKeycode = keycode;
+        webSettingsHotkeyCaptureChanged(sWebRecordedFlags, sWebRecordedKeycode, 1);
+    }
+    return event;
 }
 
 void startWebHotkeyCapture(void) {
@@ -421,27 +528,92 @@ void startWebHotkeyCapture(void) {
         sWebRecordedKeycode = -1;
         webSettingsHotkeyCaptureChanged(0, -1, 1);
 
-        sWebHotkeyFlagsMonitor = [NSEvent addLocalMonitorForEventsMatchingMask:NSEventMaskFlagsChanged
-            handler:^NSEvent *(NSEvent *event) {
-                uint64_t flags = [event modifierFlags];
-                uint64_t relevant = flags & (NSEventModifierFlagFunction | NSEventModifierFlagShift |
-                                              NSEventModifierFlagControl | NSEventModifierFlagOption |
-                                              NSEventModifierFlagCommand);
-                uint64_t cgFlags = 0;
-                if (relevant & NSEventModifierFlagFunction) cgFlags |= 0x800000;
-                if (relevant & NSEventModifierFlagShift)    cgFlags |= 0x20000;
-                if (relevant & NSEventModifierFlagControl)  cgFlags |= 0x40000;
-                if (relevant & NSEventModifierFlagOption)   cgFlags |= 0x80000;
-                if (relevant & NSEventModifierFlagCommand)  cgFlags |= 0x100000;
-                sWebRecordedFlags = cgFlags;
-                webSettingsHotkeyCaptureChanged(sWebRecordedFlags, sWebRecordedKeycode, 1);
-                return event;
-            }];
+        // Suspend the runtime hotkey tap so the user's existing trigger doesn't
+        // fire while they're rebinding it. Resumed in stopWebHotkeyCaptureRecorder.
+        setHotkeyListenerEnabled(0);
+        sWebHotkeySuspendedRuntime = YES;
+
+        // Install a CGEventTap for system-level capture (catches Fn/Globe key,
+        // modifier-only combos, and events even when window isn't first-responder).
+        // Requires Accessibility permission, which the app already has at this point.
+        CGEventMask mask = CGEventMaskBit(kCGEventFlagsChanged) | CGEventMaskBit(kCGEventKeyDown);
+        sWebHotkeyTap = CGEventTapCreate(
+            kCGSessionEventTap,
+            kCGHeadInsertEventTap,
+            kCGEventTapOptionListenOnly,
+            mask,
+            webHotkeyTapCallback,
+            NULL
+        );
+        if (sWebHotkeyTap != NULL) {
+            sWebHotkeyTapSource = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, sWebHotkeyTap, 0);
+            if (sWebHotkeyTapSource != NULL) {
+                CFRunLoopAddSource(CFRunLoopGetMain(), sWebHotkeyTapSource, kCFRunLoopCommonModes);
+            }
+            CGEventTapEnable(sWebHotkeyTap, true);
+        } else {
+            // Tap creation failed — usually missing Accessibility permission. Surface a
+            // warning so the bridge can log it; the NSEvent monitor below is a
+            // best-effort fallback but won't catch Fn/Globe reliably.
+            reportWebSettingsNativeTransportWarning(
+                @"startWebHotkeyCapture",
+                @"CGEventTapCreate returned NULL — check Accessibility permission; falling back to NSEvent monitor"
+            );
+        }
+
+        // NSEvent local monitors serve two roles:
+        //  - keyDown monitor consumes key events so they don't type into the
+        //    webview, regardless of tap state.
+        //  - flagsChanged monitor is the fallback path for modifier-only hotkeys
+        //    (e.g. Fn+Shift) when the CGEventTap failed to install — it won't
+        //    catch Fn/Globe as reliably as the tap but handles the common cases.
+        BOOL tapInstalled = (sWebHotkeyTap != NULL);
+        if (!tapInstalled) {
+            sWebHotkeyFlagsMonitor = [NSEvent addLocalMonitorForEventsMatchingMask:NSEventMaskFlagsChanged
+                handler:^NSEvent *(NSEvent *event) {
+                    uint64_t flags = [event modifierFlags];
+                    uint64_t relevant = flags & (NSEventModifierFlagFunction | NSEventModifierFlagShift |
+                                                  NSEventModifierFlagControl | NSEventModifierFlagOption |
+                                                  NSEventModifierFlagCommand);
+                    uint64_t cgFlags = 0;
+                    if (relevant & NSEventModifierFlagFunction) cgFlags |= 0x800000;
+                    if (relevant & NSEventModifierFlagShift)    cgFlags |= 0x20000;
+                    if (relevant & NSEventModifierFlagControl)  cgFlags |= 0x40000;
+                    if (relevant & NSEventModifierFlagOption)   cgFlags |= 0x80000;
+                    if (relevant & NSEventModifierFlagCommand)  cgFlags |= 0x100000;
+                    if (sWebRecordedKeycode < 0) {
+                        if (cgFlags == 0) {
+                            if (sWebRecordedFlags != 0) {
+                                sWebRecordedFlags = 0;
+                                webSettingsHotkeyCaptureChanged(0, -1, 1);
+                            }
+                        } else if (cgFlags > sWebRecordedFlags) {
+                            sWebRecordedFlags = cgFlags;
+                            webSettingsHotkeyCaptureChanged(sWebRecordedFlags, -1, 1);
+                        }
+                    }
+                    return event;
+                }];
+        }
 
         sWebHotkeyLocalMonitor = [NSEvent addLocalMonitorForEventsMatchingMask:NSEventMaskKeyDown
             handler:^NSEvent *(NSEvent *event) {
-                sWebRecordedKeycode = (int)[event keyCode];
-                webSettingsHotkeyCaptureChanged(sWebRecordedFlags, sWebRecordedKeycode, 1);
+                // When the tap is installed it already captured this event; just consume it.
+                if (sWebHotkeyTap == NULL) {
+                    uint64_t flags = [event modifierFlags];
+                    uint64_t relevant = flags & (NSEventModifierFlagFunction | NSEventModifierFlagShift |
+                                                  NSEventModifierFlagControl | NSEventModifierFlagOption |
+                                                  NSEventModifierFlagCommand);
+                    uint64_t cgFlags = 0;
+                    if (relevant & NSEventModifierFlagFunction) cgFlags |= 0x800000;
+                    if (relevant & NSEventModifierFlagShift)    cgFlags |= 0x20000;
+                    if (relevant & NSEventModifierFlagControl)  cgFlags |= 0x40000;
+                    if (relevant & NSEventModifierFlagOption)   cgFlags |= 0x80000;
+                    if (relevant & NSEventModifierFlagCommand)  cgFlags |= 0x100000;
+                    sWebRecordedFlags = cgFlags;
+                    sWebRecordedKeycode = (int)[event keyCode];
+                    webSettingsHotkeyCaptureChanged(sWebRecordedFlags, sWebRecordedKeycode, 1);
+                }
                 return nil;
             }];
     };
