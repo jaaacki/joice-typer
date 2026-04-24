@@ -18,6 +18,7 @@ export type ConfigSnapshot = {
   triggerKey: string[];
   modelSize: string;
   language: string;
+  outputMode: string;
   sampleRate: number;
   soundFeedback: boolean;
   inputDevice: string;

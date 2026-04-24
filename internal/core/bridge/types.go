@@ -4,6 +4,7 @@ type ConfigSnapshot struct {
 	TriggerKey      []string `json:"triggerKey"`
 	ModelSize       string   `json:"modelSize"`
 	Language        string   `json:"language"`
+	OutputMode      string   `json:"outputMode"`
 	SampleRate      int      `json:"sampleRate"`
 	SoundFeedback   bool     `json:"soundFeedback"`
 	InputDevice     string   `json:"inputDevice"`

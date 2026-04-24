@@ -100,7 +100,7 @@ func TestApplyReloadedConfig_RollsBackOnTranscriberFailure(t *testing.T) {
 		newHotkey:        func(keys []string, logger *slog.Logger) apppkg.HotkeyListener { return newHotkey },
 		newRecorder:      func(sampleRate int, device string, logger *slog.Logger) apppkg.Recorder { return newRecorder },
 		defaultModelPath: func(modelSize string) (string, error) { return "/tmp/model.bin", nil },
-		newTranscriber: func(ctx context.Context, modelPath, modelSize, language string, sampleRate int, decodeMode, punctuationMode string, logger *slog.Logger) (apppkg.Transcriber, error) {
+		newTranscriber: func(ctx context.Context, modelPath, modelSize, language string, sampleRate int, decodeMode, punctuationMode, outputMode string, logger *slog.Logger) (apppkg.Transcriber, error) {
 			return nil, errors.New("load failed")
 		},
 		setActiveHotkey:     func(apppkg.HotkeyListener) { setActiveCalled++ },
@@ -188,7 +188,7 @@ func TestApplyReloadedConfig_AppliesAtomicallyOnSuccess(t *testing.T) {
 		newHotkey:        func(keys []string, logger *slog.Logger) apppkg.HotkeyListener { return newHotkey },
 		newRecorder:      func(sampleRate int, device string, logger *slog.Logger) apppkg.Recorder { return newRecorder },
 		defaultModelPath: func(modelSize string) (string, error) { return "/tmp/model.bin", nil },
-		newTranscriber: func(ctx context.Context, modelPath, modelSize, language string, sampleRate int, decodeMode, punctuationMode string, logger *slog.Logger) (apppkg.Transcriber, error) {
+		newTranscriber: func(ctx context.Context, modelPath, modelSize, language string, sampleRate int, decodeMode, punctuationMode, outputMode string, logger *slog.Logger) (apppkg.Transcriber, error) {
 			return newTranscriber, nil
 		},
 		setActiveHotkey:     func(h apppkg.HotkeyListener) { activeHotkey = h },

@@ -12,6 +12,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"math"
 	"runtime"
 	"strings"
 	"sync"
@@ -39,6 +40,7 @@ type whisperTranscriber struct {
 	vocab      string
 	decodeMode string
 	punctMode  string
+	outputMode string
 	sampleRate int
 	logger     *slog.Logger
 	inflight   chan struct{} // semaphore: capacity 1
@@ -68,7 +70,7 @@ func WhisperSystemInfo() string {
 	return strings.TrimSpace(C.GoString(C.whisper_print_system_info()))
 }
 
-func NewTranscriber(ctx context.Context, modelPath string, modelSize string, language string, sampleRate int, decodeMode string, punctuationMode string, logger *slog.Logger) (apppkg.Transcriber, error) {
+func NewTranscriber(ctx context.Context, modelPath string, modelSize string, language string, sampleRate int, decodeMode string, punctuationMode string, outputMode string, logger *slog.Logger) (apppkg.Transcriber, error) {
 	l := logger.With("component", "transcriber")
 
 	if err := ensureModel(ctx, modelPath, modelSize, l); err != nil {
@@ -137,7 +139,15 @@ func NewTranscriber(ctx context.Context, modelPath string, modelSize string, lan
 	// Pass 1 (audio_ctx=200, ~4s): covers typical short push-to-talk clips.
 	// Pass 2 (audio_ctx=500, ~10s): covers long-form clips; second pass is
 	// fast because shaders and buffers from pass 1 are already resident.
-	if runtime.GOOS == "windows" {
+	// Pre-warm the GPU pipeline with two dummy inferences. On Windows this
+	// allocates Vulkan compute scratch buffers; on macOS it compiles and caches
+	// Metal shaders. Without this, the first real dictation after launch pays
+	// the full compilation cost and feels noticeably slow.
+	//
+	// Pass 1 (audio_ctx=200, ~4s clip): covers typical short push-to-talk.
+	// Pass 2 (audio_ctx=500, ~10s clip): covers long-form; pass 2 is fast
+	// because kernels compiled in pass 1 are already resident.
+	{
 		l.Info("warming GPU pipeline — pass 1 (short-form)", "operation", "NewTranscriber")
 		warmStart := time.Now()
 		warmSamples := make([]float32, 3200) // 0.2s of silence at 16kHz
@@ -154,7 +164,6 @@ func NewTranscriber(ctx context.Context, modelPath string, modelSize string, lan
 		warmParams.suppress_nst = C._Bool(true)
 		warmParams.temperature = C.float(0.0)
 		warmParams.greedy.best_of = C.int(1)
-
 		warmParams.audio_ctx = C.int(200)
 		if r := C.whisper_full(wctx, warmParams, (*C.float)(unsafe.Pointer(&warmSamples[0])), C.int(len(warmSamples))); r != 0 {
 			l.Warn("GPU warmup pass 1 returned non-zero", "operation", "NewTranscriber", "result", int(r))
@@ -176,7 +185,7 @@ func NewTranscriber(ctx context.Context, modelPath string, modelSize string, lan
 
 	return &whisperTranscriber{
 		ctx: wctx, lang: language, sampleRate: sampleRate, logger: l,
-		decodeMode: decodeMode, punctMode: punctuationMode,
+		decodeMode: decodeMode, punctMode: punctuationMode, outputMode: outputMode,
 		inflight: make(chan struct{}, 1), vocab: "",
 	}, nil
 }
@@ -260,14 +269,22 @@ func (t *whisperTranscriber) transcribeBlocking(audio []float32) (string, error)
 	}
 	rms := 0.0
 	if len(audio) > 0 {
-		rms = sumSq / float64(len(audio))
+		rms = math.Sqrt(sumSq / float64(len(audio)))
 	}
 	durationSeconds := 0.0
 	if t.sampleRate > 0 {
 		durationSeconds = float64(len(audio)) / float64(t.sampleRate)
 	}
 	longForm := durationSeconds >= longFormSeconds
-	t.logger.Info("transcribing", "operation", "Transcribe", "samples", len(audio), "audio_rms_sq", rms, "duration_sec", durationSeconds, "long_form", longForm)
+	t.logger.Info("transcribing", "operation", "Transcribe", "samples", len(audio), "audio_rms", rms, "duration_sec", durationSeconds, "long_form", longForm)
+
+	// Pre-flight energy gate: if the recording is near-silent, skip whisper
+	// entirely. Whisper hallucinates on silence — returning phantom text.
+	// -40 dBFS (RMS ~0.01) is well below any usable speech level.
+	if rms < 0.01 {
+		t.logger.Info("skipping transcription — audio below energy threshold", "operation", "Transcribe", "rms", rms)
+		return "", nil
+	}
 
 	decodeCfg := decodeConfigForMode(t.decodeMode)
 	params := C.whisper_full_default_params(C.WHISPER_SAMPLING_GREEDY)
@@ -312,6 +329,10 @@ func (t *whisperTranscriber) transcribeBlocking(audio []float32) (string, error)
 		params.language = cLang
 	}
 
+	if t.outputMode == "translation" {
+		params.translate = C._Bool(true)
+	}
+
 	if t.vocab != "" {
 		cPrompt := C.CString(t.vocab)
 		defer C.free(unsafe.Pointer(cPrompt))
@@ -333,9 +354,16 @@ func (t *whisperTranscriber) transcribeBlocking(audio []float32) (string, error)
 
 	var sb strings.Builder
 	for i := 0; i < n; i++ {
+		// no_speech_prob > 0.6 means whisper itself thinks this segment is
+		// noise/silence rather than speech. Skip it to prevent hallucination.
+		noSpeechProb := float64(C.whisper_full_get_segment_no_speech_prob(t.ctx, C.int(i)))
+		if noSpeechProb > 0.6 {
+			t.logger.Debug("skipping segment — high no_speech_prob", "operation", "Transcribe", "segment", i, "no_speech_prob", noSpeechProb)
+			continue
+		}
 		cText := C.whisper_full_get_segment_text(t.ctx, C.int(i))
 		if cText == nil {
-			continue // skip nil segments instead of crashing
+			continue
 		}
 		sb.WriteString(C.GoString(cText))
 		if sb.Len() > maxTranscribeBytes {

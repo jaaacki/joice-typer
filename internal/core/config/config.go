@@ -29,6 +29,7 @@ type Config struct {
 	TriggerKey      []string `yaml:"trigger_key"`
 	ModelSize       string   `yaml:"model_size"`
 	Language        string   `yaml:"language"`
+	OutputMode      string   `yaml:"output_mode,omitempty"`
 	SampleRate      int      `yaml:"sample_rate"`
 	SoundFeedback   bool     `yaml:"sound_feedback"`
 	InputDevice     string   `yaml:"input_device"`
@@ -262,6 +263,10 @@ func LoadConfig(path string) (Config, error) {
 		cfg.Language = "en"
 	}
 
+	if cfg.OutputMode == "" {
+		cfg.OutputMode = "transcription"
+	}
+
 	// Accept legacy clipboard/stream configs during upgrade, but do not
 	// carry the deprecated field forward when the config is later re-saved.
 	cfg.LegacyTypeMode = ""
@@ -331,6 +336,9 @@ func (c Config) Validate() error {
 	}
 	if c.Language != "" && !validLanguages[c.Language] {
 		return fmt.Errorf("config.Validate: unsupported language %q", c.Language)
+	}
+	if c.OutputMode != "" && c.OutputMode != "transcription" && c.OutputMode != "translation" {
+		return fmt.Errorf("config.Validate: invalid output_mode %q (must be transcription or translation)", c.OutputMode)
 	}
 	return nil
 }

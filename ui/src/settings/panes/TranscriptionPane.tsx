@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useMemo } from "react";
 import type { ConfigSnapshot, ModelDownloadProgressSnapshot, ModelSnapshot, SettingsOptionsSnapshot } from "../../bridge";
 import { Field, Panel, StatusBadge, parseModelOption } from "../shared";
 
@@ -20,6 +20,7 @@ type TranscriptionPaneProps = {
   onDeleteModel: (size: string) => void | Promise<void>;
   onDownloadModel: (size: string) => void | Promise<void>;
   onLanguageChange: (value: string) => void;
+  onOutputModeChange: (value: string) => void;
   onPunctuationModeChange: (value: string) => void;
   onUseModel: (size: string) => void | Promise<void>;
 };
@@ -41,10 +42,11 @@ export default function TranscriptionPane({
   onDeleteModel,
   onDownloadModel,
   onLanguageChange,
+  onOutputModeChange,
   onPunctuationModeChange,
   onUseModel,
 }: TranscriptionPaneProps) {
-  const [mode, setMode] = useState<OutputMode>("transcription");
+  const mode = (draft.outputMode || "transcription") as OutputMode;
 
   const isEnglish = draft.language === "en";
   const activeModelIsEnglishOnly =
@@ -73,7 +75,7 @@ export default function TranscriptionPane({
               role="radio"
               aria-checked={mode === "transcription"}
               className={`mode-segments__seg${mode === "transcription" ? " is-active" : ""}`}
-              onClick={() => setMode("transcription")}
+              onClick={() => onOutputModeChange("transcription")}
             >
               <strong>Transcription</strong>
               <span>Speak and type in the same language</span>
@@ -85,7 +87,7 @@ export default function TranscriptionPane({
               className={`mode-segments__seg${mode === "translation" ? " is-active" : ""}${translationDisabled ? " is-disabled" : ""}`}
               onClick={() => {
                 if (translationDisabled) return;
-                setMode("translation");
+                onOutputModeChange("translation");
               }}
               disabled={translationDisabled}
               title={translationDisabled ? "Translation requires a multilingual model (remove the English-only model first)" : undefined}

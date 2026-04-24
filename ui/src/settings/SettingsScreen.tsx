@@ -757,11 +757,8 @@ export function SettingsScreen({ bootstrap }: SettingsScreenProps) {
                 <span className="mic-preview__icon">
                   <MicIcon />
                 </span>
-                <div className="mic-preview__content">
-                  <div className="mic-preview__instruction">
-                    Click Start mic test, then speak a short phrase in your normal voice. Click Stop when done.
-                  </div>
-                  <MicLevelMeter level={inputLevel.level} />
+                <div className="mic-preview__instruction">
+                  Click Start mic test, then speak a short phrase in your normal voice. Click Stop when done.
                 </div>
                 <span className="mic-preview__label">
                   <StatusBadge tone={micQualityTone(inputLevel.quality)}>{inputLevel.quality === "good" ? "Good" : inputLevel.quality === "acceptable" ? "Acceptable" : "Poor"}</StatusBadge>
@@ -775,6 +772,7 @@ export function SettingsScreen({ bootstrap }: SettingsScreenProps) {
                     Stop Mic Test
                   </button>
                 )}
+                <MicLevelMeter level={inputLevel.level} />
               </div>
 
               {/* Future template slot: advanced capture tuning is intentionally hidden until the backend has hard constraints instead of accepting arbitrary integers.
@@ -807,6 +805,7 @@ export function SettingsScreen({ bootstrap }: SettingsScreenProps) {
             onDeleteModel={handleDeleteModel}
             onDownloadModel={handleDownloadModel}
             onLanguageChange={(value) => update("language", value)}
+            onOutputModeChange={(value) => update("outputMode", value)}
             onPunctuationModeChange={(value) => update("punctuationMode", value)}
             onUseModel={handleUseModel}
           />

@@ -20,7 +20,7 @@ func WhisperSystemInfo() string {
 	return ""
 }
 
-func NewTranscriber(ctx context.Context, modelPath string, modelSize string, language string, sampleRate int, decodeMode string, punctuationMode string, logger *slog.Logger) (apppkg.Transcriber, error) {
+func NewTranscriber(ctx context.Context, modelPath string, modelSize string, language string, sampleRate int, decodeMode string, punctuationMode string, outputMode string, logger *slog.Logger) (apppkg.Transcriber, error) {
 	return nil, unsupportedTranscriptionError("NewTranscriber")
 }
 

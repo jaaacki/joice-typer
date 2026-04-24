@@ -734,9 +734,11 @@ svg {
 }
 
 .mic-preview {
-  display: flex;
+  display: grid;
+  grid-template-columns: auto 1fr auto auto;
   align-items: center;
-  gap: 10px;
+  column-gap: 10px;
+  row-gap: 6px;
   padding: 10px 12px;
   border-radius: 10px;
   border: 1px solid var(--border-2);
@@ -748,12 +750,6 @@ svg {
   font-size: 15px;
 }
 
-.mic-preview__content {
-  flex: 1;
-  display: grid;
-  gap: 8px;
-}
-
 .mic-preview__instruction {
   color: var(--ink-2);
   font-size: 12px;
@@ -761,11 +757,12 @@ svg {
 }
 
 .mic-preview__label {
-  margin-left: auto;
+  /* auto-placed: col 3, row 1 */
 }
 
 .mic-level {
-  min-width: 180px;
+  grid-column: 2 / -1;
+  min-width: 0;
 }
 
 .mic-level__bar {

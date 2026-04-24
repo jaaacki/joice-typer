@@ -62,7 +62,7 @@ func (m *darwinInputLevelMonitor) start() error {
 			Channels: 1,
 			Latency:  device.DefaultLowInputLatency,
 		},
-		SampleRate:      device.DefaultSampleRate,
+		SampleRate:      m.sampleRate,
 		FramesPerBuffer: len(m.buffer),
 	}
 	stream, err := portaudio.OpenStream(params, m.buffer)
@@ -117,6 +117,11 @@ func (m *darwinInputLevelMonitor) readLoop(stream *portaudio.Stream, stopCh <-ch
 		level := 0.0
 		if len(m.buffer) > 0 {
 			level = math.Sqrt(sumSq/float64(len(m.buffer))) * 12
+		}
+		// Gate out the mic noise floor — electronic noise + fan hum reads
+		// non-zero even in a silent room. Below this threshold treat as 0.
+		if level < 0.04 {
+			level = 0
 		}
 		if level > 1 {
 			level = 1

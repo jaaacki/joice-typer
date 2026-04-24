@@ -24,7 +24,7 @@ type runtimeReloadDeps struct {
 	newHotkey           func([]string, *slog.Logger) apppkg.HotkeyListener
 	newRecorder         func(int, string, *slog.Logger) apppkg.Recorder
 	defaultModelPath    func(string) (string, error)
-	newTranscriber      func(context.Context, string, string, string, int, string, string, *slog.Logger) (apppkg.Transcriber, error)
+	newTranscriber      func(context.Context, string, string, string, int, string, string, string, *slog.Logger) (apppkg.Transcriber, error)
 	setActiveHotkey     func(apppkg.HotkeyListener)
 	setSettingsRecorder func(apppkg.Recorder)
 	updateStatusBar     func(apppkg.AppState)
@@ -40,7 +40,8 @@ func applyReloadedConfig(runtime *runtimeConfigState, app *apppkg.App, newCfg co
 	transcriberChanged := oldCfg.Language != newCfg.Language ||
 		oldCfg.ModelSize != newCfg.ModelSize ||
 		oldCfg.DecodeMode != newCfg.DecodeMode ||
-		oldCfg.PunctuationMode != newCfg.PunctuationMode
+		oldCfg.PunctuationMode != newCfg.PunctuationMode ||
+		oldCfg.OutputMode != newCfg.OutputMode
 	vocabularyChanged := oldCfg.Vocabulary != newCfg.Vocabulary
 
 	stagedHotkey := runtime.hotkey
@@ -64,7 +65,7 @@ func applyReloadedConfig(runtime *runtimeConfigState, app *apppkg.App, newCfg co
 		reloadCtx, reloadCancel := context.WithTimeout(context.Background(), 5*time.Minute)
 		defer reloadCancel()
 
-		stagedTranscriber, err = deps.newTranscriber(reloadCtx, modelPath, newCfg.ModelSize, newCfg.Language, newCfg.SampleRate, newCfg.DecodeMode, newCfg.PunctuationMode, logger)
+		stagedTranscriber, err = deps.newTranscriber(reloadCtx, modelPath, newCfg.ModelSize, newCfg.Language, newCfg.SampleRate, newCfg.DecodeMode, newCfg.PunctuationMode, newCfg.OutputMode, logger)
 		if err != nil {
 			deps.updateStatusBar(apppkg.StateReady)
 			return err

@@ -237,7 +237,7 @@ func runAppMode() {
 		// Step 2: Load model (may download on first run)
 		platformpkg.UpdateStatusBar(apppkg.StateLoading)
 		var tErr error
-		transcriber, tErr = transcriptionpkg.NewTranscriber(startupCtx, modelPath, cfg.ModelSize, cfg.Language, cfg.SampleRate, cfg.DecodeMode, cfg.PunctuationMode, logger)
+		transcriber, tErr = transcriptionpkg.NewTranscriber(startupCtx, modelPath, cfg.ModelSize, cfg.Language, cfg.SampleRate, cfg.DecodeMode, cfg.PunctuationMode, cfg.OutputMode, logger)
 		if tErr != nil {
 			initDone <- tErr
 			if stopErr := hotkey.Stop(); stopErr != nil {
@@ -473,7 +473,7 @@ func runTerminalMode(configPath string) {
 	}()
 
 	// --- Init transcriber (loads model -- may download on first run) ---
-	transcriber, err := transcriptionpkg.NewTranscriber(startupCtx, modelPath, cfg.ModelSize, cfg.Language, cfg.SampleRate, cfg.DecodeMode, cfg.PunctuationMode, logger)
+	transcriber, err := transcriptionpkg.NewTranscriber(startupCtx, modelPath, cfg.ModelSize, cfg.Language, cfg.SampleRate, cfg.DecodeMode, cfg.PunctuationMode, cfg.OutputMode, logger)
 	if err != nil {
 		logger.Error("failed to initialize transcriber",
 			"component", "main", "operation", "runTerminalMode", "error", err)

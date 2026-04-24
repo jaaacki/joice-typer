@@ -42,6 +42,7 @@ type saveConfigPayload struct {
 	TriggerKey      *[]string `json:"triggerKey"`
 	ModelSize       *string   `json:"modelSize"`
 	Language        *string   `json:"language"`
+	OutputMode      *string   `json:"outputMode"`
 	SampleRate      *int      `json:"sampleRate"`
 	SoundFeedback   *bool     `json:"soundFeedback"`
 	InputDevice     *string   `json:"inputDevice"`
@@ -351,10 +352,15 @@ func (p saveConfigPayload) snapshot(requestID string) (ConfigSnapshot, *Response
 			return ConfigSnapshot{}, &response
 		}
 	}
+	outputMode := "transcription"
+	if p.OutputMode != nil && *p.OutputMode != "" {
+		outputMode = *p.OutputMode
+	}
 	return ConfigSnapshot{
 		TriggerKey:      append([]string(nil), (*p.TriggerKey)...),
 		ModelSize:       *p.ModelSize,
 		Language:        *p.Language,
+		OutputMode:      outputMode,
 		SampleRate:      *p.SampleRate,
 		SoundFeedback:   *p.SoundFeedback,
 		InputDevice:     *p.InputDevice,
