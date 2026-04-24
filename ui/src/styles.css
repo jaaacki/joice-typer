@@ -903,6 +903,10 @@ svg {
   line-height: 1.5;
 }
 
+.pane-hint--warn {
+  color: var(--warn);
+}
+
 .lang-pair {
   display: grid;
   grid-template-columns: 1fr auto 1fr;

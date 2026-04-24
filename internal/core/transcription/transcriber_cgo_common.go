@@ -305,7 +305,12 @@ func (t *whisperTranscriber) transcribeBlocking(audio []float32) (string, error)
 		params.greedy.best_of = C.int(1)
 		params.temperature = C.float(0.0)
 	}
-	if longForm {
+	// Translation mode: always single-segment, no cross-segment context.
+	// Long-form params (no_context=false, multi-segment) cause whisper to
+	// carry token context between segments when translating, producing
+	// repeated text on consecutive turns. Push-to-talk translation is
+	// always a single utterance regardless of duration.
+	if longForm && t.outputMode != "translation" {
 		params.no_context = C._Bool(false)
 		params.no_timestamps = C._Bool(false)
 		params.single_segment = C._Bool(false)
@@ -333,7 +338,9 @@ func (t *whisperTranscriber) transcribeBlocking(audio []float32) (string, error)
 		params.translate = C._Bool(true)
 	}
 
-	if t.vocab != "" {
+	// Vocabulary (initial_prompt) biases output toward user-defined English
+	// words. In translation mode this corrupts the translation — skip it.
+	if t.vocab != "" && t.outputMode != "translation" {
 		cPrompt := C.CString(t.vocab)
 		defer C.free(unsafe.Pointer(cPrompt))
 		params.initial_prompt = cPrompt
@@ -354,12 +361,19 @@ func (t *whisperTranscriber) transcribeBlocking(audio []float32) (string, error)
 
 	var sb strings.Builder
 	for i := 0; i < n; i++ {
-		// no_speech_prob > 0.6 means whisper itself thinks this segment is
-		// noise/silence rather than speech. Skip it to prevent hallucination.
-		noSpeechProb := float64(C.whisper_full_get_segment_no_speech_prob(t.ctx, C.int(i)))
-		if noSpeechProb > 0.6 {
-			t.logger.Debug("skipping segment — high no_speech_prob", "operation", "Transcribe", "segment", i, "no_speech_prob", noSpeechProb)
-			continue
+		// no_speech_prob is only used in transcription mode. For translation,
+		// whisper's speech detector is poorly calibrated for non-English input —
+		// valid speech regularly scores above 0.6, so the filter produces both
+		// false negatives (valid speech dropped) and false positives (rubbish
+		// passed). The RMS energy gate above is the sole silence guard for
+		// translation.
+		if t.outputMode != "translation" {
+			noSpeechProb := float64(C.whisper_full_get_segment_no_speech_prob(t.ctx, C.int(i)))
+			if noSpeechProb > 0.6 {
+				t.logger.Info("skipping segment — high no_speech_prob", "operation", "Transcribe",
+					"segment", i, "no_speech_prob", noSpeechProb)
+				continue
+			}
 		}
 		cText := C.whisper_full_get_segment_text(t.ctx, C.int(i))
 		if cText == nil {

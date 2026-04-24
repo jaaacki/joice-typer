@@ -63,7 +63,7 @@ export default function TranscriptionPane({
     });
   }, [options.models, showEnglishOnlyModels]);
 
-  const translationDisabled = activeModelIsEnglishOnly;
+  const translationNeedsModelSwap = mode === "translation" && activeModelIsEnglishOnly;
 
   return (
     <div className="pane-stack">
@@ -84,19 +84,17 @@ export default function TranscriptionPane({
               type="button"
               role="radio"
               aria-checked={mode === "translation"}
-              className={`mode-segments__seg${mode === "translation" ? " is-active" : ""}${translationDisabled ? " is-disabled" : ""}`}
-              onClick={() => {
-                if (translationDisabled) return;
-                onOutputModeChange("translation");
-              }}
-              disabled={translationDisabled}
-              title={translationDisabled ? "Translation requires a multilingual model (remove the English-only model first)" : undefined}
+              className={`mode-segments__seg${mode === "translation" ? " is-active" : ""}`}
+              onClick={() => onOutputModeChange("translation")}
             >
               <strong>Translation</strong>
               <span>Speak one language, type English</span>
             </button>
           </div>
         </Field>
+        {translationNeedsModelSwap ? (
+          <p className="pane-hint pane-hint--warn">Translation requires a multilingual model — select one from the list below.</p>
+        ) : null}
 
         {mode === "transcription" ? (
           <Field label="Language" hint="What you speak — and what gets typed">

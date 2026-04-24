@@ -848,6 +848,9 @@ export function SettingsScreen({ bootstrap }: SettingsScreenProps) {
         <header className="settings-screen__header">
           <div className="settings-screen__header-spacer" aria-hidden="true" />
           <div className="settings-screen__meta">
+            {savedConfig.outputMode === "translation" && (
+              <StatusBadge tone="warn">Translation active</StatusBadge>
+            )}
             <StatusBadge tone={runtimeTone(runtimeStatus)}>Runtime {runtimeStatus}</StatusBadge>
             <span className="version-chip">{currentAppState.version}</span>
           </div>
@@ -881,6 +884,9 @@ export function SettingsScreen({ bootstrap }: SettingsScreenProps) {
                 ))}
               </div>
               <div className="settings-sidebar__model">Selected model · {selectedModelName}</div>
+              <div className="settings-sidebar__model">
+                Mode · {savedConfig.outputMode === "translation" ? "Translation → English" : "Transcription"}
+              </div>
             </div>
           </aside>
 
