@@ -786,14 +786,15 @@ svg {
 
 .model-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(132px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
   gap: 10px;
 }
 
 .model-card {
   position: relative;
-  display: grid;
-  gap: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
   padding: 14px;
   border: 1px solid var(--border);
   border-radius: 12px;
@@ -817,7 +818,7 @@ svg {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding-right: 56px;
+  flex-wrap: wrap;
 }
 
 .model-card__name {
@@ -828,9 +829,7 @@ svg {
 }
 
 .model-card__chip {
-  position: absolute;
-  top: 12px;
-  right: 12px;
+  display: inline-block;
   padding: 2px 6px;
   border-radius: 999px;
   background: color-mix(in srgb, var(--accent) 16%, transparent);
@@ -839,18 +838,12 @@ svg {
   font-weight: 700;
   letter-spacing: 0.09em;
   text-transform: uppercase;
+  white-space: nowrap;
 }
 
 .model-card__chip--muted {
-  top: auto;
-  bottom: 12px;
-  right: 12px;
   background: color-mix(in srgb, var(--ink-3) 18%, transparent);
   color: var(--ink-2);
-}
-
-.model-card__chip--muted + .model-card__chip {
-  top: 12px;
 }
 
 .mode-segments {
@@ -931,12 +924,6 @@ svg {
   color: var(--ink-2);
   font-size: 12.5px;
   line-height: 1.45;
-}
-
-.model-card__code {
-  color: var(--ink-3);
-  font-family: "JetBrains Mono", "SFMono-Regular", monospace;
-  font-size: 11px;
 }
 
 .model-card__meta {

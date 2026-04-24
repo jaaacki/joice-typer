@@ -11,8 +11,10 @@ import (
 )
 
 const (
-	maxLogBytes int64 = 5 * 1024 * 1024 // 5MB
-	logFileName       = "voicetype.log"
+	maxLogBytes    int64 = 5 * 1024 * 1024 // 5MB per active log file
+	rotatedKeep          = 2                // number of .1, .2 historical files to keep
+	logFileName          = "voicetype.log"
+	rotationCheckEvery   = 256              // check size every N writes (keeps fs.Stat out of hot path)
 )
 
 type WriteObserver func(path string)
@@ -34,7 +36,7 @@ func SetupLogger(logDir string) (*slog.Logger, func(), error) {
 		return nil, nil, fmt.Errorf("logger.SetupLogger: truncate: %w", err)
 	}
 
-	f, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	rw, err := newRotatingWriter(logPath, maxLogBytes, rotatedKeep)
 	if err != nil {
 		return nil, nil, fmt.Errorf("logger.SetupLogger: open log file: %w", err)
 	}
@@ -43,13 +45,13 @@ func SetupLogger(logDir string) (*slog.Logger, func(), error) {
 	if os.Getenv("JOICE_DEBUG") != "" {
 		level = slog.LevelDebug
 	}
-	handler := slog.NewJSONHandler(notifyingWriter{Writer: f, path: logPath}, &slog.HandlerOptions{
+	handler := slog.NewJSONHandler(notifyingWriter{Writer: rw, path: logPath}, &slog.HandlerOptions{
 		Level: level,
 	})
 
 	logger := slog.New(handler)
 	cleanup := func() {
-		f.Close()
+		_ = rw.Close()
 	}
 
 	return logger, cleanup, nil

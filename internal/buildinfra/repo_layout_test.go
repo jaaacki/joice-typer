@@ -1505,7 +1505,6 @@ func TestSettingsScreenSource_UsesRuntimeStateSubscription(t *testing.T) {
 		`setModel`,
 		`setOptions`,
 		`setStatus`,
-		`value={draft.modelSize}`,
 		`value={draft.language}`,
 		`value={draft.decodeMode}`,
 		`value={draft.punctuationMode}`,

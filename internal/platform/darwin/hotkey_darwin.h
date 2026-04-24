@@ -24,6 +24,12 @@ int startHotkeyListener(uint64_t targetFlags, int targetKeycode);
 // stopHotkeyListener disables the event tap and releases resources.
 void stopHotkeyListener(void);
 
+// setHotkeyListenerEnabled toggles the runtime hotkey event tap without tearing
+// it down. Used to suspend hotkey detection during settings hotkey capture so
+// the user's existing trigger doesn't fire while rebinding. Safe no-op when the
+// tap isn't installed. enabled=1 resumes, enabled=0 suspends.
+void setHotkeyListenerEnabled(int enabled);
+
 // runMainLoop runs CFRunLoopRun on the current thread. Blocks until stopMainLoop is called.
 void runMainLoop(void);
 

@@ -179,7 +179,11 @@ func (h *cgEventHotkeyListener) WaitForPermissions(ctx context.Context, onUpdate
 	ticker := time.NewTicker(2 * time.Second)
 	defer ticker.Stop()
 
-	// Check immediately on first iteration, then every 2s.
+	// Log state transitions at Info; silent polls at Debug only. Prior behavior
+	// emitted an Info line every 2s which produced ~43k lines/day when the user
+	// hadn't granted permissions — burying real signal.
+	var lastAcc, lastInp bool
+	reported := false
 	for first := true; ; first = false {
 		if !first {
 			select {
@@ -201,10 +205,20 @@ func (h *cgEventHotkeyListener) WaitForPermissions(ctx context.Context, onUpdate
 			return nil
 		}
 
-		h.logger.Info("waiting for permissions",
-			"operation", "WaitForPermissions",
-			"accessibility", acc,
-			"input_monitoring", inp)
+		if !reported || acc != lastAcc || inp != lastInp {
+			h.logger.Info("waiting for permissions",
+				"operation", "WaitForPermissions",
+				"accessibility", acc,
+				"input_monitoring", inp)
+			reported = true
+			lastAcc = acc
+			lastInp = inp
+		} else {
+			h.logger.Debug("waiting for permissions (poll)",
+				"operation", "WaitForPermissions",
+				"accessibility", acc,
+				"input_monitoring", inp)
+		}
 	}
 }
 

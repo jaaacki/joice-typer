@@ -14,16 +14,20 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
 	"sync"
+	"time"
 	"unsafe"
 
 	bridgepkg "voicetype/internal/core/bridge"
 	configpkg "voicetype/internal/core/config"
+	audiopkg "voicetype/internal/core/audio"
+	loggingpkg "voicetype/internal/core/logging"
 	transcriptionpkg "voicetype/internal/core/transcription"
 	versionpkg "voicetype/internal/core/version"
 	uiembed "voicetype/ui"
@@ -66,6 +70,19 @@ var (
 
 	webHotkeyCaptureMu    sync.Mutex
 	webHotkeyCaptureState bridgepkg.HotkeyCaptureSnapshot
+
+	// lastDispatchedEventMu guards lastDispatchedEvent; it is read from the
+	// C completion handler thread (via webSettingsNativeTransportWarning) and
+	// written from the Go dispatch path. Holding this reliably associates a
+	// JS eval failure with the event that triggered it.
+	lastDispatchedEventMu sync.Mutex
+	lastDispatchedEvent   string
+
+	// webSettingsWarningThrottle rate-limits noisy warnings from the native
+	// transport (e.g. repeated bridge dispatch failures when the webview is
+	// loading or an event payload is malformed). Keyed by (operation,event)
+	// so unrelated failures stay visible.
+	webSettingsWarningThrottle = loggingpkg.NewThrottler(10 * time.Second)
 
 	webSettingsServiceMu sync.Mutex
 	webSettingsService   *bridgepkg.Service
@@ -272,6 +289,91 @@ func buildSettingsBridgeService(_ configpkg.Config) *bridgepkg.Service {
 		ConfirmHotkeyCapture: func(context.Context) (bridgepkg.HotkeyCaptureSnapshot, error) {
 			return confirmWebSettingsHotkeyCapture()
 		},
+		SetAudioInputMonitor: func(_ context.Context, inputDevice string) error {
+			cfgPath, err := webSettingsDefaultConfigPath()
+			if err != nil {
+				return bridgepkg.WrapContractError(
+					bridgepkg.ErrorCodeSaveFailure,
+					"Failed to resolve config path",
+					false,
+					nil,
+					err,
+				)
+			}
+			cfg, err := webSettingsLoadConfig(cfgPath)
+			if err != nil {
+				return bridgepkg.WrapContractError(
+					bridgepkg.ErrorCodeConfigLoadFailure,
+					"Failed to load config",
+					false,
+					nil,
+					err,
+				)
+			}
+			deviceName := inputDevice
+			if deviceName == "" {
+				deviceName = cfg.InputDevice
+			}
+			// Capture and clear the old monitor before spawning. Pa_OpenStream
+			// and Pa_StartStream interact with Core Audio, which needs the main
+			// run loop on macOS. Running them synchronously inside a
+			// WKScriptMessageHandler callback (main thread) blocks the run loop
+			// and kills the window. Do all PortAudio work off the main thread.
+			oldMonitor := currentSettingsInputMonitor()
+			if oldMonitor != nil {
+				setSettingsInputMonitor(nil)
+			}
+			sampleRate := cfg.SampleRate
+			ensureWebSettingsInputLevelPublisher()
+			go func() {
+				if oldMonitor != nil {
+					if err := oldMonitor.Close(); err != nil {
+						currentSettingsLogger().Warn("failed to close previous input monitor",
+							"operation", "SetAudioInputMonitor", "error", err)
+					}
+				}
+				currentSettingsLogger().Info("starting input monitor",
+					"operation", "SetAudioInputMonitor",
+					"device", deviceName,
+					"sample_rate", sampleRate)
+				monitor, err := audiopkg.NewInputLevelMonitor(sampleRate, deviceName, currentSettingsLogger())
+				if err != nil {
+					currentSettingsLogger().Warn("failed to start monitored input device",
+						"operation", "SetAudioInputMonitor", "device", deviceName, "error", err)
+					publishInputLevelChanged(bridgepkg.InputLevelSnapshot{Level: 0, Quality: "poor"})
+					return
+				}
+				setSettingsInputMonitor(monitor)
+				publishInputLevelChanged(monitor.Snapshot())
+				// The microphone permission dialog (first run) causes the
+				// preferences window to lose activation and go behind other
+				// windows. Bring it back to front now that the stream is live.
+				C.focusWebSettingsWindow()
+			}()
+			return nil
+		},
+		StopAudioInputMonitor: func(context.Context) error {
+			monitor := currentSettingsInputMonitor()
+			if monitor == nil {
+				currentSettingsLogger().Debug("stop requested but no active input monitor",
+					"operation", "StopAudioInputMonitor")
+				publishInputLevelChanged(bridgepkg.InputLevelSnapshot{Level: 0, Quality: "poor"})
+				return nil
+			}
+			currentSettingsLogger().Info("stopping input monitor",
+				"operation", "StopAudioInputMonitor")
+			// Clear the reference and return immediately — Close blocks on
+			// Pa_StopStream which needs the main run loop on macOS.
+			setSettingsInputMonitor(nil)
+			publishInputLevelChanged(bridgepkg.InputLevelSnapshot{Level: 0, Quality: "poor"})
+			go func() {
+				if err := monitor.Close(); err != nil {
+					currentSettingsLogger().Warn("failed to close input monitor",
+						"operation", "StopAudioInputMonitor", "error", err)
+				}
+			}()
+			return nil
+		},
 	})
 }
 
@@ -419,6 +521,14 @@ func webSettingsHotkeyCaptureChanged(flags C.uint64_t, keycode C.int, recording 
 	keys := hotkeyToKeys(uint64(flags), int(keycode))
 	snapshot := hotkeyCaptureSnapshot(keys, recording == 1)
 	setWebHotkeyCaptureState(snapshot)
+	// Debug-level: this fires on every modifier press/release during capture.
+	// Info would be too noisy; Debug still gives us a timeline when debugging.
+	currentSettingsLogger().Debug("hotkey capture state changed",
+		"operation", "webSettingsHotkeyCaptureChanged",
+		"flags", fmt.Sprintf("0x%x", uint64(flags)),
+		"keycode", int(keycode),
+		"keys", keys,
+		"recording", recording == 1)
 	publishHotkeyCaptureChanged(snapshot)
 }
 
@@ -450,6 +560,8 @@ func currentWebHotkeyCaptureState() bridgepkg.HotkeyCaptureSnapshot {
 }
 
 func startWebSettingsHotkeyCapture() bridgepkg.HotkeyCaptureSnapshot {
+	currentSettingsLogger().Info("hotkey capture started",
+		"operation", "startWebSettingsHotkeyCapture")
 	snapshot := hotkeyCaptureSnapshot(nil, true)
 	setWebHotkeyCaptureState(snapshot)
 	publishHotkeyCaptureChanged(snapshot)
@@ -458,6 +570,8 @@ func startWebSettingsHotkeyCapture() bridgepkg.HotkeyCaptureSnapshot {
 }
 
 func cancelWebSettingsHotkeyCapture() {
+	currentSettingsLogger().Info("hotkey capture cancelled",
+		"operation", "cancelWebSettingsHotkeyCapture")
 	C.cancelWebHotkeyCapture()
 	snapshot := bridgepkg.HotkeyCaptureSnapshot{}
 	setWebHotkeyCaptureState(snapshot)
@@ -468,6 +582,8 @@ func confirmWebSettingsHotkeyCapture() (bridgepkg.HotkeyCaptureSnapshot, error) 
 	var flags C.uint64_t
 	var keycode C.int
 	if C.confirmWebHotkeyCapture(&flags, &keycode) == 0 {
+		currentSettingsLogger().Warn("hotkey capture confirm failed — no keys captured",
+			"operation", "confirmWebSettingsHotkeyCapture")
 		return bridgepkg.HotkeyCaptureSnapshot{}, bridgepkg.NewContractError(
 			bridgepkg.ErrorCodeHotkeyCaptureConfirmFailed,
 			"No hotkey was captured",
@@ -478,12 +594,29 @@ func confirmWebSettingsHotkeyCapture() (bridgepkg.HotkeyCaptureSnapshot, error) 
 	keys := hotkeyToKeys(uint64(flags), int(keycode))
 	snapshot := hotkeyCaptureSnapshot(keys, false)
 	setWebHotkeyCaptureState(snapshot)
+	currentSettingsLogger().Info("hotkey capture confirmed",
+		"operation", "confirmWebSettingsHotkeyCapture",
+		"flags", fmt.Sprintf("0x%x", uint64(flags)),
+		"keycode", int(keycode),
+		"keys", keys)
 	publishHotkeyCaptureChanged(snapshot)
 	return snapshot, nil
 }
 
 //export webSettingsWindowClosed
 func webSettingsWindowClosed() {
+	// Tear down any hotkey capture tap and mic monitor left open by the user
+	// closing the window mid-capture (e.g. via the red X). Safe to call even
+	// when nothing is active.
+	C.cancelWebHotkeyCapture()
+	if monitor := currentSettingsInputMonitor(); monitor != nil {
+		setSettingsInputMonitor(nil)
+		go func() {
+			if err := monitor.Close(); err != nil {
+				currentSettingsLogger().Warn("failed to close input monitor on window close", "operation", "webSettingsWindowClosed", "error", err)
+			}
+		}()
+	}
 	setWebHotkeyCaptureState(bridgepkg.HotkeyCaptureSnapshot{})
 	cancelPreferencesContext()
 	clearActiveWebSettingsBridgeService()
@@ -514,7 +647,20 @@ func dispatchWebSettingsEvent(event bridgepkg.EventEnvelope) {
 	if payload == "" {
 		return
 	}
+	lastDispatchedEventMu.Lock()
+	lastDispatchedEvent = string(event.Event)
+	lastDispatchedEventMu.Unlock()
+	currentSettingsLogger().Debug("dispatching bridge event",
+		"operation", "dispatchWebSettingsEvent",
+		"event", event.Event,
+		"payload_bytes", len(payload))
 	webSettingsDispatchEnvelope(payload, false)
+}
+
+func currentLastDispatchedEvent() string {
+	lastDispatchedEventMu.Lock()
+	defer lastDispatchedEventMu.Unlock()
+	return lastDispatchedEvent
 }
 
 func publishRuntimeStateChanged(state AppState) {
@@ -645,7 +791,17 @@ func webSettingsNativeTransportWarning(operation *C.char, message *C.char) {
 	if message != nil {
 		msg = C.GoString(message)
 	}
-	currentSettingsLogger().Warn("web settings native transport warning", "operation", op, "message", msg)
+	event := currentLastDispatchedEvent()
+	key := op + "::" + event
+	attrs := []any{
+		slog.String("operation", op),
+		slog.String("message", msg),
+	}
+	if event != "" {
+		attrs = append(attrs, slog.String("event", event))
+	}
+	webSettingsWarningThrottle.Log(currentSettingsLogger(), slog.LevelWarn, key,
+		"web settings native transport warning", attrs...)
 }
 
 //export webSettingsNativeTransportInfo

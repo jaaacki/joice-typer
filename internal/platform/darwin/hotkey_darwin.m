@@ -144,6 +144,12 @@ void stopHotkeyListener(void) {
     }
 }
 
+void setHotkeyListenerEnabled(int enabled) {
+    if (sEventTap != NULL) {
+        CGEventTapEnable(sEventTap, enabled ? true : false);
+    }
+}
+
 void runMainLoop(void) {
     ensureNSApp();
     [NSApp run];

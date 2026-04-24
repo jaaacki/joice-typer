@@ -161,16 +161,17 @@ export default function TranscriptionPane({
                   }
                 }}
               >
-                {inUse ? <span className="model-card__chip">In use</span> : null}
-                {option.englishOnly ? <span className="model-card__chip model-card__chip--muted">English only</span> : null}
                 <span className="model-card__topline">
                   <span className="model-card__name">
                     {details.title}
-                    {details.sizeLabel ? ` - ${details.sizeLabel}` : ""}
                   </span>
+                  {inUse ? <span className="model-card__chip">In use</span> : null}
+                  {option.englishOnly ? <span className="model-card__chip model-card__chip--muted">EN</span> : null}
                 </span>
-                <span className="model-card__code">{option.code}</span>
-                <span className="model-card__summary">{details.summary}</span>
+                <span className="model-card__summary">
+                  {details.sizeLabel}
+                  {details.summary ? ` · ${details.summary}` : ""}
+                </span>
                 <span className="model-card__meta">
                   {downloading
                     ? `${Math.round((downloadProgress?.progress ?? 0) * 100)}% downloaded`

@@ -7,6 +7,8 @@ import (
 	"log/slog"
 	"sync"
 	"sync/atomic"
+
+	audiopkg "voicetype/internal/core/audio"
 )
 
 type runtimeState struct {
@@ -14,6 +16,7 @@ type runtimeState struct {
 	activeHotkey     HotkeyListener
 	settingsLogger   *slog.Logger
 	settingsRecorder Recorder
+	inputMonitor     audiopkg.InputLevelMonitor
 	hotkeyRestartCh  chan struct{}
 
 	prefsMu     sync.Mutex
@@ -130,4 +133,16 @@ func ClearHotkeyEvents() {
 	hotkeyMu.Lock()
 	hotkeyEvents = nil
 	hotkeyMu.Unlock()
+}
+
+func setSettingsInputMonitor(m audiopkg.InputLevelMonitor) {
+	runtimeSingleton.mu.Lock()
+	defer runtimeSingleton.mu.Unlock()
+	runtimeSingleton.inputMonitor = m
+}
+
+func currentSettingsInputMonitor() audiopkg.InputLevelMonitor {
+	runtimeSingleton.mu.Lock()
+	defer runtimeSingleton.mu.Unlock()
+	return runtimeSingleton.inputMonitor
 }
