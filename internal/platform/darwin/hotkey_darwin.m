@@ -22,11 +22,63 @@ int checkInputMonitoring(void) {
     return CGPreflightListenEventAccess() ? 1 : 0;
 }
 
+// installEditMenu wires the standard macOS Edit menu (Undo/Redo/Cut/Copy/
+// Paste/Select All) into NSApp.mainMenu. Without this, accessory apps
+// have no main menu — and macOS only routes ⌘C/⌘V/⌘X through the
+// responder chain when a menu item with that key equivalent is
+// installed. The menu items use first-responder selectors (copy:,
+// cut:, paste:, selectAll:, undo:, redo:) which WKWebView and standard
+// AppKit text controls already respond to. The menu itself is never
+// visible (we keep activation policy as Accessory), but the shortcuts
+// fire correctly when a webview textarea is focused.
+static void installEditMenu(void) {
+    NSMenu *mainMenu = [[NSMenu alloc] init];
+
+    // App menu (required for the Edit menu to render correctly when the
+    // menu bar is visible — accessory apps still need a non-empty App
+    // menu in the chain even though it doesn't show).
+    NSMenuItem *appMenuItem = [[NSMenuItem alloc] init];
+    NSMenu *appMenu = [[NSMenu alloc] init];
+    [appMenuItem setSubmenu:appMenu];
+    [mainMenu addItem:appMenuItem];
+
+    // Edit menu — the actual point of this function.
+    NSMenuItem *editMenuItem = [[NSMenuItem alloc] init];
+    NSMenu *editMenu = [[NSMenu alloc] initWithTitle:@"Edit"];
+
+    NSMenuItem *undoItem = [[NSMenuItem alloc] initWithTitle:@"Undo" action:@selector(undo:) keyEquivalent:@"z"];
+    [editMenu addItem:undoItem];
+
+    NSMenuItem *redoItem = [[NSMenuItem alloc] initWithTitle:@"Redo" action:@selector(redo:) keyEquivalent:@"Z"];
+    [redoItem setKeyEquivalentModifierMask:NSEventModifierFlagShift | NSEventModifierFlagCommand];
+    [editMenu addItem:redoItem];
+
+    [editMenu addItem:[NSMenuItem separatorItem]];
+
+    NSMenuItem *cutItem = [[NSMenuItem alloc] initWithTitle:@"Cut" action:@selector(cut:) keyEquivalent:@"x"];
+    [editMenu addItem:cutItem];
+
+    NSMenuItem *copyItem = [[NSMenuItem alloc] initWithTitle:@"Copy" action:@selector(copy:) keyEquivalent:@"c"];
+    [editMenu addItem:copyItem];
+
+    NSMenuItem *pasteItem = [[NSMenuItem alloc] initWithTitle:@"Paste" action:@selector(paste:) keyEquivalent:@"v"];
+    [editMenu addItem:pasteItem];
+
+    NSMenuItem *selectAllItem = [[NSMenuItem alloc] initWithTitle:@"Select All" action:@selector(selectAll:) keyEquivalent:@"a"];
+    [editMenu addItem:selectAllItem];
+
+    [editMenuItem setSubmenu:editMenu];
+    [mainMenu addItem:editMenuItem];
+
+    [NSApp setMainMenu:mainMenu];
+}
+
 void ensureNSApp(void) {
     static dispatch_once_t once;
     dispatch_once(&once, ^{
         [NSApplication sharedApplication];
         [NSApp setActivationPolicy:NSApplicationActivationPolicyAccessory];
+        installEditMenu();
     });
 }
 
