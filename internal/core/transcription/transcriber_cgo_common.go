@@ -294,36 +294,35 @@ func (t *whisperTranscriber) transcribeBlocking(audio []float32) (string, error)
 	params.print_special = C._Bool(false)
 	params.n_threads = C.int(whisperThreadCount(longForm))
 	params.no_timestamps = C._Bool(true)
-	params.no_context = C._Bool(true)
-	params.single_segment = C._Bool(true)
-	params.suppress_blank = C._Bool(true)
-	params.suppress_nst = C._Bool(true)
-	if decodeCfg.strategy == "greedy" {
-		params.greedy.best_of = C.int(1)
-		params.temperature = C.float(0.0)
-	}
-	// Translation mode: always single-segment, no cross-segment context.
-	// Long-form params (no_context=false, multi-segment) cause whisper to
-	// carry token context between segments when translating, producing
-	// repeated text on consecutive turns. Push-to-talk translation is
-	// always a single utterance regardless of duration.
+
+	// Decode behaviour follows config preferences (decode_mode, language,
+	// output_mode, punctuation_mode) plus a small set of safe defaults that
+	// match whisper.cpp's intended use. We do NOT toggle internal whisper
+	// quality knobs (suppress_blank, suppress_nst, audio_ctx clipping,
+	// greedy temp/best_of pinning) based on heuristics — those flags were
+	// added in 01a8c37 ("transcription quality") but combined destructively
+	// with the vocabulary initial_prompt path: short utterances under prompt
+	// bias collapsed to single letters or empty output. Users control
+	// behaviour through the config; the engine should not silently override.
+	//
+	// Defaults below match the pre-01a8c37 behaviour that worked across
+	// many prior versions for both vocab and no-vocab usage.
 	if longForm && t.outputMode != "translation" {
+		// Long form transcription: allow multi-segment with cross-segment
+		// context so whisper can use the prior segment as a prompt for
+		// continuity. Translation mode always stays single-segment to avoid
+		// the cross-segment hallucination loop we hit earlier.
 		params.no_context = C._Bool(false)
-		params.no_timestamps = C._Bool(false)
+		params.single_segment = C._Bool(false)
+	} else {
+		params.no_context = C._Bool(true)
 		params.single_segment = C._Bool(false)
 	}
+
 	if decodeCfg.strategy == "beam" {
 		params.beam_search.beam_size = C.int(decodeCfg.beamSize)
 	}
-
-	// Cap the mel encoder context window to the actual audio duration.
-	// Default is 1500 frames (30s); 50 frames/s means a 2s clip only needs ~164.
-	// This is the single largest latency driver for short clips.
-	audioCtxFrames := int(durationSeconds*50) + 64
-	if audioCtxFrames > 1500 {
-		audioCtxFrames = 1500
-	}
-	params.audio_ctx = C.int(audioCtxFrames)
+	audioCtxFrames := 1500 // default = full 30s mel context
 
 	if t.lang != "" {
 		cLang := C.CString(t.lang)
