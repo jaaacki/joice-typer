@@ -17,7 +17,12 @@ type Router struct {
 
 func NewRouter(service *Service) *Router {
 	if service == nil {
-		service = NewService(nil)
+		// Defensive: callers should pass a real service. funcPlatform{}
+		// returns errPlatformMethodNotStubbed on every method, which the
+		// router converts to a generic internal-error response — broadly
+		// equivalent to the old "missing dependency" path that NewService(nil)
+		// produced before the Platform-interface refactor.
+		service = NewService(funcPlatform{})
 	}
 	return &Router{service: service}
 }

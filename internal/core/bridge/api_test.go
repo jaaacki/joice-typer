@@ -2,6 +2,7 @@ package bridge
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	configpkg "voicetype/internal/core/config"
@@ -58,8 +59,16 @@ func TestBridge_AllServiceMethodsRouteThroughPlatform(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if err := tc.run(); err == nil {
+			err := tc.run()
+			if err == nil {
 				t.Fatalf("%s: expected error from empty platform stub", tc.name)
+			}
+			// Stronger than just "got an error" — verify the error is the
+			// platform-level not-stubbed sentinel, which proves the Service
+			// method actually routed through the funcPlatform method (and
+			// didn't, say, return a hard-coded error from inside Service).
+			if !errors.Is(err, errPlatformMethodNotStubbed) {
+				t.Fatalf("%s: error = %v, want errPlatformMethodNotStubbed", tc.name, err)
 			}
 		})
 	}
