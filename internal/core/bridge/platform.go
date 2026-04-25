@@ -68,19 +68,19 @@ type Platform interface {
 	SetLoginItem(ctx context.Context, enabled bool) (LoginItemSnapshot, error)
 }
 
-// errPlatformMethodNotStubbed is returned by FuncPlatform when a method is
+// errPlatformMethodNotStubbed is returned by funcPlatform when a method is
 // invoked but its function field was left nil. Production adapters never
-// hit this — only tests should construct partial FuncPlatform values.
+// hit this — only tests should construct partial funcPlatform values.
 var errPlatformMethodNotStubbed = errors.New("bridge: platform method not stubbed in test")
 
-// FuncPlatform is a test-only adapter: it implements Platform via per-method
+// funcPlatform is a test-only adapter: it implements Platform via per-method
 // function fields, returning errPlatformMethodNotStubbed when a field is
-// left nil. Production code MUST NOT use FuncPlatform — it should
+// left nil. Production code MUST NOT use funcPlatform — it should
 // construct a real struct that implements Platform directly so the
 // compiler enforces full coverage.
 //
 // Each test sets only the fields it exercises and leaves the rest nil.
-type FuncPlatform struct {
+type funcPlatform struct {
 	LoadConfigFn             func(ctx context.Context) (configpkg.Config, error)
 	SaveConfigFn             func(ctx context.Context, cfg configpkg.Config) error
 	LoadPermissionsFn        func(ctx context.Context) (PermissionsSnapshot, error)
@@ -109,187 +109,187 @@ type FuncPlatform struct {
 	SetLoginItemFn           func(ctx context.Context, enabled bool) (LoginItemSnapshot, error)
 }
 
-// Compile-time assertion that FuncPlatform satisfies Platform. If you add a
+// Compile-time assertion that funcPlatform satisfies Platform. If you add a
 // method to Platform, this line is what tells you to add the corresponding
-// field + delegator to FuncPlatform.
-var _ Platform = FuncPlatform{}
+// field + delegator to funcPlatform.
+var _ Platform = funcPlatform{}
 
-func (p FuncPlatform) LoadConfig(ctx context.Context) (configpkg.Config, error) {
+func (p funcPlatform) LoadConfig(ctx context.Context) (configpkg.Config, error) {
 	if p.LoadConfigFn == nil {
 		return configpkg.Config{}, errPlatformMethodNotStubbed
 	}
 	return p.LoadConfigFn(ctx)
 }
 
-func (p FuncPlatform) SaveConfig(ctx context.Context, cfg configpkg.Config) error {
+func (p funcPlatform) SaveConfig(ctx context.Context, cfg configpkg.Config) error {
 	if p.SaveConfigFn == nil {
 		return errPlatformMethodNotStubbed
 	}
 	return p.SaveConfigFn(ctx, cfg)
 }
 
-func (p FuncPlatform) LoadPermissions(ctx context.Context) (PermissionsSnapshot, error) {
+func (p funcPlatform) LoadPermissions(ctx context.Context) (PermissionsSnapshot, error) {
 	if p.LoadPermissionsFn == nil {
 		return PermissionsSnapshot{}, errPlatformMethodNotStubbed
 	}
 	return p.LoadPermissionsFn(ctx)
 }
 
-func (p FuncPlatform) OpenPermissionSettings(ctx context.Context, target string) error {
+func (p funcPlatform) OpenPermissionSettings(ctx context.Context, target string) error {
 	if p.OpenPermissionSettingsFn == nil {
 		return errPlatformMethodNotStubbed
 	}
 	return p.OpenPermissionSettingsFn(ctx, target)
 }
 
-func (p FuncPlatform) ListDevices(ctx context.Context) ([]DeviceSnapshot, error) {
+func (p funcPlatform) ListDevices(ctx context.Context) ([]DeviceSnapshot, error) {
 	if p.ListDevicesFn == nil {
 		return nil, errPlatformMethodNotStubbed
 	}
 	return p.ListDevicesFn(ctx)
 }
 
-func (p FuncPlatform) RefreshDevices(ctx context.Context) ([]DeviceSnapshot, error) {
+func (p funcPlatform) RefreshDevices(ctx context.Context) ([]DeviceSnapshot, error) {
 	if p.RefreshDevicesFn == nil {
 		return nil, errPlatformMethodNotStubbed
 	}
 	return p.RefreshDevicesFn(ctx)
 }
 
-func (p FuncPlatform) LoadMachineInfo(ctx context.Context) (MachineInfoSnapshot, error) {
+func (p funcPlatform) LoadMachineInfo(ctx context.Context) (MachineInfoSnapshot, error) {
 	if p.LoadMachineInfoFn == nil {
 		return MachineInfoSnapshot{}, nil // tolerated nil-as-empty for back-compat
 	}
 	return p.LoadMachineInfoFn(ctx)
 }
 
-func (p FuncPlatform) SetAudioInputMonitor(ctx context.Context, inputDevice string) error {
+func (p funcPlatform) SetAudioInputMonitor(ctx context.Context, inputDevice string) error {
 	if p.SetAudioInputMonitorFn == nil {
 		return errPlatformMethodNotStubbed
 	}
 	return p.SetAudioInputMonitorFn(ctx, inputDevice)
 }
 
-func (p FuncPlatform) StopAudioInputMonitor(ctx context.Context) error {
+func (p funcPlatform) StopAudioInputMonitor(ctx context.Context) error {
 	if p.StopAudioInputMonitorFn == nil {
 		return errPlatformMethodNotStubbed
 	}
 	return p.StopAudioInputMonitorFn(ctx)
 }
 
-func (p FuncPlatform) GetInputVolume(ctx context.Context, deviceName string) (InputVolumeSnapshot, error) {
+func (p funcPlatform) GetInputVolume(ctx context.Context, deviceName string) (InputVolumeSnapshot, error) {
 	if p.GetInputVolumeFn == nil {
 		return InputVolumeSnapshot{}, errPlatformMethodNotStubbed
 	}
 	return p.GetInputVolumeFn(ctx, deviceName)
 }
 
-func (p FuncPlatform) SetInputVolume(ctx context.Context, deviceName string, volume float64) (InputVolumeSnapshot, error) {
+func (p funcPlatform) SetInputVolume(ctx context.Context, deviceName string, volume float64) (InputVolumeSnapshot, error) {
 	if p.SetInputVolumeFn == nil {
 		return InputVolumeSnapshot{}, errPlatformMethodNotStubbed
 	}
 	return p.SetInputVolumeFn(ctx, deviceName, volume)
 }
 
-func (p FuncPlatform) LoadModel(ctx context.Context) (ModelSnapshot, error) {
+func (p funcPlatform) LoadModel(ctx context.Context) (ModelSnapshot, error) {
 	if p.LoadModelFn == nil {
 		return ModelSnapshot{}, errPlatformMethodNotStubbed
 	}
 	return p.LoadModelFn(ctx)
 }
 
-func (p FuncPlatform) DownloadModel(ctx context.Context, size string) error {
+func (p funcPlatform) DownloadModel(ctx context.Context, size string) error {
 	if p.DownloadModelFn == nil {
 		return errPlatformMethodNotStubbed
 	}
 	return p.DownloadModelFn(ctx, size)
 }
 
-func (p FuncPlatform) DeleteModel(ctx context.Context, size string) error {
+func (p funcPlatform) DeleteModel(ctx context.Context, size string) error {
 	if p.DeleteModelFn == nil {
 		return errPlatformMethodNotStubbed
 	}
 	return p.DeleteModelFn(ctx, size)
 }
 
-func (p FuncPlatform) UseModel(ctx context.Context, size string) error {
+func (p funcPlatform) UseModel(ctx context.Context, size string) error {
 	if p.UseModelFn == nil {
 		return errPlatformMethodNotStubbed
 	}
 	return p.UseModelFn(ctx, size)
 }
 
-func (p FuncPlatform) StartHotkeyCapture(ctx context.Context) (HotkeyCaptureSnapshot, error) {
+func (p funcPlatform) StartHotkeyCapture(ctx context.Context) (HotkeyCaptureSnapshot, error) {
 	if p.StartHotkeyCaptureFn == nil {
 		return HotkeyCaptureSnapshot{}, errPlatformMethodNotStubbed
 	}
 	return p.StartHotkeyCaptureFn(ctx)
 }
 
-func (p FuncPlatform) CancelHotkeyCapture(ctx context.Context) error {
+func (p funcPlatform) CancelHotkeyCapture(ctx context.Context) error {
 	if p.CancelHotkeyCaptureFn == nil {
 		return errPlatformMethodNotStubbed
 	}
 	return p.CancelHotkeyCaptureFn(ctx)
 }
 
-func (p FuncPlatform) ConfirmHotkeyCapture(ctx context.Context) (HotkeyCaptureSnapshot, error) {
+func (p funcPlatform) ConfirmHotkeyCapture(ctx context.Context) (HotkeyCaptureSnapshot, error) {
 	if p.ConfirmHotkeyCaptureFn == nil {
 		return HotkeyCaptureSnapshot{}, errPlatformMethodNotStubbed
 	}
 	return p.ConfirmHotkeyCaptureFn(ctx)
 }
 
-func (p FuncPlatform) LoadAppState(ctx context.Context) (apppkg.AppState, error) {
+func (p funcPlatform) LoadAppState(ctx context.Context) (apppkg.AppState, error) {
 	if p.LoadAppStateFn == nil {
 		return 0, errPlatformMethodNotStubbed
 	}
 	return p.LoadAppStateFn(ctx)
 }
 
-func (p FuncPlatform) LoadLogsTail(ctx context.Context) (LogTailSnapshot, error) {
+func (p funcPlatform) LoadLogsTail(ctx context.Context) (LogTailSnapshot, error) {
 	if p.LoadLogsTailFn == nil {
 		return LogTailSnapshot{}, errPlatformMethodNotStubbed
 	}
 	return p.LoadLogsTailFn(ctx)
 }
 
-func (p FuncPlatform) LoadLogsFull(ctx context.Context) (string, error) {
+func (p funcPlatform) LoadLogsFull(ctx context.Context) (string, error) {
 	if p.LoadLogsFullFn == nil {
 		return "", errPlatformMethodNotStubbed
 	}
 	return p.LoadLogsFullFn(ctx)
 }
 
-func (p FuncPlatform) WriteClipboardText(ctx context.Context, text string) error {
+func (p funcPlatform) WriteClipboardText(ctx context.Context, text string) error {
 	if p.WriteClipboardTextFn == nil {
 		return errPlatformMethodNotStubbed
 	}
 	return p.WriteClipboardTextFn(ctx, text)
 }
 
-func (p FuncPlatform) LoadUpdater(ctx context.Context) (UpdaterSnapshot, error) {
+func (p funcPlatform) LoadUpdater(ctx context.Context) (UpdaterSnapshot, error) {
 	if p.LoadUpdaterFn == nil {
 		return UpdaterSnapshot{}, errPlatformMethodNotStubbed
 	}
 	return p.LoadUpdaterFn(ctx)
 }
 
-func (p FuncPlatform) CheckForUpdates(ctx context.Context) error {
+func (p funcPlatform) CheckForUpdates(ctx context.Context) error {
 	if p.CheckForUpdatesFn == nil {
 		return errPlatformMethodNotStubbed
 	}
 	return p.CheckForUpdatesFn(ctx)
 }
 
-func (p FuncPlatform) GetLoginItem(ctx context.Context) (LoginItemSnapshot, error) {
+func (p funcPlatform) GetLoginItem(ctx context.Context) (LoginItemSnapshot, error) {
 	if p.GetLoginItemFn == nil {
 		return LoginItemSnapshot{}, errPlatformMethodNotStubbed
 	}
 	return p.GetLoginItemFn(ctx)
 }
 
-func (p FuncPlatform) SetLoginItem(ctx context.Context, enabled bool) (LoginItemSnapshot, error) {
+func (p funcPlatform) SetLoginItem(ctx context.Context, enabled bool) (LoginItemSnapshot, error) {
 	if p.SetLoginItemFn == nil {
 		return LoginItemSnapshot{}, errPlatformMethodNotStubbed
 	}

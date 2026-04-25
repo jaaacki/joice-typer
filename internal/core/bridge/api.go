@@ -18,7 +18,7 @@ type Service struct {
 
 // NewService wires a Platform into a bridge Service. The caller MUST
 // pass a real Platform — there is no nil shortcut. Tests that need a
-// blank stub should construct an empty FuncPlatform{}.
+// blank stub should construct an empty funcPlatform{}.
 func NewService(p Platform) *Service {
 	return &Service{p: p}
 }

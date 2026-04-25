@@ -79,6 +79,20 @@ clean:
 test: bridge-contract
 	go test -v -count=1 ./...
 
+# vet-cross is the bridge contract check. Both bridge.Platform itself
+# and the funcPlatform test adapter are pure Go (no cgo), so vet'ing
+# the bridge package under both GOOS targets verifies the interface is
+# well-formed and self-consistent on either side. The platform-specific
+# adapters (darwin/windows) are checked by their respective real builds
+# — full Windows-side typechecking from a Mac dev box would require a
+# CGO_ENABLED=0 graph the project doesn't yet maintain.
+.PHONY: vet-cross
+vet-cross:
+	@echo "vetting bridge contract under GOOS=windows..."
+	GOOS=windows CGO_ENABLED=0 go vet ./internal/core/bridge/...
+	@echo "vetting bridge contract under GOOS=darwin..."
+	GOOS=darwin CGO_ENABLED=0 go vet ./internal/core/bridge/...
+
 RELEASE_TAG ?= $(shell git describe --tags --exact-match 2>/dev/null || true)
 
 release-check:

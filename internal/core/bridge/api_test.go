@@ -8,22 +8,60 @@ import (
 	apppkg "voicetype/internal/core/runtime"
 )
 
-// TestBridge_StubPlatformMethodsReturnNotStubbedError documents the new
-// contract: with a fully-empty FuncPlatform (the test stub), every Service
-// method bubbles up errPlatformMethodNotStubbed from the underlying call.
-// In production, the Platform interface guarantees every method is
-// implemented — there is no nil-dependency code path to test.
-func TestBridge_StubPlatformMethodsReturnNotStubbedError(t *testing.T) {
-	svc := NewService(FuncPlatform{})
+// TestBridge_AllServiceMethodsRouteThroughPlatform exercises every Service
+// method against an empty funcPlatform and asserts the platform error is
+// surfaced. This catches two regressions the old "missing dependency"
+// tests caught before being deleted:
+//   1. A new Service method that forgets to delegate to s.p.X
+//   2. A new Service method that swallows or rewrites the platform error
+// In production the Platform interface guarantees every method is
+// implemented — there is no missing-dependency code path. This test
+// preserves smoke coverage of the routing itself.
+func TestBridge_AllServiceMethodsRouteThroughPlatform(t *testing.T) {
+	svc := NewService(funcPlatform{})
+	ctx := context.Background()
 
-	if _, err := svc.Config(context.Background()); err == nil {
-		t.Fatal("expected Config to surface stub error")
+	cases := []struct {
+		name string
+		run  func() error
+	}{
+		{"Config", func() error { _, err := svc.Config(ctx); return err }},
+		{"SaveConfig", func() error { return svc.SaveConfig(ctx, ConfigSnapshot{}) }},
+		{"Permissions", func() error { _, err := svc.Permissions(ctx); return err }},
+		{"OpenPermissionSettings", func() error { return svc.OpenPermissionSettings(ctx, "accessibility") }},
+		{"Devices", func() error { _, err := svc.Devices(ctx); return err }},
+		{"RefreshDevices", func() error { _, err := svc.RefreshDevices(ctx); return err }},
+		{"SetAudioInputMonitor", func() error { return svc.SetAudioInputMonitor(ctx, "") }},
+		{"StopAudioInputMonitor", func() error { return svc.StopAudioInputMonitor(ctx) }},
+		{"GetInputVolume", func() error { _, err := svc.GetInputVolume(ctx, ""); return err }},
+		{"SetInputVolume", func() error { _, err := svc.SetInputVolume(ctx, "", 0); return err }},
+		{"Model", func() error { _, err := svc.Model(ctx); return err }},
+		{"DownloadModel", func() error { return svc.DownloadModel(ctx, "small") }},
+		{"DeleteModel", func() error { return svc.DeleteModel(ctx, "small") }},
+		{"UseModel", func() error { return svc.UseModel(ctx, "small") }},
+		{"StartHotkeyCapture", func() error { _, err := svc.StartHotkeyCapture(ctx); return err }},
+		{"CancelHotkeyCapture", func() error { return svc.CancelHotkeyCapture(ctx) }},
+		{"ConfirmHotkeyCapture", func() error { _, err := svc.ConfirmHotkeyCapture(ctx); return err }},
+		{"AppState", func() error { _, err := svc.AppState(ctx); return err }},
+		{"LogsGet", func() error { _, err := svc.LogsGet(ctx); return err }},
+		{"LogsCopyAll", func() error { _, err := svc.LogsCopyAll(ctx); return err }},
+		{"LogsCopyTail", func() error { _, err := svc.LogsCopyTail(ctx); return err }},
+		{"Updater", func() error { _, err := svc.Updater(ctx); return err }},
+		{"CheckForUpdates", func() error { return svc.CheckForUpdates(ctx) }},
+		{"GetLoginItem", func() error { _, err := svc.GetLoginItem(ctx); return err }},
+		{"SetLoginItem", func() error { _, err := svc.SetLoginItem(ctx, true); return err }},
+		// MachineInfo is intentionally absent: funcPlatform tolerates a nil
+		// LoadMachineInfoFn by returning an empty snapshot (preserved from
+		// the original Dependencies semantics where it was an optional
+		// dependency).
 	}
-	if err := svc.SaveConfig(context.Background(), ConfigSnapshot{}); err == nil {
-		t.Fatal("expected SaveConfig to surface stub error")
-	}
-	if _, err := svc.Permissions(context.Background()); err == nil {
-		t.Fatal("expected Permissions to surface stub error")
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := tc.run(); err == nil {
+				t.Fatalf("%s: expected error from empty platform stub", tc.name)
+			}
+		})
 	}
 }
 
@@ -41,7 +79,7 @@ func TestBridge_ConfigSnapshotTypeIsStable(t *testing.T) {
 }
 
 func TestBridge_ConfigReflectsDependencySnapshot(t *testing.T) {
-	svc := NewService(&FuncPlatform{
+	svc := NewService(&funcPlatform{
 		LoadConfigFn: func(context.Context) (configpkg.Config, error) {
 			return configpkg.Config{
 				TriggerKey:      []string{"fn", "shift"},
@@ -73,7 +111,7 @@ func TestBridge_ConfigReflectsDependencySnapshot(t *testing.T) {
 }
 
 func TestBridge_BootstrapIncludesConfigAndAppState(t *testing.T) {
-	svc := NewService(&FuncPlatform{
+	svc := NewService(&funcPlatform{
 		LoadConfigFn: func(context.Context) (configpkg.Config, error) {
 			return configpkg.Config{
 				TriggerKey:      []string{"fn", "shift"},
@@ -120,7 +158,7 @@ func TestBridge_BootstrapIncludesConfigAndAppState(t *testing.T) {
 }
 
 func TestBridge_LogsGetReturnsTailPayload(t *testing.T) {
-	svc := NewService(&FuncPlatform{
+	svc := NewService(&funcPlatform{
 		LoadLogsTailFn: func(context.Context) (LogTailSnapshot, error) {
 			return LogTailSnapshot{
 				Text:      "line 499\nline 500\n",
@@ -150,7 +188,7 @@ func TestBridge_LogsGetReturnsTailPayload(t *testing.T) {
 }
 
 func TestBridge_LogsCopyAllReturnsFullText(t *testing.T) {
-	svc := NewService(&FuncPlatform{
+	svc := NewService(&funcPlatform{
 		LoadLogsFullFn: func(context.Context) (string, error) {
 			return "line 001\nline 002\nline 003\n", nil
 		},
@@ -168,7 +206,7 @@ func TestBridge_LogsCopyAllReturnsFullText(t *testing.T) {
 
 func TestBridge_LogsCopyAllCopiesTextWhenNativeClipboardIsAvailable(t *testing.T) {
 	var copied string
-	svc := NewService(&FuncPlatform{
+	svc := NewService(&funcPlatform{
 		LoadLogsFullFn: func(context.Context) (string, error) {
 			return "line 001\nline 002\nline 003\n", nil
 		},
@@ -189,7 +227,7 @@ func TestBridge_LogsCopyAllCopiesTextWhenNativeClipboardIsAvailable(t *testing.T
 
 func TestBridge_LogsCopyTailCopiesVisibleTextWhenNativeClipboardIsAvailable(t *testing.T) {
 	var copied string
-	svc := NewService(&FuncPlatform{
+	svc := NewService(&funcPlatform{
 		LoadLogsTailFn: func(context.Context) (LogTailSnapshot, error) {
 			return LogTailSnapshot{
 				Text:      "tail 499\ntail 500\n",
@@ -217,7 +255,7 @@ func TestBridge_LogsCopyTailCopiesVisibleTextWhenNativeClipboardIsAvailable(t *t
 }
 
 func TestBridge_UpdaterReturnsSnapshot(t *testing.T) {
-	svc := NewService(&FuncPlatform{
+	svc := NewService(&funcPlatform{
 		LoadUpdaterFn: func(context.Context) (UpdaterSnapshot, error) {
 			return UpdaterSnapshot{
 				Enabled:             true,
@@ -248,7 +286,7 @@ func TestBridge_UpdaterReturnsSnapshot(t *testing.T) {
 
 func TestBridge_CheckForUpdatesUsesDependency(t *testing.T) {
 	called := false
-	svc := NewService(&FuncPlatform{
+	svc := NewService(&funcPlatform{
 		CheckForUpdatesFn: func(context.Context) error {
 			called = true
 			return nil

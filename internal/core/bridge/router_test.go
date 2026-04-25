@@ -14,7 +14,7 @@ import (
 
 func TestRouterHandleRequest_SaveConfig(t *testing.T) {
 	var saved ConfigSnapshot
-	service := NewService(&FuncPlatform{
+	service := NewService(&funcPlatform{
 		SaveConfigFn: func(ctx context.Context, cfg configpkg.Config) error {
 			saved = configSnapshotFromConfig(cfg)
 			return nil
@@ -79,7 +79,7 @@ func TestRouterHandleRequest_UnsupportedMethod(t *testing.T) {
 }
 
 func TestRouterHandleRequest_SaveConfigFailure(t *testing.T) {
-	service := NewService(&FuncPlatform{
+	service := NewService(&funcPlatform{
 		SaveConfigFn: func(ctx context.Context, cfg configpkg.Config) error {
 			return errors.New("disk full")
 		},
@@ -103,7 +103,7 @@ func TestRouterHandleRequest_SaveConfigFailure(t *testing.T) {
 }
 
 func TestRouterHandleRequest_SaveConfigRejectsMissingFields(t *testing.T) {
-	router := NewRouter(NewService(&FuncPlatform{
+	router := NewRouter(NewService(&funcPlatform{
 		SaveConfigFn: func(context.Context, configpkg.Config) error {
 			t.Fatal("SaveConfig should not be called when required fields are missing")
 			return nil
@@ -130,7 +130,7 @@ func TestRouterHandleRequest_SaveConfigRejectsMissingFields(t *testing.T) {
 }
 
 func TestRouterHandleRequest_RejectsUnexpectedParamsForQueryMethods(t *testing.T) {
-	router := NewRouter(NewService(&FuncPlatform{
+	router := NewRouter(NewService(&funcPlatform{
 		LoadConfigFn: func(context.Context) (configpkg.Config, error) {
 			return configpkg.Config{
 				TriggerKey:      []string{"fn", "shift"},
@@ -162,7 +162,7 @@ func TestRouterHandleRequest_RejectsUnexpectedParamsForQueryMethods(t *testing.T
 }
 
 func TestRouterHandleRequest_PreservesContractErrorCode(t *testing.T) {
-	service := NewService(&FuncPlatform{
+	service := NewService(&funcPlatform{
 		OpenPermissionSettingsFn: func(ctx context.Context, target string) error {
 			return NewContractError(
 				ErrorCodePermissionInvalidTarget,
@@ -194,7 +194,7 @@ func TestRouterHandleRequest_PreservesContractErrorCode(t *testing.T) {
 }
 
 func TestRouterHandleRequest_ConfigGetFailureUsesSpecificCode(t *testing.T) {
-	service := NewService(&FuncPlatform{
+	service := NewService(&funcPlatform{
 		LoadConfigFn: func(ctx context.Context) (configpkg.Config, error) {
 			return configpkg.Config{}, errors.New("missing")
 		},
@@ -218,7 +218,7 @@ func TestRouterHandleRequest_ConfigGetFailureUsesSpecificCode(t *testing.T) {
 }
 
 func TestRouterHandleRequest_BootstrapGet(t *testing.T) {
-	service := NewService(&FuncPlatform{
+	service := NewService(&funcPlatform{
 		LoadConfigFn: func(ctx context.Context) (configpkg.Config, error) {
 			return configpkg.Config{
 				ModelSize:       "small",
@@ -267,7 +267,7 @@ func TestRouterHandleRequest_BootstrapGet(t *testing.T) {
 }
 
 func TestRouterHandleRequest_QueryMethods(t *testing.T) {
-	service := NewService(&FuncPlatform{
+	service := NewService(&funcPlatform{
 		LoadPermissionsFn: func(ctx context.Context) (PermissionsSnapshot, error) {
 			return PermissionsSnapshot{Accessibility: true, InputMonitoring: false}, nil
 		},
@@ -400,7 +400,7 @@ func TestRouterHandleRequest_QueryMethods(t *testing.T) {
 
 func TestRouterHandleRequest_OpenPermissionSettings(t *testing.T) {
 	var openedTarget string
-	service := NewService(&FuncPlatform{
+	service := NewService(&funcPlatform{
 		OpenPermissionSettingsFn: func(ctx context.Context, target string) error {
 			openedTarget = target
 			return nil
@@ -426,7 +426,7 @@ func TestRouterHandleRequest_OpenPermissionSettings(t *testing.T) {
 
 func TestRouterHandleRequest_DevicesRefresh(t *testing.T) {
 	refreshed := false
-	service := NewService(&FuncPlatform{
+	service := NewService(&funcPlatform{
 		RefreshDevicesFn: func(ctx context.Context) ([]DeviceSnapshot, error) {
 			refreshed = true
 			return []DeviceSnapshot{{Name: "USB Headset", IsDefault: false}}, nil
@@ -458,7 +458,7 @@ func TestRouterHandleRequest_DevicesRefresh(t *testing.T) {
 }
 
 func TestRouterHandleRequest_DevicesRefreshFailure(t *testing.T) {
-	service := NewService(&FuncPlatform{
+	service := NewService(&funcPlatform{
 		RefreshDevicesFn: func(ctx context.Context) ([]DeviceSnapshot, error) {
 			return nil, errors.New("portaudio refresh failed")
 		},
@@ -485,7 +485,7 @@ func TestRouterHandleRequest_ModelCommands(t *testing.T) {
 	var downloaded string
 	var deleted string
 	var selected string
-	service := NewService(&FuncPlatform{
+	service := NewService(&funcPlatform{
 		DownloadModelFn: func(ctx context.Context, size string) error {
 			downloaded = size
 			return nil
@@ -562,13 +562,13 @@ func TestRouterHandleRequest_ModelCommandFailuresUseExplicitCodes(t *testing.T) 
 		name     string
 		method   string
 		wantCode string
-		deps     *FuncPlatform
+		deps     *funcPlatform
 	}{
 		{
 			name:     "download",
 			method:   ModelDownloadMethod,
 			wantCode: ErrorCodeModelDownloadFailed,
-			deps: &FuncPlatform{DownloadModelFn: func(ctx context.Context, size string) error {
+			deps: &funcPlatform{DownloadModelFn: func(ctx context.Context, size string) error {
 				return errors.New("download failed")
 			}},
 		},
@@ -576,7 +576,7 @@ func TestRouterHandleRequest_ModelCommandFailuresUseExplicitCodes(t *testing.T) 
 			name:     "delete",
 			method:   ModelDeleteMethod,
 			wantCode: ErrorCodeModelDeleteFailed,
-			deps: &FuncPlatform{DeleteModelFn: func(ctx context.Context, size string) error {
+			deps: &funcPlatform{DeleteModelFn: func(ctx context.Context, size string) error {
 				return errors.New("delete failed")
 			}},
 		},
@@ -584,7 +584,7 @@ func TestRouterHandleRequest_ModelCommandFailuresUseExplicitCodes(t *testing.T) 
 			name:     "use",
 			method:   ModelUseMethod,
 			wantCode: ErrorCodeModelUseFailed,
-			deps: &FuncPlatform{UseModelFn: func(ctx context.Context, size string) error {
+			deps: &funcPlatform{UseModelFn: func(ctx context.Context, size string) error {
 				return errors.New("use failed")
 			}},
 		},
