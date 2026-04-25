@@ -166,228 +166,250 @@ func loadWebSettingsMachineInfo() bridgepkg.MachineInfoSnapshot {
 	return snapshot
 }
 
+// darwinPlatform implements bridgepkg.Platform. The compile-time assertion
+// below means adding a new method to bridgepkg.Platform breaks this build
+// until the corresponding method is implemented here. That is the whole
+// point of converting the old nullable Dependencies struct into an
+// interface — drift becomes impossible.
+type darwinPlatform struct{}
+
+var _ bridgepkg.Platform = darwinPlatform{}
+
 func buildSettingsBridgeService(_ configpkg.Config) *bridgepkg.Service {
-	return bridgepkg.NewService(&bridgepkg.Dependencies{
-		LoadConfig: func(context.Context) (configpkg.Config, error) {
-			cfgPath, err := webSettingsDefaultConfigPath()
-			if err != nil {
-				return configpkg.Config{}, bridgepkg.WrapContractError(
-					bridgepkg.ErrorCodeConfigLoadFailure,
-					"Failed to resolve config path",
-					false,
-					nil,
-					err,
-				)
+	return bridgepkg.NewService(darwinPlatform{})
+}
+
+func (darwinPlatform) LoadConfig(context.Context) (configpkg.Config, error) {
+	cfgPath, err := webSettingsDefaultConfigPath()
+	if err != nil {
+		return configpkg.Config{}, bridgepkg.WrapContractError(
+			bridgepkg.ErrorCodeConfigLoadFailure,
+			"Failed to resolve config path",
+			false, nil, err,
+		)
+	}
+	loaded, err := webSettingsLoadConfig(cfgPath)
+	if err != nil {
+		return configpkg.Config{}, bridgepkg.WrapContractError(
+			bridgepkg.ErrorCodeConfigLoadFailure,
+			"Failed to load config",
+			false, nil, err,
+		)
+	}
+	return loaded, nil
+}
+
+func (darwinPlatform) SaveConfig(_ context.Context, updated configpkg.Config) error {
+	if err := updated.Validate(); err != nil {
+		return bridgepkg.WrapContractError(
+			bridgepkg.ErrorCodeConfigInvalid,
+			"Config validation failed",
+			false, nil, err,
+		)
+	}
+	if err := applyWebSettingsConfig(bridgepkg.ConfigSnapshot{
+		TriggerKey:      append([]string(nil), updated.TriggerKey...),
+		ModelSize:       updated.ModelSize,
+		Language:        updated.Language,
+		OutputMode:      updated.OutputMode,
+		SampleRate:      updated.SampleRate,
+		SoundFeedback:   updated.SoundFeedback,
+		InputDevice:     updated.InputDevice,
+		DecodeMode:      updated.DecodeMode,
+		PunctuationMode: updated.PunctuationMode,
+		Vocabulary:      updated.Vocabulary,
+	}); err != nil {
+		return bridgepkg.WrapContractError(
+			bridgepkg.ErrorCodeSaveFailure,
+			"Failed to save config",
+			false, nil, err,
+		)
+	}
+	return nil
+}
+
+func (darwinPlatform) LoadAppState(context.Context) (AppState, error) {
+	return currentAppState(), nil
+}
+
+func (darwinPlatform) LoadPermissions(context.Context) (bridgepkg.PermissionsSnapshot, error) {
+	return webSettingsLoadPermissions(), nil
+}
+
+func (darwinPlatform) LoadMachineInfo(context.Context) (bridgepkg.MachineInfoSnapshot, error) {
+	return loadWebSettingsMachineInfo(), nil
+}
+
+func (darwinPlatform) OpenPermissionSettings(_ context.Context, target string) error {
+	if err := webSettingsOpenPermissionSettings(target); err != nil {
+		if _, ok := bridgepkg.AsContractError(err); ok {
+			return err
+		}
+		return bridgepkg.WrapContractError(
+			bridgepkg.ErrorCodePermissionOpenFailed,
+			"Failed to open system permission settings",
+			true,
+			map[string]any{"target": target},
+			err,
+		)
+	}
+	return nil
+}
+
+func (darwinPlatform) ListDevices(context.Context) ([]bridgepkg.DeviceSnapshot, error) {
+	return webSettingsListInputDevices()
+}
+
+func (darwinPlatform) RefreshDevices(context.Context) ([]bridgepkg.DeviceSnapshot, error) {
+	return webSettingsRefreshDevices()
+}
+
+func (darwinPlatform) LoadModel(context.Context) (bridgepkg.ModelSnapshot, error) {
+	return loadActiveWebSettingsModelSnapshot()
+}
+
+func (darwinPlatform) DownloadModel(ctx context.Context, size string) error {
+	return webSettingsDownloadModel(ctx, size)
+}
+
+func (darwinPlatform) DeleteModel(_ context.Context, size string) error {
+	return webSettingsDeleteModel(size)
+}
+
+func (darwinPlatform) UseModel(_ context.Context, size string) error {
+	return webSettingsUseModel(size)
+}
+
+func (darwinPlatform) LoadLogsTail(context.Context) (bridgepkg.LogTailSnapshot, error) {
+	return loadWebSettingsLogTailSnapshot()
+}
+
+func (darwinPlatform) LoadLogsFull(context.Context) (string, error) {
+	return loadWebSettingsLogFullText()
+}
+
+func (darwinPlatform) WriteClipboardText(_ context.Context, text string) error {
+	return copyTextToClipboard(text)
+}
+
+func (darwinPlatform) LoadUpdater(context.Context) (bridgepkg.UpdaterSnapshot, error) {
+	return currentUpdaterSnapshot(), nil
+}
+
+func (darwinPlatform) CheckForUpdates(context.Context) error {
+	return CheckForUpdates()
+}
+
+func (darwinPlatform) GetLoginItem(context.Context) (bridgepkg.LoginItemSnapshot, error) {
+	return webSettingsGetLoginItem(), nil
+}
+
+func (darwinPlatform) SetLoginItem(_ context.Context, enabled bool) (bridgepkg.LoginItemSnapshot, error) {
+	return webSettingsSetLoginItem(enabled)
+}
+
+func (darwinPlatform) GetInputVolume(_ context.Context, deviceName string) (bridgepkg.InputVolumeSnapshot, error) {
+	return webSettingsGetInputVolume(deviceName), nil
+}
+
+func (darwinPlatform) SetInputVolume(_ context.Context, deviceName string, volume float64) (bridgepkg.InputVolumeSnapshot, error) {
+	return webSettingsSetInputVolume(deviceName, volume)
+}
+
+func (darwinPlatform) StartHotkeyCapture(context.Context) (bridgepkg.HotkeyCaptureSnapshot, error) {
+	return startWebSettingsHotkeyCapture(), nil
+}
+
+func (darwinPlatform) CancelHotkeyCapture(context.Context) error {
+	cancelWebSettingsHotkeyCapture()
+	return nil
+}
+
+func (darwinPlatform) ConfirmHotkeyCapture(context.Context) (bridgepkg.HotkeyCaptureSnapshot, error) {
+	return confirmWebSettingsHotkeyCapture()
+}
+
+func (darwinPlatform) SetAudioInputMonitor(_ context.Context, inputDevice string) error {
+	cfgPath, err := webSettingsDefaultConfigPath()
+	if err != nil {
+		return bridgepkg.WrapContractError(
+			bridgepkg.ErrorCodeSaveFailure,
+			"Failed to resolve config path",
+			false, nil, err,
+		)
+	}
+	cfg, err := webSettingsLoadConfig(cfgPath)
+	if err != nil {
+		return bridgepkg.WrapContractError(
+			bridgepkg.ErrorCodeConfigLoadFailure,
+			"Failed to load config",
+			false, nil, err,
+		)
+	}
+	deviceName := inputDevice
+	if deviceName == "" {
+		deviceName = cfg.InputDevice
+	}
+	// Capture and clear the old monitor before spawning. Pa_OpenStream
+	// and Pa_StartStream interact with Core Audio, which needs the main
+	// run loop on macOS. Running them synchronously inside a
+	// WKScriptMessageHandler callback (main thread) blocks the run loop
+	// and kills the window. Do all PortAudio work off the main thread.
+	oldMonitor := currentSettingsInputMonitor()
+	if oldMonitor != nil {
+		setSettingsInputMonitor(nil)
+	}
+	sampleRate := cfg.SampleRate
+	ensureWebSettingsInputLevelPublisher()
+	go func() {
+		if oldMonitor != nil {
+			if err := oldMonitor.Close(); err != nil {
+				currentSettingsLogger().Warn("failed to close previous input monitor",
+					"operation", "SetAudioInputMonitor", "error", err)
 			}
-			loaded, err := webSettingsLoadConfig(cfgPath)
-			if err != nil {
-				return configpkg.Config{}, bridgepkg.WrapContractError(
-					bridgepkg.ErrorCodeConfigLoadFailure,
-					"Failed to load config",
-					false,
-					nil,
-					err,
-				)
-			}
-			return loaded, nil
-		},
-		SaveConfig: func(_ context.Context, updated configpkg.Config) error {
-			if err := updated.Validate(); err != nil {
-				return bridgepkg.WrapContractError(
-					bridgepkg.ErrorCodeConfigInvalid,
-					"Config validation failed",
-					false,
-					nil,
-					err,
-				)
-			}
-			if err := applyWebSettingsConfig(bridgepkg.ConfigSnapshot{
-				TriggerKey:      append([]string(nil), updated.TriggerKey...),
-				ModelSize:       updated.ModelSize,
-				Language:        updated.Language,
-				OutputMode:      updated.OutputMode,
-				SampleRate:      updated.SampleRate,
-				SoundFeedback:   updated.SoundFeedback,
-				InputDevice:     updated.InputDevice,
-				DecodeMode:      updated.DecodeMode,
-				PunctuationMode: updated.PunctuationMode,
-				Vocabulary:      updated.Vocabulary,
-			}); err != nil {
-				return bridgepkg.WrapContractError(
-					bridgepkg.ErrorCodeSaveFailure,
-					"Failed to save config",
-					false,
-					nil,
-					err,
-				)
-			}
-			return nil
-		},
-		LoadAppState: func(context.Context) (AppState, error) {
-			return currentAppState(), nil
-		},
-		LoadPermissions: func(context.Context) (bridgepkg.PermissionsSnapshot, error) {
-			return webSettingsLoadPermissions(), nil
-		},
-		LoadMachineInfo: func(context.Context) (bridgepkg.MachineInfoSnapshot, error) {
-			return loadWebSettingsMachineInfo(), nil
-		},
-		OpenPermissionSettings: func(ctx context.Context, target string) error {
-			if err := webSettingsOpenPermissionSettings(target); err != nil {
-				if _, ok := bridgepkg.AsContractError(err); ok {
-					return err
-				}
-				return bridgepkg.WrapContractError(
-					bridgepkg.ErrorCodePermissionOpenFailed,
-					"Failed to open system permission settings",
-					true,
-					map[string]any{"target": target},
-					err,
-				)
-			}
-			return nil
-		},
-		ListDevices: func(context.Context) ([]bridgepkg.DeviceSnapshot, error) {
-			return webSettingsListInputDevices()
-		},
-		RefreshDevices: func(context.Context) ([]bridgepkg.DeviceSnapshot, error) {
-			return webSettingsRefreshDevices()
-		},
-		LoadModel: func(context.Context) (bridgepkg.ModelSnapshot, error) {
-			return loadActiveWebSettingsModelSnapshot()
-		},
-		DownloadModel: func(ctx context.Context, size string) error {
-			return webSettingsDownloadModel(ctx, size)
-		},
-		DeleteModel: func(ctx context.Context, size string) error {
-			return webSettingsDeleteModel(size)
-		},
-		UseModel: func(ctx context.Context, size string) error {
-			return webSettingsUseModel(size)
-		},
-		LoadLogsTail: func(context.Context) (bridgepkg.LogTailSnapshot, error) {
-			return loadWebSettingsLogTailSnapshot()
-		},
-		LoadLogsFull: func(context.Context) (string, error) {
-			return loadWebSettingsLogFullText()
-		},
-		WriteClipboardText: func(_ context.Context, text string) error {
-			return copyTextToClipboard(text)
-		},
-		LoadUpdater: func(context.Context) (bridgepkg.UpdaterSnapshot, error) {
-			return currentUpdaterSnapshot(), nil
-		},
-		CheckForUpdates: func(context.Context) error {
-			return CheckForUpdates()
-		},
-		GetLoginItem: func(context.Context) (bridgepkg.LoginItemSnapshot, error) {
-			return webSettingsGetLoginItem(), nil
-		},
-		SetLoginItem: func(_ context.Context, enabled bool) (bridgepkg.LoginItemSnapshot, error) {
-			return webSettingsSetLoginItem(enabled)
-		},
-		GetInputVolume: func(_ context.Context, deviceName string) (bridgepkg.InputVolumeSnapshot, error) {
-			return webSettingsGetInputVolume(deviceName), nil
-		},
-		SetInputVolume: func(_ context.Context, deviceName string, volume float64) (bridgepkg.InputVolumeSnapshot, error) {
-			return webSettingsSetInputVolume(deviceName, volume)
-		},
-		StartHotkeyCapture: func(context.Context) (bridgepkg.HotkeyCaptureSnapshot, error) {
-			return startWebSettingsHotkeyCapture(), nil
-		},
-		CancelHotkeyCapture: func(context.Context) error {
-			cancelWebSettingsHotkeyCapture()
-			return nil
-		},
-		ConfirmHotkeyCapture: func(context.Context) (bridgepkg.HotkeyCaptureSnapshot, error) {
-			return confirmWebSettingsHotkeyCapture()
-		},
-		SetAudioInputMonitor: func(_ context.Context, inputDevice string) error {
-			cfgPath, err := webSettingsDefaultConfigPath()
-			if err != nil {
-				return bridgepkg.WrapContractError(
-					bridgepkg.ErrorCodeSaveFailure,
-					"Failed to resolve config path",
-					false,
-					nil,
-					err,
-				)
-			}
-			cfg, err := webSettingsLoadConfig(cfgPath)
-			if err != nil {
-				return bridgepkg.WrapContractError(
-					bridgepkg.ErrorCodeConfigLoadFailure,
-					"Failed to load config",
-					false,
-					nil,
-					err,
-				)
-			}
-			deviceName := inputDevice
-			if deviceName == "" {
-				deviceName = cfg.InputDevice
-			}
-			// Capture and clear the old monitor before spawning. Pa_OpenStream
-			// and Pa_StartStream interact with Core Audio, which needs the main
-			// run loop on macOS. Running them synchronously inside a
-			// WKScriptMessageHandler callback (main thread) blocks the run loop
-			// and kills the window. Do all PortAudio work off the main thread.
-			oldMonitor := currentSettingsInputMonitor()
-			if oldMonitor != nil {
-				setSettingsInputMonitor(nil)
-			}
-			sampleRate := cfg.SampleRate
-			ensureWebSettingsInputLevelPublisher()
-			go func() {
-				if oldMonitor != nil {
-					if err := oldMonitor.Close(); err != nil {
-						currentSettingsLogger().Warn("failed to close previous input monitor",
-							"operation", "SetAudioInputMonitor", "error", err)
-					}
-				}
-				currentSettingsLogger().Info("starting input monitor",
-					"operation", "SetAudioInputMonitor",
-					"device", deviceName,
-					"sample_rate", sampleRate)
-				monitor, err := audiopkg.NewInputLevelMonitor(sampleRate, deviceName, currentSettingsLogger())
-				if err != nil {
-					currentSettingsLogger().Warn("failed to start monitored input device",
-						"operation", "SetAudioInputMonitor", "device", deviceName, "error", err)
-					publishInputLevelChanged(bridgepkg.InputLevelSnapshot{Level: 0, Quality: "poor"})
-					return
-				}
-				setSettingsInputMonitor(monitor)
-				publishInputLevelChanged(monitor.Snapshot())
-				// The microphone permission dialog (first run) causes the
-				// preferences window to lose activation and go behind other
-				// windows. Bring it back to front now that the stream is live.
-				C.focusWebSettingsWindow()
-			}()
-			return nil
-		},
-		StopAudioInputMonitor: func(context.Context) error {
-			monitor := currentSettingsInputMonitor()
-			if monitor == nil {
-				currentSettingsLogger().Debug("stop requested but no active input monitor",
-					"operation", "StopAudioInputMonitor")
-				publishInputLevelChanged(bridgepkg.InputLevelSnapshot{Level: 0, Quality: "poor"})
-				return nil
-			}
-			currentSettingsLogger().Info("stopping input monitor",
-				"operation", "StopAudioInputMonitor")
-			// Clear the reference and return immediately — Close blocks on
-			// Pa_StopStream which needs the main run loop on macOS.
-			setSettingsInputMonitor(nil)
+		}
+		currentSettingsLogger().Info("starting input monitor",
+			"operation", "SetAudioInputMonitor",
+			"device", deviceName,
+			"sample_rate", sampleRate)
+		monitor, err := audiopkg.NewInputLevelMonitor(sampleRate, deviceName, currentSettingsLogger())
+		if err != nil {
+			currentSettingsLogger().Warn("failed to start monitored input device",
+				"operation", "SetAudioInputMonitor", "device", deviceName, "error", err)
 			publishInputLevelChanged(bridgepkg.InputLevelSnapshot{Level: 0, Quality: "poor"})
-			go func() {
-				if err := monitor.Close(); err != nil {
-					currentSettingsLogger().Warn("failed to close input monitor",
-						"operation", "StopAudioInputMonitor", "error", err)
-				}
-			}()
-			return nil
-		},
-	})
+			return
+		}
+		setSettingsInputMonitor(monitor)
+		publishInputLevelChanged(monitor.Snapshot())
+		// The microphone permission dialog (first run) causes the
+		// preferences window to lose activation and go behind other
+		// windows. Bring it back to front now that the stream is live.
+		C.focusWebSettingsWindow()
+	}()
+	return nil
+}
+
+func (darwinPlatform) StopAudioInputMonitor(context.Context) error {
+	monitor := currentSettingsInputMonitor()
+	if monitor == nil {
+		currentSettingsLogger().Debug("stop requested but no active input monitor",
+			"operation", "StopAudioInputMonitor")
+		publishInputLevelChanged(bridgepkg.InputLevelSnapshot{Level: 0, Quality: "poor"})
+		return nil
+	}
+	currentSettingsLogger().Info("stopping input monitor",
+		"operation", "StopAudioInputMonitor")
+	// Clear the reference and return immediately — Close blocks on
+	// Pa_StopStream which needs the main run loop on macOS.
+	setSettingsInputMonitor(nil)
+	publishInputLevelChanged(bridgepkg.InputLevelSnapshot{Level: 0, Quality: "poor"})
+	go func() {
+		if err := monitor.Close(); err != nil {
+			currentSettingsLogger().Warn("failed to close input monitor",
+				"operation", "StopAudioInputMonitor", "error", err)
+		}
+	}()
+	return nil
 }
 
 func renderEmbeddedWebUI(ctx context.Context, service *bridgepkg.Service) (string, error) {

@@ -387,14 +387,14 @@ func TestPlatformSettingsSources_UseNativeClipboardAndAsyncModelDownload(t *test
 		{
 			path: "internal/platform/darwin/webview.go",
 			required: []string{
-				`WriteClipboardText: func(_ context.Context, text string) error`,
+				`func (darwinPlatform) WriteClipboardText(_ context.Context, text string) error`,
 				`return copyTextToClipboard(text)`,
 			},
 		},
 		{
 			path: "internal/platform/windows/settings.go",
 			required: []string{
-				`WriteClipboardText: func(_ context.Context, text string) error`,
+				`func (windowsPlatform) WriteClipboardText(_ context.Context, text string) error`,
 				`return setWindowsClipboardText(text)`,
 				`go func(downloadCtx context.Context, modelSize string, path string) {`,
 				`publishModelDownloadCompleted(modelSize)`,
@@ -946,19 +946,19 @@ func TestWindowsSettingsBridgeSource_ProvidesExplicitAdapterHooks(t *testing.T) 
 	source := string(data)
 	for _, required := range []string{
 		`return bridgepkg.PermissionsSnapshot{Accessibility: true, InputMonitoring: true}`,
-		`ListDevices: func(context.Context) ([]bridgepkg.DeviceSnapshot, error) {`,
-		`RefreshDevices: func(context.Context) ([]bridgepkg.DeviceSnapshot, error) {`,
+		`func (windowsPlatform) ListDevices(context.Context) ([]bridgepkg.DeviceSnapshot, error) {`,
+		`func (windowsPlatform) RefreshDevices(context.Context) ([]bridgepkg.DeviceSnapshot, error) {`,
 		`prefsCtx := currentPreferencesContext()`,
 		`preferences context unavailable after opening setup`,
 		`func openPreferences() error {`,
 		`decorateWebView2UnavailableMessage(err)`,
 		`showWindowsMessageBox("JoiceTyper Preferences unavailable", message)`,
 		`return fmt.Errorf("failed to start the Windows preferences host: %w", err)`,
-		`DownloadModel: func(ctx context.Context, size string) error {`,
-		`DeleteModel: func(ctx context.Context, size string) error {`,
-		`UseModel: func(ctx context.Context, size string) error {`,
-		`StartHotkeyCapture: func(context.Context) (bridgepkg.HotkeyCaptureSnapshot, error) {`,
-		`ConfirmHotkeyCapture: func(context.Context) (bridgepkg.HotkeyCaptureSnapshot, error) {`,
+		`func (windowsPlatform) DownloadModel(ctx context.Context, size string) error {`,
+		`func (windowsPlatform) DeleteModel(ctx context.Context, size string) error {`,
+		`func (windowsPlatform) UseModel(ctx context.Context, size string) error {`,
+		`func (windowsPlatform) StartHotkeyCapture(context.Context) (bridgepkg.HotkeyCaptureSnapshot, error) {`,
+		`func (windowsPlatform) ConfirmHotkeyCapture(context.Context) (bridgepkg.HotkeyCaptureSnapshot, error) {`,
 		`transcriptionpkg.DownloadModelWithProgress`,
 		`publishModelDownloadProgress(size, progress, downloaded, total)`,
 		`"Cannot delete the active model"`,

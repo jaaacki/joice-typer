@@ -8,164 +8,22 @@ import (
 	apppkg "voicetype/internal/core/runtime"
 )
 
-func TestBridge_NewServiceExposesConfigMethods(t *testing.T) {
-	svc := NewService(nil)
-	if svc == nil {
-		t.Fatal("expected bridge service")
-	}
+// TestBridge_StubPlatformMethodsReturnNotStubbedError documents the new
+// contract: with a fully-empty FuncPlatform (the test stub), every Service
+// method bubbles up errPlatformMethodNotStubbed from the underlying call.
+// In production, the Platform interface guarantees every method is
+// implemented — there is no nil-dependency code path to test.
+func TestBridge_StubPlatformMethodsReturnNotStubbedError(t *testing.T) {
+	svc := NewService(FuncPlatform{})
+
 	if _, err := svc.Config(context.Background()); err == nil {
-		t.Fatal("expected Config to fail when bridge dependencies are missing")
-	} else if contractErr, ok := AsContractError(err); !ok || contractErr.Code != ErrorCodeInternal {
-		t.Fatalf("Config error = %#v, want contract code %q", err, ErrorCodeInternal)
+		t.Fatal("expected Config to surface stub error")
 	}
-}
-
-func TestBridge_ServiceMethodsFailWhenDependenciesMissing(t *testing.T) {
-	svc := NewService(nil)
-
-	testCases := []struct {
-		name string
-		run  func() error
-	}{
-		{
-			name: "SaveConfig",
-			run: func() error {
-				return svc.SaveConfig(context.Background(), ConfigSnapshot{})
-			},
-		},
-		{
-			name: "Permissions",
-			run: func() error {
-				_, err := svc.Permissions(context.Background())
-				return err
-			},
-		},
-		{
-			name: "Devices",
-			run: func() error {
-				_, err := svc.Devices(context.Background())
-				return err
-			},
-		},
-		{
-			name: "RefreshDevices",
-			run: func() error {
-				_, err := svc.RefreshDevices(context.Background())
-				return err
-			},
-		},
-		{
-			name: "Model",
-			run: func() error {
-				_, err := svc.Model(context.Background())
-				return err
-			},
-		},
-		{
-			name: "DownloadModel",
-			run: func() error {
-				return svc.DownloadModel(context.Background(), "small")
-			},
-		},
-		{
-			name: "DeleteModel",
-			run: func() error {
-				return svc.DeleteModel(context.Background(), "small")
-			},
-		},
-		{
-			name: "UseModel",
-			run: func() error {
-				return svc.UseModel(context.Background(), "small")
-			},
-		},
-		{
-			name: "StartHotkeyCapture",
-			run: func() error {
-				_, err := svc.StartHotkeyCapture(context.Background())
-				return err
-			},
-		},
-		{
-			name: "CancelHotkeyCapture",
-			run: func() error {
-				return svc.CancelHotkeyCapture(context.Background())
-			},
-		},
-		{
-			name: "ConfirmHotkeyCapture",
-			run: func() error {
-				_, err := svc.ConfirmHotkeyCapture(context.Background())
-				return err
-			},
-		},
-		{
-			name: "AppState",
-			run: func() error {
-				_, err := svc.AppState(context.Background())
-				return err
-			},
-		},
-		{
-			name: "Bootstrap",
-			run: func() error {
-				_, err := svc.Bootstrap(context.Background())
-				return err
-			},
-		},
-		{
-			name: "LogsGet",
-			run: func() error {
-				_, err := svc.LogsGet(context.Background())
-				return err
-			},
-		},
-		{
-			name: "LogsCopyTail",
-			run: func() error {
-				_, err := svc.LogsCopyTail(context.Background())
-				return err
-			},
-		},
-		{
-			name: "LogsCopyAll",
-			run: func() error {
-				_, err := svc.LogsCopyAll(context.Background())
-				return err
-			},
-		},
-		{
-			name: "Updater",
-			run: func() error {
-				_, err := svc.Updater(context.Background())
-				return err
-			},
-		},
-		{
-			name: "CheckForUpdates",
-			run: func() error {
-				return svc.CheckForUpdates(context.Background())
-			},
-		},
+	if err := svc.SaveConfig(context.Background(), ConfigSnapshot{}); err == nil {
+		t.Fatal("expected SaveConfig to surface stub error")
 	}
-
-	for _, tc := range testCases {
-		t.Run(tc.name, func(t *testing.T) {
-			err := tc.run()
-			if err == nil {
-				t.Fatalf("expected %s to fail when dependency is missing", tc.name)
-			}
-			contractErr, ok := AsContractError(err)
-			if !ok {
-				t.Fatalf("%s error = %#v, want ContractError", tc.name, err)
-			}
-			if contractErr.Code != ErrorCodeInternal {
-				t.Fatalf("%s code = %q, want %q", tc.name, contractErr.Code, ErrorCodeInternal)
-			}
-			if contractErr.Details["operation"] == "" {
-				t.Fatalf("%s details = %#v, want operation metadata", tc.name, contractErr.Details)
-			}
-		})
+	if _, err := svc.Permissions(context.Background()); err == nil {
+		t.Fatal("expected Permissions to surface stub error")
 	}
 }
 
@@ -183,8 +41,8 @@ func TestBridge_ConfigSnapshotTypeIsStable(t *testing.T) {
 }
 
 func TestBridge_ConfigReflectsDependencySnapshot(t *testing.T) {
-	svc := NewService(&Dependencies{
-		LoadConfig: func(context.Context) (configpkg.Config, error) {
+	svc := NewService(&FuncPlatform{
+		LoadConfigFn: func(context.Context) (configpkg.Config, error) {
 			return configpkg.Config{
 				TriggerKey:      []string{"fn", "shift"},
 				ModelSize:       "small",
@@ -215,8 +73,8 @@ func TestBridge_ConfigReflectsDependencySnapshot(t *testing.T) {
 }
 
 func TestBridge_BootstrapIncludesConfigAndAppState(t *testing.T) {
-	svc := NewService(&Dependencies{
-		LoadConfig: func(context.Context) (configpkg.Config, error) {
+	svc := NewService(&FuncPlatform{
+		LoadConfigFn: func(context.Context) (configpkg.Config, error) {
 			return configpkg.Config{
 				TriggerKey:      []string{"fn", "shift"},
 				ModelSize:       "medium",
@@ -229,13 +87,13 @@ func TestBridge_BootstrapIncludesConfigAndAppState(t *testing.T) {
 				Vocabulary:      "joice",
 			}, nil
 		},
-		LoadAppState: func(context.Context) (apppkg.AppState, error) {
+		LoadAppStateFn: func(context.Context) (apppkg.AppState, error) {
 			return apppkg.StateReady, nil
 		},
-		LoadPermissions: func(context.Context) (PermissionsSnapshot, error) {
+		LoadPermissionsFn: func(context.Context) (PermissionsSnapshot, error) {
 			return PermissionsSnapshot{Accessibility: true, InputMonitoring: false}, nil
 		},
-		LoadModel: func(context.Context) (ModelSnapshot, error) {
+		LoadModelFn: func(context.Context) (ModelSnapshot, error) {
 			return ModelSnapshot{Size: "medium", Path: "/tmp/ggml-medium.bin", Ready: true}, nil
 		},
 	})
@@ -262,8 +120,8 @@ func TestBridge_BootstrapIncludesConfigAndAppState(t *testing.T) {
 }
 
 func TestBridge_LogsGetReturnsTailPayload(t *testing.T) {
-	svc := NewService(&Dependencies{
-		LoadLogsTail: func(context.Context) (LogTailSnapshot, error) {
+	svc := NewService(&FuncPlatform{
+		LoadLogsTailFn: func(context.Context) (LogTailSnapshot, error) {
 			return LogTailSnapshot{
 				Text:      "line 499\nline 500\n",
 				Truncated: true,
@@ -292,10 +150,11 @@ func TestBridge_LogsGetReturnsTailPayload(t *testing.T) {
 }
 
 func TestBridge_LogsCopyAllReturnsFullText(t *testing.T) {
-	svc := NewService(&Dependencies{
-		LoadLogsFull: func(context.Context) (string, error) {
+	svc := NewService(&FuncPlatform{
+		LoadLogsFullFn: func(context.Context) (string, error) {
 			return "line 001\nline 002\nline 003\n", nil
 		},
+		WriteClipboardTextFn: func(context.Context, string) error { return nil },
 	})
 
 	text, err := svc.LogsCopyAll(context.Background())
@@ -309,11 +168,11 @@ func TestBridge_LogsCopyAllReturnsFullText(t *testing.T) {
 
 func TestBridge_LogsCopyAllCopiesTextWhenNativeClipboardIsAvailable(t *testing.T) {
 	var copied string
-	svc := NewService(&Dependencies{
-		LoadLogsFull: func(context.Context) (string, error) {
+	svc := NewService(&FuncPlatform{
+		LoadLogsFullFn: func(context.Context) (string, error) {
 			return "line 001\nline 002\nline 003\n", nil
 		},
-		WriteClipboardText: func(_ context.Context, text string) error {
+		WriteClipboardTextFn: func(_ context.Context, text string) error {
 			copied = text
 			return nil
 		},
@@ -330,8 +189,8 @@ func TestBridge_LogsCopyAllCopiesTextWhenNativeClipboardIsAvailable(t *testing.T
 
 func TestBridge_LogsCopyTailCopiesVisibleTextWhenNativeClipboardIsAvailable(t *testing.T) {
 	var copied string
-	svc := NewService(&Dependencies{
-		LoadLogsTail: func(context.Context) (LogTailSnapshot, error) {
+	svc := NewService(&FuncPlatform{
+		LoadLogsTailFn: func(context.Context) (LogTailSnapshot, error) {
 			return LogTailSnapshot{
 				Text:      "tail 499\ntail 500\n",
 				Truncated: true,
@@ -339,7 +198,7 @@ func TestBridge_LogsCopyTailCopiesVisibleTextWhenNativeClipboardIsAvailable(t *t
 				UpdatedAt: "2026-04-20T03:04:05Z",
 			}, nil
 		},
-		WriteClipboardText: func(_ context.Context, text string) error {
+		WriteClipboardTextFn: func(_ context.Context, text string) error {
 			copied = text
 			return nil
 		},
@@ -358,8 +217,8 @@ func TestBridge_LogsCopyTailCopiesVisibleTextWhenNativeClipboardIsAvailable(t *t
 }
 
 func TestBridge_UpdaterReturnsSnapshot(t *testing.T) {
-	svc := NewService(&Dependencies{
-		LoadUpdater: func(context.Context) (UpdaterSnapshot, error) {
+	svc := NewService(&FuncPlatform{
+		LoadUpdaterFn: func(context.Context) (UpdaterSnapshot, error) {
 			return UpdaterSnapshot{
 				Enabled:             true,
 				SupportsManualCheck: true,
@@ -389,8 +248,8 @@ func TestBridge_UpdaterReturnsSnapshot(t *testing.T) {
 
 func TestBridge_CheckForUpdatesUsesDependency(t *testing.T) {
 	called := false
-	svc := NewService(&Dependencies{
-		CheckForUpdates: func(context.Context) error {
+	svc := NewService(&FuncPlatform{
+		CheckForUpdatesFn: func(context.Context) error {
 			called = true
 			return nil
 		},

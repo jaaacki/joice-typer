@@ -14,8 +14,8 @@ import (
 
 func TestRouterHandleRequest_SaveConfig(t *testing.T) {
 	var saved ConfigSnapshot
-	service := NewService(&Dependencies{
-		SaveConfig: func(ctx context.Context, cfg configpkg.Config) error {
+	service := NewService(&FuncPlatform{
+		SaveConfigFn: func(ctx context.Context, cfg configpkg.Config) error {
 			saved = configSnapshotFromConfig(cfg)
 			return nil
 		},
@@ -79,8 +79,8 @@ func TestRouterHandleRequest_UnsupportedMethod(t *testing.T) {
 }
 
 func TestRouterHandleRequest_SaveConfigFailure(t *testing.T) {
-	service := NewService(&Dependencies{
-		SaveConfig: func(ctx context.Context, cfg configpkg.Config) error {
+	service := NewService(&FuncPlatform{
+		SaveConfigFn: func(ctx context.Context, cfg configpkg.Config) error {
 			return errors.New("disk full")
 		},
 	})
@@ -103,8 +103,8 @@ func TestRouterHandleRequest_SaveConfigFailure(t *testing.T) {
 }
 
 func TestRouterHandleRequest_SaveConfigRejectsMissingFields(t *testing.T) {
-	router := NewRouter(NewService(&Dependencies{
-		SaveConfig: func(context.Context, configpkg.Config) error {
+	router := NewRouter(NewService(&FuncPlatform{
+		SaveConfigFn: func(context.Context, configpkg.Config) error {
 			t.Fatal("SaveConfig should not be called when required fields are missing")
 			return nil
 		},
@@ -130,8 +130,8 @@ func TestRouterHandleRequest_SaveConfigRejectsMissingFields(t *testing.T) {
 }
 
 func TestRouterHandleRequest_RejectsUnexpectedParamsForQueryMethods(t *testing.T) {
-	router := NewRouter(NewService(&Dependencies{
-		LoadConfig: func(context.Context) (configpkg.Config, error) {
+	router := NewRouter(NewService(&FuncPlatform{
+		LoadConfigFn: func(context.Context) (configpkg.Config, error) {
 			return configpkg.Config{
 				TriggerKey:      []string{"fn", "shift"},
 				ModelSize:       "small",
@@ -162,8 +162,8 @@ func TestRouterHandleRequest_RejectsUnexpectedParamsForQueryMethods(t *testing.T
 }
 
 func TestRouterHandleRequest_PreservesContractErrorCode(t *testing.T) {
-	service := NewService(&Dependencies{
-		OpenPermissionSettings: func(ctx context.Context, target string) error {
+	service := NewService(&FuncPlatform{
+		OpenPermissionSettingsFn: func(ctx context.Context, target string) error {
 			return NewContractError(
 				ErrorCodePermissionInvalidTarget,
 				"Unsupported permission settings target",
@@ -194,8 +194,8 @@ func TestRouterHandleRequest_PreservesContractErrorCode(t *testing.T) {
 }
 
 func TestRouterHandleRequest_ConfigGetFailureUsesSpecificCode(t *testing.T) {
-	service := NewService(&Dependencies{
-		LoadConfig: func(ctx context.Context) (configpkg.Config, error) {
+	service := NewService(&FuncPlatform{
+		LoadConfigFn: func(ctx context.Context) (configpkg.Config, error) {
 			return configpkg.Config{}, errors.New("missing")
 		},
 	})
@@ -218,8 +218,8 @@ func TestRouterHandleRequest_ConfigGetFailureUsesSpecificCode(t *testing.T) {
 }
 
 func TestRouterHandleRequest_BootstrapGet(t *testing.T) {
-	service := NewService(&Dependencies{
-		LoadConfig: func(ctx context.Context) (configpkg.Config, error) {
+	service := NewService(&FuncPlatform{
+		LoadConfigFn: func(ctx context.Context) (configpkg.Config, error) {
 			return configpkg.Config{
 				ModelSize:       "small",
 				Language:        "en",
@@ -228,13 +228,13 @@ func TestRouterHandleRequest_BootstrapGet(t *testing.T) {
 				PunctuationMode: "conservative",
 			}, nil
 		},
-		LoadAppState: func(context.Context) (apppkg.AppState, error) {
+		LoadAppStateFn: func(context.Context) (apppkg.AppState, error) {
 			return apppkg.StateReady, nil
 		},
-		LoadPermissions: func(context.Context) (PermissionsSnapshot, error) {
+		LoadPermissionsFn: func(context.Context) (PermissionsSnapshot, error) {
 			return PermissionsSnapshot{Accessibility: true, InputMonitoring: false}, nil
 		},
-		LoadModel: func(context.Context) (ModelSnapshot, error) {
+		LoadModelFn: func(context.Context) (ModelSnapshot, error) {
 			return ModelSnapshot{Size: "small", Ready: true}, nil
 		},
 	})
@@ -267,20 +267,20 @@ func TestRouterHandleRequest_BootstrapGet(t *testing.T) {
 }
 
 func TestRouterHandleRequest_QueryMethods(t *testing.T) {
-	service := NewService(&Dependencies{
-		LoadPermissions: func(ctx context.Context) (PermissionsSnapshot, error) {
+	service := NewService(&FuncPlatform{
+		LoadPermissionsFn: func(ctx context.Context) (PermissionsSnapshot, error) {
 			return PermissionsSnapshot{Accessibility: true, InputMonitoring: false}, nil
 		},
-		ListDevices: func(ctx context.Context) ([]DeviceSnapshot, error) {
+		ListDevicesFn: func(ctx context.Context) ([]DeviceSnapshot, error) {
 			return []DeviceSnapshot{{Name: "Built-in Microphone", IsDefault: true}}, nil
 		},
-		LoadModel: func(ctx context.Context) (ModelSnapshot, error) {
+		LoadModelFn: func(ctx context.Context) (ModelSnapshot, error) {
 			return ModelSnapshot{Size: "small", Ready: true}, nil
 		},
-		LoadAppState: func(context.Context) (apppkg.AppState, error) {
+		LoadAppStateFn: func(context.Context) (apppkg.AppState, error) {
 			return apppkg.StateReady, nil
 		},
-		LoadLogsTail: func(context.Context) (LogTailSnapshot, error) {
+		LoadLogsTailFn: func(context.Context) (LogTailSnapshot, error) {
 			return LogTailSnapshot{
 				Text:      "line 499\nline 500\n",
 				Truncated: true,
@@ -288,10 +288,10 @@ func TestRouterHandleRequest_QueryMethods(t *testing.T) {
 				UpdatedAt: "2026-04-20T03:04:05Z",
 			}, nil
 		},
-		LoadLogsFull: func(context.Context) (string, error) {
+		LoadLogsFullFn: func(context.Context) (string, error) {
 			return "line 001\nline 002\nline 003\n", nil
 		},
-		LoadUpdater: func(context.Context) (UpdaterSnapshot, error) {
+		LoadUpdaterFn: func(context.Context) (UpdaterSnapshot, error) {
 			return UpdaterSnapshot{
 				Enabled:             true,
 				SupportsManualCheck: true,
@@ -299,9 +299,10 @@ func TestRouterHandleRequest_QueryMethods(t *testing.T) {
 				Channel:             "stable",
 			}, nil
 		},
-		CheckForUpdates: func(context.Context) error {
+		CheckForUpdatesFn: func(context.Context) error {
 			return nil
 		},
+		WriteClipboardTextFn: func(context.Context, string) error { return nil },
 	})
 	router := NewRouter(service)
 
@@ -393,45 +394,14 @@ func TestRouterHandleRequest_QueryMethods(t *testing.T) {
 	}
 }
 
-func TestRouterHandleRequest_LogsMissingDependenciesReturnContractErrors(t *testing.T) {
-	router := NewRouter(NewService(nil))
-
-	tests := []struct {
-		method string
-		id     string
-	}{
-		{method: LogsGetMethod, id: "req-logs-missing-get"},
-		{method: LogsCopyTailMethod, id: "req-logs-missing-copy-tail"},
-		{method: LogsCopyAllMethod, id: "req-logs-missing-copy"},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.method, func(t *testing.T) {
-			response := router.HandleRequest(context.Background(), RequestEnvelope{
-				V:      ProtocolVersion,
-				Kind:   KindRequest,
-				ID:     tc.id,
-				Method: tc.method,
-				Params: json.RawMessage(`{}`),
-			})
-
-			if response.OK {
-				t.Fatal("expected missing log dependency request to fail")
-			}
-			if response.Error == nil || response.Error.Code != ErrorCodeInternal {
-				t.Fatalf("Error = %#v, want code %q", response.Error, ErrorCodeInternal)
-			}
-			if got := response.Error.Details["operation"]; got == "" {
-				t.Fatalf("Error.Details[operation] = %#v, want operation metadata", got)
-			}
-		})
-	}
-}
+// Drift-safety for missing platform methods is now enforced at compile time
+// by the Platform interface — the previous "missing dependency returns
+// ErrorCodeInternal" test scenario is unreachable in production.
 
 func TestRouterHandleRequest_OpenPermissionSettings(t *testing.T) {
 	var openedTarget string
-	service := NewService(&Dependencies{
-		OpenPermissionSettings: func(ctx context.Context, target string) error {
+	service := NewService(&FuncPlatform{
+		OpenPermissionSettingsFn: func(ctx context.Context, target string) error {
 			openedTarget = target
 			return nil
 		},
@@ -456,8 +426,8 @@ func TestRouterHandleRequest_OpenPermissionSettings(t *testing.T) {
 
 func TestRouterHandleRequest_DevicesRefresh(t *testing.T) {
 	refreshed := false
-	service := NewService(&Dependencies{
-		RefreshDevices: func(ctx context.Context) ([]DeviceSnapshot, error) {
+	service := NewService(&FuncPlatform{
+		RefreshDevicesFn: func(ctx context.Context) ([]DeviceSnapshot, error) {
 			refreshed = true
 			return []DeviceSnapshot{{Name: "USB Headset", IsDefault: false}}, nil
 		},
@@ -488,8 +458,8 @@ func TestRouterHandleRequest_DevicesRefresh(t *testing.T) {
 }
 
 func TestRouterHandleRequest_DevicesRefreshFailure(t *testing.T) {
-	service := NewService(&Dependencies{
-		RefreshDevices: func(ctx context.Context) ([]DeviceSnapshot, error) {
+	service := NewService(&FuncPlatform{
+		RefreshDevicesFn: func(ctx context.Context) ([]DeviceSnapshot, error) {
 			return nil, errors.New("portaudio refresh failed")
 		},
 	})
@@ -515,16 +485,16 @@ func TestRouterHandleRequest_ModelCommands(t *testing.T) {
 	var downloaded string
 	var deleted string
 	var selected string
-	service := NewService(&Dependencies{
-		DownloadModel: func(ctx context.Context, size string) error {
+	service := NewService(&FuncPlatform{
+		DownloadModelFn: func(ctx context.Context, size string) error {
 			downloaded = size
 			return nil
 		},
-		DeleteModel: func(ctx context.Context, size string) error {
+		DeleteModelFn: func(ctx context.Context, size string) error {
 			deleted = size
 			return nil
 		},
-		UseModel: func(ctx context.Context, size string) error {
+		UseModelFn: func(ctx context.Context, size string) error {
 			selected = size
 			return nil
 		},
@@ -592,13 +562,13 @@ func TestRouterHandleRequest_ModelCommandFailuresUseExplicitCodes(t *testing.T) 
 		name     string
 		method   string
 		wantCode string
-		deps     *Dependencies
+		deps     *FuncPlatform
 	}{
 		{
 			name:     "download",
 			method:   ModelDownloadMethod,
 			wantCode: ErrorCodeModelDownloadFailed,
-			deps: &Dependencies{DownloadModel: func(ctx context.Context, size string) error {
+			deps: &FuncPlatform{DownloadModelFn: func(ctx context.Context, size string) error {
 				return errors.New("download failed")
 			}},
 		},
@@ -606,7 +576,7 @@ func TestRouterHandleRequest_ModelCommandFailuresUseExplicitCodes(t *testing.T) 
 			name:     "delete",
 			method:   ModelDeleteMethod,
 			wantCode: ErrorCodeModelDeleteFailed,
-			deps: &Dependencies{DeleteModel: func(ctx context.Context, size string) error {
+			deps: &FuncPlatform{DeleteModelFn: func(ctx context.Context, size string) error {
 				return errors.New("delete failed")
 			}},
 		},
@@ -614,7 +584,7 @@ func TestRouterHandleRequest_ModelCommandFailuresUseExplicitCodes(t *testing.T) 
 			name:     "use",
 			method:   ModelUseMethod,
 			wantCode: ErrorCodeModelUseFailed,
-			deps: &Dependencies{UseModel: func(ctx context.Context, size string) error {
+			deps: &FuncPlatform{UseModelFn: func(ctx context.Context, size string) error {
 				return errors.New("use failed")
 			}},
 		},

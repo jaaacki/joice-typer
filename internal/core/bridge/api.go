@@ -4,67 +4,27 @@ import (
 	"context"
 
 	configpkg "voicetype/internal/core/config"
-	apppkg "voicetype/internal/core/runtime"
 	versionpkg "voicetype/internal/core/version"
 )
 
-type Dependencies struct {
-	LoadConfig             func(context.Context) (configpkg.Config, error)
-	SaveConfig             func(context.Context, configpkg.Config) error
-	LoadPermissions        func(context.Context) (PermissionsSnapshot, error)
-	OpenPermissionSettings func(context.Context, string) error
-	ListDevices            func(context.Context) ([]DeviceSnapshot, error)
-	RefreshDevices         func(context.Context) ([]DeviceSnapshot, error)
-	LoadMachineInfo        func(context.Context) (MachineInfoSnapshot, error)
-	SetAudioInputMonitor   func(context.Context, string) error
-	StopAudioInputMonitor  func(context.Context) error
-	LoadModel              func(context.Context) (ModelSnapshot, error)
-	DownloadModel          func(context.Context, string) error
-	DeleteModel            func(context.Context, string) error
-	UseModel               func(context.Context, string) error
-	StartHotkeyCapture     func(context.Context) (HotkeyCaptureSnapshot, error)
-	CancelHotkeyCapture    func(context.Context) error
-	ConfirmHotkeyCapture   func(context.Context) (HotkeyCaptureSnapshot, error)
-	LoadAppState           func(context.Context) (apppkg.AppState, error)
-	LoadLogsTail           func(context.Context) (LogTailSnapshot, error)
-	LoadLogsFull           func(context.Context) (string, error)
-	WriteClipboardText     func(context.Context, string) error
-	LoadUpdater            func(context.Context) (UpdaterSnapshot, error)
-	CheckForUpdates        func(context.Context) error
-	GetLoginItem           func(context.Context) (LoginItemSnapshot, error)
-	SetLoginItem           func(context.Context, bool) (LoginItemSnapshot, error)
-	GetInputVolume         func(context.Context, string) (InputVolumeSnapshot, error)
-	SetInputVolume         func(context.Context, string, float64) (InputVolumeSnapshot, error)
-}
-
+// Service exposes the bridge methods consumed by the router and the
+// embedded preferences UI. It delegates every call to a Platform —
+// the shape of the platform contract is enforced at compile time, so
+// adding a new method to Platform breaks every adapter that hasn't
+// implemented it.
 type Service struct {
-	deps Dependencies
+	p Platform
 }
 
-func missingDependencyError(operation string, dependency string) error {
-	return NewContractError(
-		ErrorCodeInternal,
-		"bridge service misconfigured: missing dependency",
-		false,
-		map[string]any{
-			"operation":  operation,
-			"dependency": dependency,
-		},
-	)
-}
-
-func NewService(deps *Dependencies) *Service {
-	if deps == nil {
-		return &Service{}
-	}
-	return &Service{deps: *deps}
+// NewService wires a Platform into a bridge Service. The caller MUST
+// pass a real Platform — there is no nil shortcut. Tests that need a
+// blank stub should construct an empty FuncPlatform{}.
+func NewService(p Platform) *Service {
+	return &Service{p: p}
 }
 
 func (s *Service) Config(ctx context.Context) (ConfigSnapshot, error) {
-	if s.deps.LoadConfig == nil {
-		return ConfigSnapshot{}, missingDependencyError(ConfigGetMethod, "LoadConfig")
-	}
-	cfg, err := s.deps.LoadConfig(ctx)
+	cfg, err := s.p.LoadConfig(ctx)
 	if err != nil {
 		return ConfigSnapshot{}, err
 	}
@@ -72,205 +32,124 @@ func (s *Service) Config(ctx context.Context) (ConfigSnapshot, error) {
 }
 
 func (s *Service) SaveConfig(ctx context.Context, snapshot ConfigSnapshot) error {
-	if s.deps.SaveConfig == nil {
-		return missingDependencyError(SaveConfigMethod, "SaveConfig")
-	}
-	return s.deps.SaveConfig(ctx, configFromSnapshot(snapshot))
+	return s.p.SaveConfig(ctx, configFromSnapshot(snapshot))
 }
 
 func (s *Service) Permissions(ctx context.Context) (PermissionsSnapshot, error) {
-	if s.deps.LoadPermissions == nil {
-		return PermissionsSnapshot{}, missingDependencyError(PermissionsGetMethod, "LoadPermissions")
-	}
-	return s.deps.LoadPermissions(ctx)
+	return s.p.LoadPermissions(ctx)
 }
 
 func (s *Service) OpenPermissionSettings(ctx context.Context, target string) error {
-	if s.deps.OpenPermissionSettings == nil {
-		return missingDependencyError(PermissionsOpenSettingsMethod, "OpenPermissionSettings")
-	}
-	return s.deps.OpenPermissionSettings(ctx, target)
+	return s.p.OpenPermissionSettings(ctx, target)
 }
 
 func (s *Service) Devices(ctx context.Context) ([]DeviceSnapshot, error) {
-	if s.deps.ListDevices == nil {
-		return nil, missingDependencyError(DevicesListMethod, "ListDevices")
-	}
-	return s.deps.ListDevices(ctx)
+	return s.p.ListDevices(ctx)
 }
 
 func (s *Service) RefreshDevices(ctx context.Context) ([]DeviceSnapshot, error) {
-	if s.deps.RefreshDevices == nil {
-		return nil, missingDependencyError(DevicesRefreshMethod, "RefreshDevices")
-	}
-	return s.deps.RefreshDevices(ctx)
+	return s.p.RefreshDevices(ctx)
 }
 
 func (s *Service) MachineInfo(ctx context.Context) (MachineInfoSnapshot, error) {
-	if s.deps.LoadMachineInfo == nil {
-		return MachineInfoSnapshot{}, nil
-	}
-	return s.deps.LoadMachineInfo(ctx)
+	return s.p.LoadMachineInfo(ctx)
 }
 
 func (s *Service) SetAudioInputMonitor(ctx context.Context, inputDevice string) error {
-	if s.deps.SetAudioInputMonitor == nil {
-		return missingDependencyError(AudioInputMonitorSetMethod, "SetAudioInputMonitor")
-	}
-	return s.deps.SetAudioInputMonitor(ctx, inputDevice)
+	return s.p.SetAudioInputMonitor(ctx, inputDevice)
 }
 
 func (s *Service) StopAudioInputMonitor(ctx context.Context) error {
-	if s.deps.StopAudioInputMonitor == nil {
-		return missingDependencyError(AudioInputMonitorStopMethod, "StopAudioInputMonitor")
-	}
-	return s.deps.StopAudioInputMonitor(ctx)
+	return s.p.StopAudioInputMonitor(ctx)
 }
 
 func (s *Service) Model(ctx context.Context) (ModelSnapshot, error) {
-	if s.deps.LoadModel == nil {
-		return ModelSnapshot{}, missingDependencyError(ModelGetMethod, "LoadModel")
-	}
-	return s.deps.LoadModel(ctx)
+	return s.p.LoadModel(ctx)
 }
 
 func (s *Service) DownloadModel(ctx context.Context, size string) error {
-	if s.deps.DownloadModel == nil {
-		return missingDependencyError(ModelDownloadMethod, "DownloadModel")
-	}
-	return s.deps.DownloadModel(ctx, size)
+	return s.p.DownloadModel(ctx, size)
 }
 
 func (s *Service) DeleteModel(ctx context.Context, size string) error {
-	if s.deps.DeleteModel == nil {
-		return missingDependencyError(ModelDeleteMethod, "DeleteModel")
-	}
-	return s.deps.DeleteModel(ctx, size)
+	return s.p.DeleteModel(ctx, size)
 }
 
 func (s *Service) UseModel(ctx context.Context, size string) error {
-	if s.deps.UseModel == nil {
-		return missingDependencyError(ModelUseMethod, "UseModel")
-	}
-	return s.deps.UseModel(ctx, size)
+	return s.p.UseModel(ctx, size)
 }
 
 func (s *Service) StartHotkeyCapture(ctx context.Context) (HotkeyCaptureSnapshot, error) {
-	if s.deps.StartHotkeyCapture == nil {
-		return HotkeyCaptureSnapshot{}, missingDependencyError(HotkeyCaptureStartMethod, "StartHotkeyCapture")
-	}
-	return s.deps.StartHotkeyCapture(ctx)
+	return s.p.StartHotkeyCapture(ctx)
 }
 
 func (s *Service) CancelHotkeyCapture(ctx context.Context) error {
-	if s.deps.CancelHotkeyCapture == nil {
-		return missingDependencyError(HotkeyCaptureCancelMethod, "CancelHotkeyCapture")
-	}
-	return s.deps.CancelHotkeyCapture(ctx)
+	return s.p.CancelHotkeyCapture(ctx)
 }
 
 func (s *Service) ConfirmHotkeyCapture(ctx context.Context) (HotkeyCaptureSnapshot, error) {
-	if s.deps.ConfirmHotkeyCapture == nil {
-		return HotkeyCaptureSnapshot{}, missingDependencyError(HotkeyCaptureConfirmMethod, "ConfirmHotkeyCapture")
-	}
-	return s.deps.ConfirmHotkeyCapture(ctx)
+	return s.p.ConfirmHotkeyCapture(ctx)
 }
 
 func (s *Service) AppState(ctx context.Context) (AppStateSnapshot, error) {
-	snapshot := AppStateSnapshot{
-		State:   "unknown",
-		Version: versionpkg.Version,
-	}
-	if s.deps.LoadAppState == nil {
-		return AppStateSnapshot{}, missingDependencyError(RuntimeGetMethod, "LoadAppState")
-	}
-	state, err := s.deps.LoadAppState(ctx)
+	state, err := s.p.LoadAppState(ctx)
 	if err != nil {
 		return AppStateSnapshot{}, err
 	}
-	snapshot.State = state.String()
-	return snapshot, nil
+	return AppStateSnapshot{
+		State:   state.String(),
+		Version: versionpkg.Version,
+	}, nil
 }
 
 func (s *Service) LogsGet(ctx context.Context) (LogTailSnapshot, error) {
-	if s.deps.LoadLogsTail == nil {
-		return LogTailSnapshot{}, missingDependencyError(LogsGetMethod, "LoadLogsTail")
-	}
-	return s.deps.LoadLogsTail(ctx)
+	return s.p.LoadLogsTail(ctx)
 }
 
 func (s *Service) LogsCopyAll(ctx context.Context) (string, error) {
-	if s.deps.LoadLogsFull == nil {
-		return "", missingDependencyError(LogsCopyAllMethod, "LoadLogsFull")
-	}
-	text, err := s.deps.LoadLogsFull(ctx)
+	text, err := s.p.LoadLogsFull(ctx)
 	if err != nil {
 		return "", err
 	}
-	if s.deps.WriteClipboardText != nil {
-		if err := s.deps.WriteClipboardText(ctx, text); err != nil {
-			return "", err
-		}
+	if err := s.p.WriteClipboardText(ctx, text); err != nil {
+		return "", err
 	}
 	return text, nil
 }
 
 func (s *Service) LogsCopyTail(ctx context.Context) (string, error) {
-	if s.deps.LoadLogsTail == nil {
-		return "", missingDependencyError(LogsCopyTailMethod, "LoadLogsTail")
-	}
-	snapshot, err := s.deps.LoadLogsTail(ctx)
+	snapshot, err := s.p.LoadLogsTail(ctx)
 	if err != nil {
 		return "", err
 	}
-	if s.deps.WriteClipboardText != nil {
-		if err := s.deps.WriteClipboardText(ctx, snapshot.Text); err != nil {
-			return "", err
-		}
+	if err := s.p.WriteClipboardText(ctx, snapshot.Text); err != nil {
+		return "", err
 	}
 	return snapshot.Text, nil
 }
 
 func (s *Service) Updater(ctx context.Context) (UpdaterSnapshot, error) {
-	if s.deps.LoadUpdater == nil {
-		return UpdaterSnapshot{}, missingDependencyError(UpdaterGetMethod, "LoadUpdater")
-	}
-	return s.deps.LoadUpdater(ctx)
+	return s.p.LoadUpdater(ctx)
 }
 
 func (s *Service) CheckForUpdates(ctx context.Context) error {
-	if s.deps.CheckForUpdates == nil {
-		return missingDependencyError(UpdaterCheckMethod, "CheckForUpdates")
-	}
-	return s.deps.CheckForUpdates(ctx)
+	return s.p.CheckForUpdates(ctx)
 }
 
 func (s *Service) GetLoginItem(ctx context.Context) (LoginItemSnapshot, error) {
-	if s.deps.GetLoginItem == nil {
-		return LoginItemSnapshot{}, missingDependencyError(LoginItemGetMethod, "GetLoginItem")
-	}
-	return s.deps.GetLoginItem(ctx)
+	return s.p.GetLoginItem(ctx)
 }
 
 func (s *Service) SetLoginItem(ctx context.Context, enabled bool) (LoginItemSnapshot, error) {
-	if s.deps.SetLoginItem == nil {
-		return LoginItemSnapshot{}, missingDependencyError(LoginItemSetMethod, "SetLoginItem")
-	}
-	return s.deps.SetLoginItem(ctx, enabled)
+	return s.p.SetLoginItem(ctx, enabled)
 }
 
 func (s *Service) GetInputVolume(ctx context.Context, deviceName string) (InputVolumeSnapshot, error) {
-	if s.deps.GetInputVolume == nil {
-		return InputVolumeSnapshot{}, missingDependencyError(InputVolumeGetMethod, "GetInputVolume")
-	}
-	return s.deps.GetInputVolume(ctx, deviceName)
+	return s.p.GetInputVolume(ctx, deviceName)
 }
 
 func (s *Service) SetInputVolume(ctx context.Context, deviceName string, volume float64) (InputVolumeSnapshot, error) {
-	if s.deps.SetInputVolume == nil {
-		return InputVolumeSnapshot{}, missingDependencyError(InputVolumeSetMethod, "SetInputVolume")
-	}
-	return s.deps.SetInputVolume(ctx, deviceName, volume)
+	return s.p.SetInputVolume(ctx, deviceName, volume)
 }
 
 func (s *Service) Bootstrap(ctx context.Context) (BootstrapPayload, error) {

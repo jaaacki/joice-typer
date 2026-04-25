@@ -336,196 +336,249 @@ func MigrateWindowsInputDeviceConfig(cfg configpkg.Config) configpkg.Config {
 	return migrateWindowsInputDeviceConfig(cfg)
 }
 
+// windowsPlatform implements bridgepkg.Platform. The compile-time assertion
+// below means adding a new method to bridgepkg.Platform breaks this build
+// until the corresponding method is implemented here. That is the whole
+// point of converting the old nullable Dependencies struct into an
+// interface — drift becomes impossible.
+type windowsPlatform struct{}
+
+var _ bridgepkg.Platform = windowsPlatform{}
+
 func buildSettingsBridgeService(_ configpkg.Config) *bridgepkg.Service {
-	return bridgepkg.NewService(&bridgepkg.Dependencies{
-		LoadConfig: func(context.Context) (configpkg.Config, error) {
-			cfgPath, err := webSettingsDefaultConfigPath()
-			if err != nil {
-				return configpkg.Config{}, bridgepkg.WrapContractError(
-					bridgepkg.ErrorCodeConfigLoadFailure,
-					"Failed to resolve config path",
-					false,
-					nil,
-					err,
-				)
-			}
-			loaded, err := webSettingsLoadConfig(cfgPath)
-			if err != nil {
-				return configpkg.Config{}, bridgepkg.WrapContractError(
-					bridgepkg.ErrorCodeConfigLoadFailure,
-					"Failed to load config",
-					false,
-					nil,
-					err,
-				)
-			}
-			loaded = migrateWindowsInputDeviceConfig(loaded)
-			return loaded, nil
-		},
-		SaveConfig: func(_ context.Context, updated configpkg.Config) error {
-			if err := updated.Validate(); err != nil {
-				return bridgepkg.WrapContractError(
-					bridgepkg.ErrorCodeConfigInvalid,
-					"Config validation failed",
-					false,
-					nil,
-					err,
-				)
-			}
-			updated = migrateWindowsInputDeviceConfig(updated)
-			cfgPath, err := webSettingsDefaultConfigPath()
-			if err != nil {
-				return bridgepkg.WrapContractError(
-					bridgepkg.ErrorCodeSaveFailure,
-					"Failed to resolve config path",
-					false,
-					nil,
-					err,
-				)
-			}
-			if err := webSettingsSaveConfig(cfgPath, updated); err != nil {
-				return bridgepkg.WrapContractError(
-					bridgepkg.ErrorCodeSaveFailure,
-					"Failed to save config",
-					false,
-					nil,
-					err,
-				)
-			}
-			webSettingsSignalRestart()
-			return nil
-		},
-		LoadAppState: func(context.Context) (AppState, error) {
-			return currentAppState(), nil
-		},
-		LoadPermissions: func(context.Context) (bridgepkg.PermissionsSnapshot, error) {
-			return webSettingsLoadPermissions(), nil
-		},
-		LoadMachineInfo: func(context.Context) (bridgepkg.MachineInfoSnapshot, error) {
-			return loadWebSettingsMachineInfo(), nil
-		},
-		OpenPermissionSettings: func(_ context.Context, target string) error {
-			// Windows does not require the macOS-specific accessibility/input-monitoring grants.
+	return bridgepkg.NewService(windowsPlatform{})
+}
+
+func (windowsPlatform) LoadConfig(context.Context) (configpkg.Config, error) {
+	cfgPath, err := webSettingsDefaultConfigPath()
+	if err != nil {
+		return configpkg.Config{}, bridgepkg.WrapContractError(
+			bridgepkg.ErrorCodeConfigLoadFailure,
+			"Failed to resolve config path",
+			false, nil, err,
+		)
+	}
+	loaded, err := webSettingsLoadConfig(cfgPath)
+	if err != nil {
+		return configpkg.Config{}, bridgepkg.WrapContractError(
+			bridgepkg.ErrorCodeConfigLoadFailure,
+			"Failed to load config",
+			false, nil, err,
+		)
+	}
+	loaded = migrateWindowsInputDeviceConfig(loaded)
+	return loaded, nil
+}
+
+func (windowsPlatform) SaveConfig(_ context.Context, updated configpkg.Config) error {
+	if err := updated.Validate(); err != nil {
+		return bridgepkg.WrapContractError(
+			bridgepkg.ErrorCodeConfigInvalid,
+			"Config validation failed",
+			false, nil, err,
+		)
+	}
+	updated = migrateWindowsInputDeviceConfig(updated)
+	cfgPath, err := webSettingsDefaultConfigPath()
+	if err != nil {
+		return bridgepkg.WrapContractError(
+			bridgepkg.ErrorCodeSaveFailure,
+			"Failed to resolve config path",
+			false, nil, err,
+		)
+	}
+	if err := webSettingsSaveConfig(cfgPath, updated); err != nil {
+		return bridgepkg.WrapContractError(
+			bridgepkg.ErrorCodeSaveFailure,
+			"Failed to save config",
+			false, nil, err,
+		)
+	}
+	webSettingsSignalRestart()
+	return nil
+}
+
+func (windowsPlatform) LoadAppState(context.Context) (AppState, error) {
+	return currentAppState(), nil
+}
+
+func (windowsPlatform) LoadPermissions(context.Context) (bridgepkg.PermissionsSnapshot, error) {
+	return webSettingsLoadPermissions(), nil
+}
+
+func (windowsPlatform) LoadMachineInfo(context.Context) (bridgepkg.MachineInfoSnapshot, error) {
+	return loadWebSettingsMachineInfo(), nil
+}
+
+func (windowsPlatform) OpenPermissionSettings(_ context.Context, target string) error {
+	// Windows does not require the macOS-specific accessibility/input-monitoring grants.
+	return bridgepkg.WrapContractError(
+		bridgepkg.ErrorCodePermissionOpenFailed,
+		"Windows does not require additional accessibility or input-monitoring settings",
+		false,
+		map[string]any{"target": target},
+		nil,
+	)
+}
+
+func (windowsPlatform) ListDevices(context.Context) ([]bridgepkg.DeviceSnapshot, error) {
+	return webSettingsListInputDevices()
+}
+
+func (windowsPlatform) RefreshDevices(context.Context) ([]bridgepkg.DeviceSnapshot, error) {
+	return webSettingsRefreshDevices()
+}
+
+func (windowsPlatform) SetAudioInputMonitor(_ context.Context, inputDevice string) error {
+	cfgPath, err := webSettingsDefaultConfigPath()
+	if err != nil {
+		return bridgepkg.WrapContractError(
+			bridgepkg.ErrorCodeSaveFailure,
+			"Failed to resolve config path",
+			false, nil, err,
+		)
+	}
+	cfg, err := webSettingsLoadConfig(cfgPath)
+	if err != nil {
+		return bridgepkg.WrapContractError(
+			bridgepkg.ErrorCodeConfigLoadFailure,
+			"Failed to load config",
+			false, nil, err,
+		)
+	}
+	cfg.InputDevice = inputDevice
+	cfg = migrateWindowsInputDeviceConfig(cfg)
+	if monitor := currentSettingsInputMonitor(); monitor != nil {
+		if err := monitor.Close(); err != nil {
 			return bridgepkg.WrapContractError(
-				bridgepkg.ErrorCodePermissionOpenFailed,
-				"Windows does not require additional accessibility or input-monitoring settings",
-				false,
-				map[string]any{"target": target},
-				nil,
+				bridgepkg.ErrorCodeDevicesRefreshFailed,
+				"Failed to stop previous monitored input device",
+				true, nil, err,
 			)
-		},
-		ListDevices: func(context.Context) ([]bridgepkg.DeviceSnapshot, error) {
-			return webSettingsListInputDevices()
-		},
-		RefreshDevices: func(context.Context) ([]bridgepkg.DeviceSnapshot, error) {
-			return webSettingsRefreshDevices()
-		},
-		SetAudioInputMonitor: func(_ context.Context, inputDevice string) error {
-			cfgPath, err := webSettingsDefaultConfigPath()
-			if err != nil {
-				return bridgepkg.WrapContractError(
-					bridgepkg.ErrorCodeSaveFailure,
-					"Failed to resolve config path",
-					false,
-					nil,
-					err,
-				)
-			}
-			cfg, err := webSettingsLoadConfig(cfgPath)
-			if err != nil {
-				return bridgepkg.WrapContractError(
-					bridgepkg.ErrorCodeConfigLoadFailure,
-					"Failed to load config",
-					false,
-					nil,
-					err,
-				)
-			}
-			cfg.InputDevice = inputDevice
-			cfg = migrateWindowsInputDeviceConfig(cfg)
-			if monitor := currentSettingsInputMonitor(); monitor != nil {
-				if err := monitor.Close(); err != nil {
-					return bridgepkg.WrapContractError(
-						bridgepkg.ErrorCodeDevicesRefreshFailed,
-						"Failed to stop previous monitored input device",
-						true,
-						nil,
-						err,
-					)
-				}
-				SetSettingsInputMonitor(nil)
-			}
-			monitor, err := audiopkg.NewInputLevelMonitor(cfg.SampleRate, cfg.InputDevice, currentSettingsLogger())
-			if err != nil {
-				currentSettingsLogger().Warn("failed to start monitored input device", "operation", "SetAudioInputMonitor", "device", cfg.InputDevice, "error", err)
-				return bridgepkg.WrapContractError(
-					bridgepkg.ErrorCodeDevicesRefreshFailed,
-					"Failed to start monitored input device",
-					true,
-					nil,
-					err,
-				)
-			}
-			SetSettingsInputMonitor(monitor)
-			publishInputLevelChanged(monitor.Snapshot())
-			return nil
-		},
-		StopAudioInputMonitor: func(context.Context) error {
-			monitor := currentSettingsInputMonitor()
-			if monitor == nil {
-				publishInputLevelChanged(bridgepkg.InputLevelSnapshot{Level: 0, Quality: "poor"})
-				return nil
-			}
-			if err := monitor.Close(); err != nil {
-				return bridgepkg.WrapContractError(
-					bridgepkg.ErrorCodeDevicesRefreshFailed,
-					"Failed to stop monitored input device",
-					true,
-					nil,
-					err,
-				)
-			}
-			SetSettingsInputMonitor(nil)
-			publishInputLevelChanged(bridgepkg.InputLevelSnapshot{Level: 0, Quality: "poor"})
-			return nil
-		},
-		LoadModel: func(context.Context) (bridgepkg.ModelSnapshot, error) {
-			return loadActiveWebSettingsModelSnapshot()
-		},
-		DownloadModel: func(ctx context.Context, size string) error {
-			return webSettingsDownloadModel(ctx, size)
-		},
-		DeleteModel: func(ctx context.Context, size string) error {
-			return webSettingsDeleteModel(ctx, size)
-		},
-		UseModel: func(ctx context.Context, size string) error {
-			return webSettingsUseModel(ctx, size)
-		},
-		LoadLogsTail: func(context.Context) (bridgepkg.LogTailSnapshot, error) {
-			return loadWebSettingsLogTailSnapshot()
-		},
-		LoadLogsFull: func(context.Context) (string, error) {
-			return loadWebSettingsLogFullText()
-		},
-		WriteClipboardText: func(_ context.Context, text string) error {
-			return setWindowsClipboardText(text)
-		},
-		LoadUpdater: func(context.Context) (bridgepkg.UpdaterSnapshot, error) {
-			return loadWebSettingsUpdaterSnapshot(), nil
-		},
-		CheckForUpdates: func(context.Context) error {
-			return checkWebSettingsForUpdates()
-		},
-		StartHotkeyCapture: func(context.Context) (bridgepkg.HotkeyCaptureSnapshot, error) {
-			return webSettingsStartHotkeyCapture()
-		},
-		CancelHotkeyCapture: func(context.Context) error {
-			return webSettingsCancelHotkeyCapture()
-		},
-		ConfirmHotkeyCapture: func(context.Context) (bridgepkg.HotkeyCaptureSnapshot, error) {
-			return webSettingsConfirmHotkeyCapture()
-		},
-	})
+		}
+		SetSettingsInputMonitor(nil)
+	}
+	monitor, err := audiopkg.NewInputLevelMonitor(cfg.SampleRate, cfg.InputDevice, currentSettingsLogger())
+	if err != nil {
+		currentSettingsLogger().Warn("failed to start monitored input device", "operation", "SetAudioInputMonitor", "device", cfg.InputDevice, "error", err)
+		return bridgepkg.WrapContractError(
+			bridgepkg.ErrorCodeDevicesRefreshFailed,
+			"Failed to start monitored input device",
+			true, nil, err,
+		)
+	}
+	SetSettingsInputMonitor(monitor)
+	publishInputLevelChanged(monitor.Snapshot())
+	return nil
+}
+
+func (windowsPlatform) StopAudioInputMonitor(context.Context) error {
+	monitor := currentSettingsInputMonitor()
+	if monitor == nil {
+		publishInputLevelChanged(bridgepkg.InputLevelSnapshot{Level: 0, Quality: "poor"})
+		return nil
+	}
+	if err := monitor.Close(); err != nil {
+		return bridgepkg.WrapContractError(
+			bridgepkg.ErrorCodeDevicesRefreshFailed,
+			"Failed to stop monitored input device",
+			true, nil, err,
+		)
+	}
+	SetSettingsInputMonitor(nil)
+	publishInputLevelChanged(bridgepkg.InputLevelSnapshot{Level: 0, Quality: "poor"})
+	return nil
+}
+
+func (windowsPlatform) LoadModel(context.Context) (bridgepkg.ModelSnapshot, error) {
+	return loadActiveWebSettingsModelSnapshot()
+}
+
+func (windowsPlatform) DownloadModel(ctx context.Context, size string) error {
+	return webSettingsDownloadModel(ctx, size)
+}
+
+func (windowsPlatform) DeleteModel(ctx context.Context, size string) error {
+	return webSettingsDeleteModel(ctx, size)
+}
+
+func (windowsPlatform) UseModel(ctx context.Context, size string) error {
+	return webSettingsUseModel(ctx, size)
+}
+
+func (windowsPlatform) LoadLogsTail(context.Context) (bridgepkg.LogTailSnapshot, error) {
+	return loadWebSettingsLogTailSnapshot()
+}
+
+func (windowsPlatform) LoadLogsFull(context.Context) (string, error) {
+	return loadWebSettingsLogFullText()
+}
+
+func (windowsPlatform) WriteClipboardText(_ context.Context, text string) error {
+	return setWindowsClipboardText(text)
+}
+
+func (windowsPlatform) LoadUpdater(context.Context) (bridgepkg.UpdaterSnapshot, error) {
+	return loadWebSettingsUpdaterSnapshot(), nil
+}
+
+func (windowsPlatform) CheckForUpdates(context.Context) error {
+	return checkWebSettingsForUpdates()
+}
+
+func (windowsPlatform) StartHotkeyCapture(context.Context) (bridgepkg.HotkeyCaptureSnapshot, error) {
+	return webSettingsStartHotkeyCapture()
+}
+
+func (windowsPlatform) CancelHotkeyCapture(context.Context) error {
+	return webSettingsCancelHotkeyCapture()
+}
+
+func (windowsPlatform) ConfirmHotkeyCapture(context.Context) (bridgepkg.HotkeyCaptureSnapshot, error) {
+	return webSettingsConfirmHotkeyCapture()
+}
+
+// GetLoginItem / SetLoginItem / GetInputVolume / SetInputVolume:
+// These features have macOS-only implementations today (SMAppService for
+// login item, CoreAudio kAudioDevicePropertyVolumeScalar for input volume).
+// The Windows equivalents would be Registry / Task Scheduler for login
+// item and IAudioEndpointVolume via WASAPI for volume — implement when
+// needed. Until then, return a clear contract error so the UI can hide or
+// disable the controls cleanly instead of getting a "missing dependency"
+// surprise.
+
+func (windowsPlatform) GetLoginItem(context.Context) (bridgepkg.LoginItemSnapshot, error) {
+	return bridgepkg.LoginItemSnapshot{Enabled: false}, bridgepkg.NewContractError(
+		bridgepkg.ErrorCodeLoginItemFailed,
+		"Launch at login is not yet supported on Windows",
+		false, nil,
+	)
+}
+
+func (windowsPlatform) SetLoginItem(_ context.Context, _ bool) (bridgepkg.LoginItemSnapshot, error) {
+	return bridgepkg.LoginItemSnapshot{}, bridgepkg.NewContractError(
+		bridgepkg.ErrorCodeLoginItemFailed,
+		"Launch at login is not yet supported on Windows",
+		false, nil,
+	)
+}
+
+func (windowsPlatform) GetInputVolume(_ context.Context, deviceName string) (bridgepkg.InputVolumeSnapshot, error) {
+	return bridgepkg.InputVolumeSnapshot{Supported: false}, bridgepkg.NewContractError(
+		bridgepkg.ErrorCodeInputVolumeFailed,
+		"Input volume control is not yet supported on Windows",
+		false,
+		map[string]any{"deviceName": deviceName},
+	)
+}
+
+func (windowsPlatform) SetInputVolume(_ context.Context, deviceName string, _ float64) (bridgepkg.InputVolumeSnapshot, error) {
+	return bridgepkg.InputVolumeSnapshot{Supported: false}, bridgepkg.NewContractError(
+		bridgepkg.ErrorCodeInputVolumeFailed,
+		"Input volume control is not yet supported on Windows",
+		false,
+		map[string]any{"deviceName": deviceName},
+	)
 }
 
 // prefsActiveModel tracks the in-use model for the current preferences session.
