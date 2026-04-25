@@ -73,10 +73,7 @@ const (
 	ErrorCodeLoginItemFailed            = generated.ErrorCodeLoginItemFailed
 	InputVolumeGetMethod                = generated.InputVolumeGetMethod
 	InputVolumeSetMethod                = generated.InputVolumeSetMethod
-	MicrophoneModeGetMethod             = generated.MicrophoneModeGetMethod
-	MicrophoneModeSetMethod             = generated.MicrophoneModeSetMethod
 	ErrorCodeInputVolumeFailed          = generated.ErrorCodeInputVolumeFailed
-	ErrorCodeMicrophoneModeFailed       = generated.ErrorCodeMicrophoneModeFailed
 )
 
 type ErrorObject struct {

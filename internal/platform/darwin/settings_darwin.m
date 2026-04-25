@@ -1254,13 +1254,3 @@ int setInputDeviceVolume(const char *deviceName, float volume) {
     return ok;
 }
 
-// Microphone Mode (Voice Isolation) is intentionally NOT exposed
-// programmatically. AVFoundation's preferredMicrophoneMode is iOS-only on
-// modern Macs, and loading AVFoundation via dlopen has been observed to
-// activate the system mic-in-use indicator even without opening a stream.
-// On macOS the user controls voice isolation via Control Center →
-// Microphone Mode → JoiceTyper.
-
-int getPreferredMicrophoneMode(void) { return -1; }
-int getActiveMicrophoneMode(void) { return -1; }
-int setPreferredMicrophoneMode(int mode) { (void)mode; return 0; }

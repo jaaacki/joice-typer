@@ -33,9 +33,7 @@
     { "goName": "LoginItemGetMethod", "tsName": "loginItemGet", "value": "login_item.get" },
     { "goName": "LoginItemSetMethod", "tsName": "loginItemSet", "value": "login_item.set" },
     { "goName": "InputVolumeGetMethod", "tsName": "inputVolumeGet", "value": "input_volume.get" },
-    { "goName": "InputVolumeSetMethod", "tsName": "inputVolumeSet", "value": "input_volume.set" },
-    { "goName": "MicrophoneModeGetMethod", "tsName": "microphoneModeGet", "value": "microphone_mode.get" },
-    { "goName": "MicrophoneModeSetMethod", "tsName": "microphoneModeSet", "value": "microphone_mode.set" }
+    { "goName": "InputVolumeSetMethod", "tsName": "inputVolumeSet", "value": "input_volume.set" }
   ],
   "events": [
     { "goName": "RuntimeStateChangedEvent", "tsName": "runtimeStateChanged", "value": "runtime.state_changed" },
@@ -74,7 +72,6 @@
     { "goName": "ErrorCodeUpdaterUnavailable", "tsName": "updaterUnavailable", "value": "updater.unavailable" },
     { "goName": "ErrorCodeUpdaterCheckFailed", "tsName": "updaterCheckFailed", "value": "updater.check_failed" },
     { "goName": "ErrorCodeLoginItemFailed", "tsName": "loginItemFailed", "value": "login_item.failed" },
-    { "goName": "ErrorCodeInputVolumeFailed", "tsName": "inputVolumeFailed", "value": "input_volume.failed" },
-    { "goName": "ErrorCodeMicrophoneModeFailed", "tsName": "microphoneModeFailed", "value": "microphone_mode.failed" }
+    { "goName": "ErrorCodeInputVolumeFailed", "tsName": "inputVolumeFailed", "value": "input_volume.failed" }
   ]
 }

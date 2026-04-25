@@ -51,10 +51,6 @@ type inputVolumeSetParams struct {
 	Volume     float64 `json:"volume"`
 }
 
-type microphoneModeSetParams struct {
-	Mode int `json:"mode"`
-}
-
 type saveConfigPayload struct {
 	TriggerKey      *[]string `json:"triggerKey"`
 	ModelSize       *string   `json:"modelSize"`
@@ -316,25 +312,6 @@ func (r *Router) HandleRequest(ctx context.Context, request RequestEnvelope) Res
 		snapshot, err := r.service.SetInputVolume(ctx, params.DeviceName, params.Volume)
 		if err != nil {
 			return NewErrorResponseFromError(request.ID, err, ErrorCodeInputVolumeFailed, "failed to set input volume", true, nil)
-		}
-		return NewSuccessResponse(request.ID, snapshot)
-	case MicrophoneModeGetMethod:
-		if response := ensureEmptyParams(request); response != nil {
-			return *response
-		}
-		snapshot, err := r.service.GetMicrophoneMode(ctx)
-		if err != nil {
-			return NewErrorResponseFromError(request.ID, err, ErrorCodeMicrophoneModeFailed, "failed to get microphone mode", true, nil)
-		}
-		return NewSuccessResponse(request.ID, snapshot)
-	case MicrophoneModeSetMethod:
-		var params microphoneModeSetParams
-		if response := decodeRequestParams(request, &params); response != nil {
-			return *response
-		}
-		snapshot, err := r.service.SetMicrophoneMode(ctx, params.Mode)
-		if err != nil {
-			return NewErrorResponseFromError(request.ID, err, ErrorCodeMicrophoneModeFailed, "failed to set microphone mode", true, nil)
 		}
 		return NewSuccessResponse(request.ID, snapshot)
 	default:

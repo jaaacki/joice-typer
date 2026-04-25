@@ -75,12 +75,6 @@ type InputVolumeSnapshot struct {
 	Supported bool    `json:"supported"`
 }
 
-type MicrophoneModeSnapshot struct {
-	Available bool `json:"available"`
-	Preferred int  `json:"preferred"`
-	Active    int  `json:"active"`
-}
-
 type BootstrapPayload struct {
 	Config      ConfigSnapshot          `json:"config"`
 	AppState    AppStateSnapshot        `json:"appState"`

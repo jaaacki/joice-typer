@@ -1277,22 +1277,3 @@ func webSettingsSetInputVolume(deviceName string, volume float64) (bridgepkg.Inp
 	return webSettingsGetInputVolume(deviceName), nil
 }
 
-func webSettingsGetMicrophoneMode() bridgepkg.MicrophoneModeSnapshot {
-	preferred := int(C.getPreferredMicrophoneMode())
-	active := int(C.getActiveMicrophoneMode())
-	return bridgepkg.MicrophoneModeSnapshot{
-		Available: preferred >= 0,
-		Preferred: preferred,
-		Active:    active,
-	}
-}
-
-func webSettingsSetMicrophoneMode(mode int) (bridgepkg.MicrophoneModeSnapshot, error) {
-	if mode < 0 || mode > 2 {
-		return bridgepkg.MicrophoneModeSnapshot{}, fmt.Errorf("settings.SetMicrophoneMode: invalid mode %d", mode)
-	}
-	if C.setPreferredMicrophoneMode(C.int(mode)) == 0 {
-		return bridgepkg.MicrophoneModeSnapshot{Available: false}, fmt.Errorf("settings.SetMicrophoneMode: not supported on this macOS version")
-	}
-	return webSettingsGetMicrophoneMode(), nil
-}

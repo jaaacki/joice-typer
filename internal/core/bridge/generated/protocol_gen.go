@@ -35,8 +35,6 @@ const (
 	LoginItemSetMethod                  = "login_item.set"
 	InputVolumeGetMethod                = "input_volume.get"
 	InputVolumeSetMethod                = "input_volume.set"
-	MicrophoneModeGetMethod             = "microphone_mode.get"
-	MicrophoneModeSetMethod             = "microphone_mode.set"
 	RuntimeStateChangedEvent            = "runtime.state_changed"
 	PermissionsChangedEvent             = "permissions.changed"
 	DevicesChangedEvent                 = "devices.changed"
@@ -72,5 +70,4 @@ const (
 	ErrorCodeUpdaterCheckFailed         = "updater.check_failed"
 	ErrorCodeLoginItemFailed            = "login_item.failed"
 	ErrorCodeInputVolumeFailed          = "input_volume.failed"
-	ErrorCodeMicrophoneModeFailed       = "microphone_mode.failed"
 )

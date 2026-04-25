@@ -35,8 +35,6 @@ type Dependencies struct {
 	SetLoginItem           func(context.Context, bool) (LoginItemSnapshot, error)
 	GetInputVolume         func(context.Context, string) (InputVolumeSnapshot, error)
 	SetInputVolume         func(context.Context, string, float64) (InputVolumeSnapshot, error)
-	GetMicrophoneMode      func(context.Context) (MicrophoneModeSnapshot, error)
-	SetMicrophoneMode      func(context.Context, int) (MicrophoneModeSnapshot, error)
 }
 
 type Service struct {
@@ -273,20 +271,6 @@ func (s *Service) SetInputVolume(ctx context.Context, deviceName string, volume 
 		return InputVolumeSnapshot{}, missingDependencyError(InputVolumeSetMethod, "SetInputVolume")
 	}
 	return s.deps.SetInputVolume(ctx, deviceName, volume)
-}
-
-func (s *Service) GetMicrophoneMode(ctx context.Context) (MicrophoneModeSnapshot, error) {
-	if s.deps.GetMicrophoneMode == nil {
-		return MicrophoneModeSnapshot{}, missingDependencyError(MicrophoneModeGetMethod, "GetMicrophoneMode")
-	}
-	return s.deps.GetMicrophoneMode(ctx)
-}
-
-func (s *Service) SetMicrophoneMode(ctx context.Context, mode int) (MicrophoneModeSnapshot, error) {
-	if s.deps.SetMicrophoneMode == nil {
-		return MicrophoneModeSnapshot{}, missingDependencyError(MicrophoneModeSetMethod, "SetMicrophoneMode")
-	}
-	return s.deps.SetMicrophoneMode(ctx, mode)
 }
 
 func (s *Service) Bootstrap(ctx context.Context) (BootstrapPayload, error) {

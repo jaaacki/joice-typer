@@ -67,12 +67,6 @@ export type InputVolumeSnapshot = {
   supported: boolean;
 };
 
-export type MicrophoneModeSnapshot = {
-  available: boolean;
-  preferred: number;
-  active: number;
-};
-
 export type BootstrapPayload = {
   config: ConfigSnapshot;
   appState: AppStateSnapshot;
@@ -456,14 +450,6 @@ export function fetchInputVolume(deviceName: string): Promise<InputVolumeSnapsho
 
 export function setInputVolume(deviceName: string, volume: number): Promise<InputVolumeSnapshot> {
   return query<InputVolumeSnapshot, { deviceName: string; volume: number }>(METHODS.inputVolumeSet, { deviceName, volume });
-}
-
-export function fetchMicrophoneMode(): Promise<MicrophoneModeSnapshot> {
-  return query<MicrophoneModeSnapshot, Record<string, never>>(METHODS.microphoneModeGet, {});
-}
-
-export function setMicrophoneMode(mode: number): Promise<MicrophoneModeSnapshot> {
-  return query<MicrophoneModeSnapshot, { mode: number }>(METHODS.microphoneModeSet, { mode });
 }
 
 export function subscribeRuntimeStateChanged(handler: (appState: AppStateSnapshot) => void): () => void {

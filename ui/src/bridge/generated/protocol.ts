@@ -38,8 +38,6 @@ export const METHODS = {
   loginItemSet: "login_item.set",
   inputVolumeGet: "input_volume.get",
   inputVolumeSet: "input_volume.set",
-  microphoneModeGet: "microphone_mode.get",
-  microphoneModeSet: "microphone_mode.set",
 } as const;
 export type BridgeMethod = (typeof METHODS)[keyof typeof METHODS];
 
@@ -83,7 +81,6 @@ export const ERROR_CODES = {
   updaterCheckFailed: "updater.check_failed",
   loginItemFailed: "login_item.failed",
   inputVolumeFailed: "input_volume.failed",
-  microphoneModeFailed: "microphone_mode.failed",
 } as const;
 export type BridgeErrorCode = (typeof ERROR_CODES)[keyof typeof ERROR_CODES];
 

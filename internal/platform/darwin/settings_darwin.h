@@ -43,10 +43,4 @@ float getInputDeviceVolume(const char *deviceName);
 // Returns 1 on success, 0 on failure.
 int setInputDeviceVolume(const char *deviceName, float volume);
 
-// Microphone mode (Voice Isolation). macOS 12+ via AVCaptureDevice.
-// Returns: -1 unavailable, 0 standard, 1 wide-spectrum, 2 voice-isolation.
-int getPreferredMicrophoneMode(void);
-int getActiveMicrophoneMode(void);
-int setPreferredMicrophoneMode(int mode);
-
 #endif

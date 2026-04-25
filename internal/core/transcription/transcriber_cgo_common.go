@@ -131,22 +131,20 @@ func NewTranscriber(ctx context.Context, modelPath string, modelSize string, lan
 
 	l.Info("model loaded", "operation", "NewTranscriber")
 
-	// Pre-warm the GPU shader pipeline with two dummy inferences that match
-	// real usage sizes. Vulkan allocates compute scratch buffers per context
-	// size, so we must warm with audio_ctx values close to what real
-	// dictation will actually use — not a minimal stub.
-	//
-	// Pass 1 (audio_ctx=200, ~4s): covers typical short push-to-talk clips.
-	// Pass 2 (audio_ctx=500, ~10s): covers long-form clips; second pass is
-	// fast because shaders and buffers from pass 1 are already resident.
 	// Pre-warm the GPU pipeline with two dummy inferences. On Windows this
 	// allocates Vulkan compute scratch buffers; on macOS it compiles and caches
 	// Metal shaders. Without this, the first real dictation after launch pays
 	// the full compilation cost and feels noticeably slow.
 	//
+	// Both passes MUST keep no_context=true and single_segment=true. Otherwise
+	// whisper writes the tokens it hallucinates from 0.2s of silence into
+	// state->prompt_past, which then biases the first real decode toward
+	// rubbish output. We sacrifice some long-form-path warming to avoid
+	// state pollution — the long-form path warms on first long use.
+	//
 	// Pass 1 (audio_ctx=200, ~4s clip): covers typical short push-to-talk.
-	// Pass 2 (audio_ctx=500, ~10s clip): covers long-form; pass 2 is fast
-	// because kernels compiled in pass 1 are already resident.
+	// Pass 2 (audio_ctx=500, ~10s clip): warms the bigger encoder buffer
+	// shape; kernels compiled in pass 1 are already resident.
 	{
 		l.Info("warming GPU pipeline — pass 1 (short-form)", "operation", "NewTranscriber")
 		warmStart := time.Now()
@@ -170,12 +168,11 @@ func NewTranscriber(ctx context.Context, modelPath string, modelSize string, lan
 		}
 		l.Info("GPU warmup pass 1 done", "operation", "NewTranscriber", "ms", time.Since(warmStart).Milliseconds())
 
-		l.Info("warming GPU pipeline — pass 2 (long-form)", "operation", "NewTranscriber")
+		l.Info("warming GPU pipeline — pass 2 (encoder buffer)", "operation", "NewTranscriber")
 		pass2Start := time.Now()
 		warmParams.audio_ctx = C.int(500)
-		warmParams.single_segment = C._Bool(false)
-		warmParams.no_timestamps = C._Bool(false)
-		warmParams.no_context = C._Bool(false)
+		// Intentionally KEEP no_context=true and single_segment=true here to
+		// avoid polluting state->prompt_past with silence-hallucination tokens.
 		if r := C.whisper_full(wctx, warmParams, (*C.float)(unsafe.Pointer(&warmSamples[0])), C.int(len(warmSamples))); r != 0 {
 			l.Warn("GPU warmup pass 2 returned non-zero", "operation", "NewTranscriber", "result", int(r))
 		}
