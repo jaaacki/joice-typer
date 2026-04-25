@@ -280,6 +280,24 @@ func buildSettingsBridgeService(_ configpkg.Config) *bridgepkg.Service {
 		CheckForUpdates: func(context.Context) error {
 			return CheckForUpdates()
 		},
+		GetLoginItem: func(context.Context) (bridgepkg.LoginItemSnapshot, error) {
+			return webSettingsGetLoginItem(), nil
+		},
+		SetLoginItem: func(_ context.Context, enabled bool) (bridgepkg.LoginItemSnapshot, error) {
+			return webSettingsSetLoginItem(enabled)
+		},
+		GetInputVolume: func(_ context.Context, deviceName string) (bridgepkg.InputVolumeSnapshot, error) {
+			return webSettingsGetInputVolume(deviceName), nil
+		},
+		SetInputVolume: func(_ context.Context, deviceName string, volume float64) (bridgepkg.InputVolumeSnapshot, error) {
+			return webSettingsSetInputVolume(deviceName, volume)
+		},
+		GetMicrophoneMode: func(context.Context) (bridgepkg.MicrophoneModeSnapshot, error) {
+			return webSettingsGetMicrophoneMode(), nil
+		},
+		SetMicrophoneMode: func(_ context.Context, mode int) (bridgepkg.MicrophoneModeSnapshot, error) {
+			return webSettingsSetMicrophoneMode(mode)
+		},
 		StartHotkeyCapture: func(context.Context) (bridgepkg.HotkeyCaptureSnapshot, error) {
 			return startWebSettingsHotkeyCapture(), nil
 		},

@@ -58,6 +58,21 @@ export type UpdaterSnapshot = {
   channel: string;
 };
 
+export type LoginItemSnapshot = {
+  enabled: boolean;
+};
+
+export type InputVolumeSnapshot = {
+  volume: number;
+  supported: boolean;
+};
+
+export type MicrophoneModeSnapshot = {
+  available: boolean;
+  preferred: number;
+  active: number;
+};
+
 export type BootstrapPayload = {
   config: ConfigSnapshot;
   appState: AppStateSnapshot;
@@ -65,6 +80,7 @@ export type BootstrapPayload = {
   model: ModelSnapshot;
   machineInfo: MachineInfoSnapshot;
   options: SettingsOptionsSnapshot;
+  loginItem: LoginItemSnapshot;
 };
 
 export type PermissionsSnapshot = {
@@ -424,6 +440,30 @@ export function stopAudioInputMonitor(): Promise<void> {
 
 export function checkForUpdates(): Promise<void> {
   return query<{ started: boolean }, Record<string, never>>(METHODS.updaterCheck, {}).then(() => undefined);
+}
+
+export function fetchLoginItem(): Promise<LoginItemSnapshot> {
+  return query<LoginItemSnapshot, Record<string, never>>(METHODS.loginItemGet, {});
+}
+
+export function setLoginItem(enabled: boolean): Promise<LoginItemSnapshot> {
+  return query<LoginItemSnapshot, { enabled: boolean }>(METHODS.loginItemSet, { enabled });
+}
+
+export function fetchInputVolume(deviceName: string): Promise<InputVolumeSnapshot> {
+  return query<InputVolumeSnapshot, { deviceName: string }>(METHODS.inputVolumeGet, { deviceName });
+}
+
+export function setInputVolume(deviceName: string, volume: number): Promise<InputVolumeSnapshot> {
+  return query<InputVolumeSnapshot, { deviceName: string; volume: number }>(METHODS.inputVolumeSet, { deviceName, volume });
+}
+
+export function fetchMicrophoneMode(): Promise<MicrophoneModeSnapshot> {
+  return query<MicrophoneModeSnapshot, Record<string, never>>(METHODS.microphoneModeGet, {});
+}
+
+export function setMicrophoneMode(mode: number): Promise<MicrophoneModeSnapshot> {
+  return query<MicrophoneModeSnapshot, { mode: number }>(METHODS.microphoneModeSet, { mode });
 }
 
 export function subscribeRuntimeStateChanged(handler: (appState: AppStateSnapshot) => void): () => void {

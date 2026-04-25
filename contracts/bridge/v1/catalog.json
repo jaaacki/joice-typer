@@ -29,7 +29,13 @@
     { "goName": "LogsCopyTailMethod", "tsName": "logsCopyTail", "value": "logs.copy_tail" },
     { "goName": "LogsCopyAllMethod", "tsName": "logsCopyAll", "value": "logs.copy_all" },
     { "goName": "UpdaterGetMethod", "tsName": "updaterGet", "value": "updater.get" },
-    { "goName": "UpdaterCheckMethod", "tsName": "updaterCheck", "value": "updater.check" }
+    { "goName": "UpdaterCheckMethod", "tsName": "updaterCheck", "value": "updater.check" },
+    { "goName": "LoginItemGetMethod", "tsName": "loginItemGet", "value": "login_item.get" },
+    { "goName": "LoginItemSetMethod", "tsName": "loginItemSet", "value": "login_item.set" },
+    { "goName": "InputVolumeGetMethod", "tsName": "inputVolumeGet", "value": "input_volume.get" },
+    { "goName": "InputVolumeSetMethod", "tsName": "inputVolumeSet", "value": "input_volume.set" },
+    { "goName": "MicrophoneModeGetMethod", "tsName": "microphoneModeGet", "value": "microphone_mode.get" },
+    { "goName": "MicrophoneModeSetMethod", "tsName": "microphoneModeSet", "value": "microphone_mode.set" }
   ],
   "events": [
     { "goName": "RuntimeStateChangedEvent", "tsName": "runtimeStateChanged", "value": "runtime.state_changed" },
@@ -66,6 +72,9 @@
     { "goName": "ErrorCodeLogsUnavailable", "tsName": "logsUnavailable", "value": "logs.unavailable" },
     { "goName": "ErrorCodeRuntimeUnavailable", "tsName": "runtimeUnavailable", "value": "runtime.unavailable" },
     { "goName": "ErrorCodeUpdaterUnavailable", "tsName": "updaterUnavailable", "value": "updater.unavailable" },
-    { "goName": "ErrorCodeUpdaterCheckFailed", "tsName": "updaterCheckFailed", "value": "updater.check_failed" }
+    { "goName": "ErrorCodeUpdaterCheckFailed", "tsName": "updaterCheckFailed", "value": "updater.check_failed" },
+    { "goName": "ErrorCodeLoginItemFailed", "tsName": "loginItemFailed", "value": "login_item.failed" },
+    { "goName": "ErrorCodeInputVolumeFailed", "tsName": "inputVolumeFailed", "value": "input_volume.failed" },
+    { "goName": "ErrorCodeMicrophoneModeFailed", "tsName": "microphoneModeFailed", "value": "microphone_mode.failed" }
   ]
 }

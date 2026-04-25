@@ -31,6 +31,12 @@ type Dependencies struct {
 	WriteClipboardText     func(context.Context, string) error
 	LoadUpdater            func(context.Context) (UpdaterSnapshot, error)
 	CheckForUpdates        func(context.Context) error
+	GetLoginItem           func(context.Context) (LoginItemSnapshot, error)
+	SetLoginItem           func(context.Context, bool) (LoginItemSnapshot, error)
+	GetInputVolume         func(context.Context, string) (InputVolumeSnapshot, error)
+	SetInputVolume         func(context.Context, string, float64) (InputVolumeSnapshot, error)
+	GetMicrophoneMode      func(context.Context) (MicrophoneModeSnapshot, error)
+	SetMicrophoneMode      func(context.Context, int) (MicrophoneModeSnapshot, error)
 }
 
 type Service struct {
@@ -241,6 +247,48 @@ func (s *Service) CheckForUpdates(ctx context.Context) error {
 	return s.deps.CheckForUpdates(ctx)
 }
 
+func (s *Service) GetLoginItem(ctx context.Context) (LoginItemSnapshot, error) {
+	if s.deps.GetLoginItem == nil {
+		return LoginItemSnapshot{}, missingDependencyError(LoginItemGetMethod, "GetLoginItem")
+	}
+	return s.deps.GetLoginItem(ctx)
+}
+
+func (s *Service) SetLoginItem(ctx context.Context, enabled bool) (LoginItemSnapshot, error) {
+	if s.deps.SetLoginItem == nil {
+		return LoginItemSnapshot{}, missingDependencyError(LoginItemSetMethod, "SetLoginItem")
+	}
+	return s.deps.SetLoginItem(ctx, enabled)
+}
+
+func (s *Service) GetInputVolume(ctx context.Context, deviceName string) (InputVolumeSnapshot, error) {
+	if s.deps.GetInputVolume == nil {
+		return InputVolumeSnapshot{}, missingDependencyError(InputVolumeGetMethod, "GetInputVolume")
+	}
+	return s.deps.GetInputVolume(ctx, deviceName)
+}
+
+func (s *Service) SetInputVolume(ctx context.Context, deviceName string, volume float64) (InputVolumeSnapshot, error) {
+	if s.deps.SetInputVolume == nil {
+		return InputVolumeSnapshot{}, missingDependencyError(InputVolumeSetMethod, "SetInputVolume")
+	}
+	return s.deps.SetInputVolume(ctx, deviceName, volume)
+}
+
+func (s *Service) GetMicrophoneMode(ctx context.Context) (MicrophoneModeSnapshot, error) {
+	if s.deps.GetMicrophoneMode == nil {
+		return MicrophoneModeSnapshot{}, missingDependencyError(MicrophoneModeGetMethod, "GetMicrophoneMode")
+	}
+	return s.deps.GetMicrophoneMode(ctx)
+}
+
+func (s *Service) SetMicrophoneMode(ctx context.Context, mode int) (MicrophoneModeSnapshot, error) {
+	if s.deps.SetMicrophoneMode == nil {
+		return MicrophoneModeSnapshot{}, missingDependencyError(MicrophoneModeSetMethod, "SetMicrophoneMode")
+	}
+	return s.deps.SetMicrophoneMode(ctx, mode)
+}
+
 func (s *Service) Bootstrap(ctx context.Context) (BootstrapPayload, error) {
 	configSnapshot, err := s.Config(ctx)
 	if err != nil {
@@ -262,6 +310,9 @@ func (s *Service) Bootstrap(ctx context.Context) (BootstrapPayload, error) {
 	if err != nil {
 		return BootstrapPayload{}, err
 	}
+	// Do not call GetLoginItem here: it would load ServiceManagement at every
+	// preferences-open, which adds perceptible latency. The UI fetches it
+	// lazily via fetchLoginItem() after mount.
 	return BootstrapPayload{
 		Config:      configSnapshot,
 		AppState:    appStateSnapshot,

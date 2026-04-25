@@ -38,6 +38,23 @@ type audioInputMonitorParams struct {
 	InputDevice string `json:"inputDevice"`
 }
 
+type loginItemSetParams struct {
+	Enabled bool `json:"enabled"`
+}
+
+type inputVolumeGetParams struct {
+	DeviceName string `json:"deviceName"`
+}
+
+type inputVolumeSetParams struct {
+	DeviceName string  `json:"deviceName"`
+	Volume     float64 `json:"volume"`
+}
+
+type microphoneModeSetParams struct {
+	Mode int `json:"mode"`
+}
+
 type saveConfigPayload struct {
 	TriggerKey      *[]string `json:"triggerKey"`
 	ModelSize       *string   `json:"modelSize"`
@@ -262,6 +279,64 @@ func (r *Router) HandleRequest(ctx context.Context, request RequestEnvelope) Res
 			return *response
 		}
 		return NewSuccessResponse(request.ID, settingsOptionsSnapshot())
+	case LoginItemGetMethod:
+		if response := ensureEmptyParams(request); response != nil {
+			return *response
+		}
+		snapshot, err := r.service.GetLoginItem(ctx)
+		if err != nil {
+			return NewErrorResponseFromError(request.ID, err, ErrorCodeLoginItemFailed, "failed to get login item status", true, nil)
+		}
+		return NewSuccessResponse(request.ID, snapshot)
+	case LoginItemSetMethod:
+		var params loginItemSetParams
+		if response := decodeRequestParams(request, &params); response != nil {
+			return *response
+		}
+		snapshot, err := r.service.SetLoginItem(ctx, params.Enabled)
+		if err != nil {
+			return NewErrorResponseFromError(request.ID, err, ErrorCodeLoginItemFailed, "failed to set login item", true, nil)
+		}
+		return NewSuccessResponse(request.ID, snapshot)
+	case InputVolumeGetMethod:
+		var params inputVolumeGetParams
+		if response := decodeRequestParams(request, &params); response != nil {
+			return *response
+		}
+		snapshot, err := r.service.GetInputVolume(ctx, params.DeviceName)
+		if err != nil {
+			return NewErrorResponseFromError(request.ID, err, ErrorCodeInputVolumeFailed, "failed to get input volume", true, nil)
+		}
+		return NewSuccessResponse(request.ID, snapshot)
+	case InputVolumeSetMethod:
+		var params inputVolumeSetParams
+		if response := decodeRequestParams(request, &params); response != nil {
+			return *response
+		}
+		snapshot, err := r.service.SetInputVolume(ctx, params.DeviceName, params.Volume)
+		if err != nil {
+			return NewErrorResponseFromError(request.ID, err, ErrorCodeInputVolumeFailed, "failed to set input volume", true, nil)
+		}
+		return NewSuccessResponse(request.ID, snapshot)
+	case MicrophoneModeGetMethod:
+		if response := ensureEmptyParams(request); response != nil {
+			return *response
+		}
+		snapshot, err := r.service.GetMicrophoneMode(ctx)
+		if err != nil {
+			return NewErrorResponseFromError(request.ID, err, ErrorCodeMicrophoneModeFailed, "failed to get microphone mode", true, nil)
+		}
+		return NewSuccessResponse(request.ID, snapshot)
+	case MicrophoneModeSetMethod:
+		var params microphoneModeSetParams
+		if response := decodeRequestParams(request, &params); response != nil {
+			return *response
+		}
+		snapshot, err := r.service.SetMicrophoneMode(ctx, params.Mode)
+		if err != nil {
+			return NewErrorResponseFromError(request.ID, err, ErrorCodeMicrophoneModeFailed, "failed to set microphone mode", true, nil)
+		}
+		return NewSuccessResponse(request.ID, snapshot)
 	default:
 		return NewErrorResponse(request.ID, ErrorCodeBadMethod, fmt.Sprintf("unsupported bridge method %q", request.Method), false, map[string]any{
 			"method": request.Method,

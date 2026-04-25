@@ -340,6 +340,13 @@ func (c Config) Validate() error {
 	if c.OutputMode != "" && c.OutputMode != "transcription" && c.OutputMode != "translation" {
 		return fmt.Errorf("config.Validate: invalid output_mode %q (must be transcription or translation)", c.OutputMode)
 	}
+	if c.OutputMode == "translation" {
+		for _, m := range ModelOptions {
+			if m.Size == c.ModelSize && m.EnglishOnly {
+				return fmt.Errorf("config.Validate: translation mode requires a multilingual model, but %q is English-only", c.ModelSize)
+			}
+		}
+	}
 	return nil
 }
 

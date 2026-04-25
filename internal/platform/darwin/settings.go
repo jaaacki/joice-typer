@@ -3,7 +3,7 @@
 package darwin
 
 /*
-#cgo LDFLAGS: -framework Cocoa -framework ApplicationServices
+#cgo LDFLAGS: -framework Cocoa -framework ApplicationServices -framework CoreAudio
 #include "settings_darwin.h"
 #include "hotkey_darwin.h"
 #include <stdlib.h>
@@ -1237,4 +1237,62 @@ func FormatHotkeyDisplay(keys []string) string {
 		}
 	}
 	return strings.Join(parts, " + ")
+}
+
+func webSettingsGetLoginItem() bridgepkg.LoginItemSnapshot {
+	return bridgepkg.LoginItemSnapshot{Enabled: C.getLoginItemEnabled() != 0}
+}
+
+func webSettingsSetLoginItem(enabled bool) (bridgepkg.LoginItemSnapshot, error) {
+	var cEnabled C.int
+	if enabled {
+		cEnabled = 1
+	}
+	if C.setLoginItemEnabled(cEnabled) == 0 {
+		action := "disable"
+		if enabled {
+			action = "enable"
+		}
+		return bridgepkg.LoginItemSnapshot{}, fmt.Errorf("settings.SetLoginItem: failed to %s login item", action)
+	}
+	return bridgepkg.LoginItemSnapshot{Enabled: enabled}, nil
+}
+
+func webSettingsGetInputVolume(deviceName string) bridgepkg.InputVolumeSnapshot {
+	cName := C.CString(deviceName)
+	defer C.free(unsafe.Pointer(cName))
+	v := float64(C.getInputDeviceVolume(cName))
+	if v < 0 {
+		return bridgepkg.InputVolumeSnapshot{Supported: false}
+	}
+	return bridgepkg.InputVolumeSnapshot{Volume: v, Supported: true}
+}
+
+func webSettingsSetInputVolume(deviceName string, volume float64) (bridgepkg.InputVolumeSnapshot, error) {
+	cName := C.CString(deviceName)
+	defer C.free(unsafe.Pointer(cName))
+	if C.setInputDeviceVolume(cName, C.float(volume)) == 0 {
+		return bridgepkg.InputVolumeSnapshot{Supported: false}, fmt.Errorf("settings.SetInputVolume: device %q does not support software volume control", deviceName)
+	}
+	return webSettingsGetInputVolume(deviceName), nil
+}
+
+func webSettingsGetMicrophoneMode() bridgepkg.MicrophoneModeSnapshot {
+	preferred := int(C.getPreferredMicrophoneMode())
+	active := int(C.getActiveMicrophoneMode())
+	return bridgepkg.MicrophoneModeSnapshot{
+		Available: preferred >= 0,
+		Preferred: preferred,
+		Active:    active,
+	}
+}
+
+func webSettingsSetMicrophoneMode(mode int) (bridgepkg.MicrophoneModeSnapshot, error) {
+	if mode < 0 || mode > 2 {
+		return bridgepkg.MicrophoneModeSnapshot{}, fmt.Errorf("settings.SetMicrophoneMode: invalid mode %d", mode)
+	}
+	if C.setPreferredMicrophoneMode(C.int(mode)) == 0 {
+		return bridgepkg.MicrophoneModeSnapshot{Available: false}, fmt.Errorf("settings.SetMicrophoneMode: not supported on this macOS version")
+	}
+	return webSettingsGetMicrophoneMode(), nil
 }

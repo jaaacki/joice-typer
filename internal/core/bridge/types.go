@@ -66,6 +66,21 @@ type UpdaterSnapshot struct {
 	Channel             string `json:"channel"`
 }
 
+type LoginItemSnapshot struct {
+	Enabled bool `json:"enabled"`
+}
+
+type InputVolumeSnapshot struct {
+	Volume    float64 `json:"volume"`
+	Supported bool    `json:"supported"`
+}
+
+type MicrophoneModeSnapshot struct {
+	Available bool `json:"available"`
+	Preferred int  `json:"preferred"`
+	Active    int  `json:"active"`
+}
+
 type BootstrapPayload struct {
 	Config      ConfigSnapshot          `json:"config"`
 	AppState    AppStateSnapshot        `json:"appState"`
@@ -73,6 +88,7 @@ type BootstrapPayload struct {
 	Model       ModelSnapshot           `json:"model"`
 	MachineInfo MachineInfoSnapshot     `json:"machineInfo"`
 	Options     SettingsOptionsSnapshot `json:"options"`
+	LoginItem   LoginItemSnapshot       `json:"loginItem"`
 }
 
 type OptionSnapshot struct {

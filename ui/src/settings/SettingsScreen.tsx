@@ -21,6 +21,10 @@ import {
   openPermissionSettings,
   refreshDevices,
   saveConfig,
+  fetchLoginItem,
+  setLoginItem as setLoginItemApi,
+  fetchInputVolume,
+  setInputVolume as setInputVolumeApi,
   setAudioInputMonitor,
   stopAudioInputMonitor,
   startHotkeyCapture,
@@ -45,6 +49,8 @@ import {
   type ModelDownloadProgressSnapshot,
   type ModelDownloadFailedSnapshot,
   type ModelSnapshot,
+  type LoginItemSnapshot,
+  type InputVolumeSnapshot,
   type PermissionsSnapshot,
   type SettingsOptionsSnapshot,
   type UpdaterSnapshot,
@@ -193,6 +199,16 @@ export function SettingsScreen({ bootstrap }: SettingsScreenProps) {
   const [downloadProgress, setDownloadProgress] = useState<ModelDownloadProgressSnapshot | null>(null);
   const [inputLevel, setInputLevel] = useState<InputLevelSnapshot>({ level: 0, quality: "poor" });
   const [micTestActive, setMicTestActive] = useState(false);
+  const [loginItem, setLoginItem] = useState<LoginItemSnapshot>({ enabled: false });
+  const [inputVolume, setInputVolume] = useState<InputVolumeSnapshot>({ volume: 0, supported: false });
+
+  useEffect(() => {
+    let cancelled = false;
+    void fetchLoginItem().then((snapshot) => {
+      if (!cancelled) setLoginItem(snapshot);
+    }).catch(() => {});
+    return () => { cancelled = true; };
+  }, []);
 
   const modelOptionsByCode = useMemo(
     () => new Map(options.models.map((option) => [option.code, option])),
@@ -228,13 +244,31 @@ export function SettingsScreen({ bootstrap }: SettingsScreenProps) {
     () => JSON.stringify(draft) !== JSON.stringify(savedConfig),
     [draft, savedConfig],
   );
+  const configError: string | null = useMemo(() => {
+    const selectedModel = modelOptionsByCode.get(draft.modelSize);
+    if (draft.outputMode === "translation" && selectedModel?.englishOnly === true) {
+      const hasInstalledMultilingual = options.models.some((m) => !m.englishOnly && m.installed);
+      return hasInstalledMultilingual
+        ? "Translation requires a multilingual model — select one from the Transcription pane."
+        : "Translation requires a multilingual model — download one from the Transcription pane.";
+    }
+    if (draft.outputMode === "transcription" && draft.language === "en" && selectedModel?.englishOnly === false) {
+      const hasInstalledEnOnly = options.models.some((m) => m.englishOnly && m.installed);
+      return hasInstalledEnOnly
+        ? "English transcription requires an English-only model — select one below."
+        : "English transcription requires an English-only model — download one below.";
+    }
+    return null;
+  }, [draft.outputMode, draft.language, draft.modelSize, modelOptionsByCode, options.models]);
   const footerStatus = downloadProgress
     ? `Downloading ${downloadProgress.size} model... ${Math.round(downloadProgress.progress * 100)}%${downloadProgress.bytesTotal > 0 ? ` · ${formatTransferSize(downloadProgress.bytesDownloaded)} / ${formatTransferSize(downloadProgress.bytesTotal)}` : ""}`
-    : status !== ""
-      ? status
-      : hasUnsavedChanges
-        ? "Unsaved changes."
-        : "No unsaved changes.";
+    : configError
+      ? configError
+      : status !== ""
+        ? status
+        : hasUnsavedChanges
+          ? "Unsaved changes."
+          : "No unsaved changes.";
 
   const selectedModelStatus = useMemo(() => {
     if (downloadProgress?.size === modelActionSize) {
@@ -263,6 +297,16 @@ export function SettingsScreen({ bootstrap }: SettingsScreenProps) {
 
   const resolvedInputDevice = useMemo(() => effectiveInputDevice(draft, devices), [draft, devices]);
   const resolvedInputDeviceName = useMemo(() => effectiveInputDeviceName(draft, devices), [draft, devices]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void fetchInputVolume(resolvedInputDeviceName).then((snapshot) => {
+      if (!cancelled) setInputVolume(snapshot);
+    }).catch(() => {
+      if (!cancelled) setInputVolume({ volume: 0, supported: false });
+    });
+    return () => { cancelled = true; };
+  }, [resolvedInputDeviceName]);
 
   function update<K extends keyof ConfigSnapshot>(key: K, value: ConfigSnapshot[K]) {
     setStatus("");
@@ -443,6 +487,7 @@ export function SettingsScreen({ bootstrap }: SettingsScreenProps) {
     setConfirmDeleteModelSize(null);
   }, [modelActionSize]);
 
+
   useEffect(() => {
     let cancelled = false;
     const timeoutId = window.setTimeout(() => {
@@ -581,6 +626,25 @@ export function SettingsScreen({ bootstrap }: SettingsScreenProps) {
       setStatus("Mic test stopped.");
     } catch (error) {
       setStatus(describeBridgeError(error, "Failed to stop mic test"));
+    }
+  }
+
+  async function handleToggleLoginItem() {
+    try {
+      const next = await setLoginItemApi(!loginItem.enabled);
+      setLoginItem(next);
+    } catch (error) {
+      setStatus(describeBridgeError(error, "Failed to update login item"));
+    }
+  }
+
+  async function handleInputVolumeChange(volume: number) {
+    setInputVolume((cur) => ({ ...cur, volume }));
+    try {
+      const next = await setInputVolumeApi(resolvedInputDeviceName, volume);
+      setInputVolume(next);
+    } catch (error) {
+      setStatus(describeBridgeError(error, "Failed to set input volume"));
     }
   }
 
@@ -753,6 +817,24 @@ export function SettingsScreen({ bootstrap }: SettingsScreenProps) {
                 </div>
               </Field>
 
+              <Field label="Input volume" hint={inputVolume.supported ? "Adjusts the system input level for this device" : "This device does not support software volume control"}>
+                <div className="input-row">
+                  <input
+                    type="range"
+                    min={0}
+                    max={1}
+                    step={0.01}
+                    value={inputVolume.volume}
+                    disabled={!inputVolume.supported}
+                    onChange={(event) => void handleInputVolumeChange(parseFloat(event.target.value))}
+                    style={{ flex: 1 }}
+                  />
+                  <span style={{ minWidth: "3.5em", textAlign: "right", fontVariantNumeric: "tabular-nums" }}>
+                    {inputVolume.supported ? `${Math.round(inputVolume.volume * 100)}%` : "n/a"}
+                  </span>
+                </div>
+              </Field>
+
               <div className="mic-preview">
                 <span className="mic-preview__icon">
                   <MicIcon />
@@ -760,9 +842,13 @@ export function SettingsScreen({ bootstrap }: SettingsScreenProps) {
                 <div className="mic-preview__instruction">
                   Click Start mic test, then speak a short phrase in your normal voice. Click Stop when done.
                 </div>
-                <span className="mic-preview__label">
-                  <StatusBadge tone={micQualityTone(inputLevel.quality)}>{inputLevel.quality === "good" ? "Good" : inputLevel.quality === "acceptable" ? "Acceptable" : "Poor"}</StatusBadge>
-                </span>
+                {micTestActive && (
+                  <span className="mic-preview__label">
+                    <StatusBadge tone={inputLevel.level === 0 ? "idle" : micQualityTone(inputLevel.quality)}>
+                      {inputLevel.level === 0 ? "No detection" : inputLevel.quality === "good" ? "Good" : inputLevel.quality === "acceptable" ? "Acceptable" : "Poor"}
+                    </StatusBadge>
+                  </span>
+                )}
                 {!micTestActive ? (
                   <button className="ui-button ui-button--secondary" type="button" onClick={() => void handleStartMicTest()}>
                     Start Mic Test
@@ -804,8 +890,41 @@ export function SettingsScreen({ bootstrap }: SettingsScreenProps) {
             onDecodeModeChange={(value) => update("decodeMode", value)}
             onDeleteModel={handleDeleteModel}
             onDownloadModel={handleDownloadModel}
-            onLanguageChange={(value) => update("language", value)}
-            onOutputModeChange={(value) => update("outputMode", value)}
+            onLanguageChange={(newLang) => {
+              setStatus("");
+              setDraft((cur) => {
+                if (cur.outputMode !== "transcription") return { ...cur, language: newLang };
+                const curModel = modelOptionsByCode.get(cur.modelSize);
+                let newModel = cur.modelSize;
+                if (newLang === "en" && !curModel?.englishOnly) {
+                  const enEquiv = options.models.find((m) => m.code === cur.modelSize + ".en" && m.installed);
+                  const anyEn = options.models.find((m) => m.englishOnly && m.installed);
+                  newModel = (enEquiv ?? anyEn)?.code ?? cur.modelSize;
+                } else if (newLang !== "en" && curModel?.englishOnly) {
+                  const base = options.models.find((m) => m.code === cur.modelSize.replace(".en", "") && m.installed);
+                  const anyMulti = options.models.find((m) => !m.englishOnly && m.installed);
+                  newModel = (base ?? anyMulti)?.code ?? cur.modelSize;
+                }
+                return { ...cur, language: newLang, modelSize: newModel };
+              });
+            }}
+            onOutputModeChange={(newMode) => {
+              setStatus("");
+              setDraft((cur) => {
+                const curModel = modelOptionsByCode.get(cur.modelSize);
+                let newModel = cur.modelSize;
+                if (newMode === "translation" && curModel?.englishOnly) {
+                  const base = options.models.find((m) => m.code === cur.modelSize.replace(".en", "") && m.installed);
+                  const anyMulti = options.models.find((m) => !m.englishOnly && m.installed);
+                  newModel = (base ?? anyMulti)?.code ?? cur.modelSize;
+                } else if (newMode === "transcription" && cur.language === "en" && !curModel?.englishOnly) {
+                  const enEquiv = options.models.find((m) => m.code === cur.modelSize + ".en" && m.installed);
+                  const anyEn = options.models.find((m) => m.englishOnly && m.installed);
+                  newModel = (enEquiv ?? anyEn)?.code ?? cur.modelSize;
+                }
+                return { ...cur, outputMode: newMode, modelSize: newModel };
+              });
+            }}
             onPunctuationModeChange={(value) => update("punctuationMode", value)}
             onUseModel={handleUseModel}
           />
@@ -819,7 +938,9 @@ export function SettingsScreen({ bootstrap }: SettingsScreenProps) {
           <PermissionsPane
             options={options.permissions}
             permissions={permissions}
+            loginItem={loginItem}
             onOpenPermissionSettings={handleOpenPermissionSettings}
+            onToggleLoginItem={handleToggleLoginItem}
           />
         );
 
@@ -848,8 +969,10 @@ export function SettingsScreen({ bootstrap }: SettingsScreenProps) {
         <header className="settings-screen__header">
           <div className="settings-screen__header-spacer" aria-hidden="true" />
           <div className="settings-screen__meta">
-            {savedConfig.outputMode === "translation" && (
+            {savedConfig.outputMode === "translation" ? (
               <StatusBadge tone="warn">Translation active</StatusBadge>
+            ) : (
+              <StatusBadge tone="warn">Transcription active</StatusBadge>
             )}
             <StatusBadge tone={runtimeTone(runtimeStatus)}>Runtime {runtimeStatus}</StatusBadge>
             <span className="version-chip">{currentAppState.version}</span>
@@ -883,10 +1006,6 @@ export function SettingsScreen({ bootstrap }: SettingsScreenProps) {
                   </span>
                 ))}
               </div>
-              <div className="settings-sidebar__model">Selected model · {selectedModelName}</div>
-              <div className="settings-sidebar__model">
-                Mode · {savedConfig.outputMode === "translation" ? "Translation → English" : "Transcription"}
-              </div>
             </div>
           </aside>
 
@@ -910,7 +1029,7 @@ export function SettingsScreen({ bootstrap }: SettingsScreenProps) {
                   </div>
                 ) : null}
               </div>
-              <button className="ui-button ui-button--primary ui-button--large" onClick={() => void handleSave()} disabled={!saveAvailable || saving}>
+              <button className="ui-button ui-button--primary ui-button--large" onClick={() => void handleSave()} disabled={!saveAvailable || saving || configError !== null}>
                 Save and Reload
               </button>
             </footer>

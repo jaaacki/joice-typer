@@ -34,5 +34,19 @@ int isSetupComplete(void);
 const char *getSelectedDevice(void);
 void runSetupEventLoop(void);
 int copyTextToClipboard(const char *text);
+int getLoginItemEnabled(void);
+int setLoginItemEnabled(int enabled);
+
+// Input device volume (0.0-1.0). Returns -1.0 if the device does not
+// support software volume control. Pass "" for default input device.
+float getInputDeviceVolume(const char *deviceName);
+// Returns 1 on success, 0 on failure.
+int setInputDeviceVolume(const char *deviceName, float volume);
+
+// Microphone mode (Voice Isolation). macOS 12+ via AVCaptureDevice.
+// Returns: -1 unavailable, 0 standard, 1 wide-spectrum, 2 voice-isolation.
+int getPreferredMicrophoneMode(void);
+int getActiveMicrophoneMode(void);
+int setPreferredMicrophoneMode(int mode);
 
 #endif

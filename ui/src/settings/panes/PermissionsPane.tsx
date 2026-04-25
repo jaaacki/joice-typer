@@ -1,13 +1,15 @@
-import type { PermissionOptionsSnapshot, PermissionsSnapshot } from "../../bridge";
+import type { LoginItemSnapshot, PermissionOptionsSnapshot, PermissionsSnapshot } from "../../bridge";
 import { Panel, StatusBadge, permissionsTone } from "../shared";
 
 type PermissionsPaneProps = {
   options: PermissionOptionsSnapshot;
   permissions: PermissionsSnapshot;
+  loginItem: LoginItemSnapshot;
   onOpenPermissionSettings: (target: "accessibility" | "input_monitoring", label: string) => void | Promise<void>;
+  onToggleLoginItem: () => void | Promise<void>;
 };
 
-export default function PermissionsPane({ options, permissions, onOpenPermissionSettings }: PermissionsPaneProps) {
+export default function PermissionsPane({ options, permissions, loginItem, onOpenPermissionSettings, onToggleLoginItem }: PermissionsPaneProps) {
   const items = [
     {
       key: "accessibility" as const,
@@ -32,6 +34,21 @@ export default function PermissionsPane({ options, permissions, onOpenPermission
       <div className="pane-stack">
         <Panel eyebrow="System access" title="Permissions">
           <p className="settings-panel__hint">JoiceTyper does not require additional system permission steps on this platform.</p>
+        </Panel>
+        <Panel eyebrow="Startup" title="Launch at Login">
+          <div className="permission-item">
+            <div className="permission-item__icon"><LoginIcon /></div>
+            <div className="permission-item__copy">
+              <strong>Open at login</strong>
+              <span>Start JoiceTyper automatically when you log in to your Mac.</span>
+            </div>
+            <StatusBadge tone={loginItem.enabled ? "ok" : "idle"}>
+              {loginItem.enabled ? "On" : "Off"}
+            </StatusBadge>
+            <button className="ui-button ui-button--secondary" type="button" onClick={() => void onToggleLoginItem()}>
+              {loginItem.enabled ? "Disable" : "Enable"}
+            </button>
+          </div>
         </Panel>
       </div>
     );
@@ -77,14 +94,41 @@ export default function PermissionsPane({ options, permissions, onOpenPermission
         </div>
       </Panel>
 
-      {/* Future template slot: privacy toggles stay commented until the runtime grows matching config fields.
-      <Panel eyebrow="Privacy" title="Data handling">
-        <div className="settings-inline-toggle">On-device only</div>
-        <div className="settings-inline-toggle">Share anonymous diagnostics</div>
-        <div className="settings-inline-toggle">Save dictation history</div>
+      <Panel eyebrow="Startup" title="Launch at Login">
+        <div className="permission-item">
+          <div className="permission-item__icon"><LoginIcon /></div>
+          <div className="permission-item__copy">
+            <strong>Open at login</strong>
+            <span>Start JoiceTyper automatically when you log in to your Mac.</span>
+          </div>
+          <StatusBadge tone={loginItem.enabled ? "ok" : "idle"}>
+            {loginItem.enabled ? "On" : "Off"}
+          </StatusBadge>
+          <button
+            className="ui-button ui-button--secondary"
+            type="button"
+            onClick={() => void onToggleLoginItem()}
+          >
+            {loginItem.enabled ? "Disable" : "Enable"}
+          </button>
+        </div>
       </Panel>
-      */}
     </div>
+  );
+}
+
+function LoginIcon() {
+  return (
+    <svg viewBox="0 0 16 16" aria-hidden="true">
+      <path
+        d="M6 2H3a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h3M10 11l3-3-3-3M13 8H6"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.25"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
   );
 }
 

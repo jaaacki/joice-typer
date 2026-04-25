@@ -68,6 +68,15 @@ const (
 	ErrorCodeRuntimeUnavailable         = generated.ErrorCodeRuntimeUnavailable
 	ErrorCodeUpdaterUnavailable         = generated.ErrorCodeUpdaterUnavailable
 	ErrorCodeUpdaterCheckFailed         = generated.ErrorCodeUpdaterCheckFailed
+	LoginItemGetMethod                  = generated.LoginItemGetMethod
+	LoginItemSetMethod                  = generated.LoginItemSetMethod
+	ErrorCodeLoginItemFailed            = generated.ErrorCodeLoginItemFailed
+	InputVolumeGetMethod                = generated.InputVolumeGetMethod
+	InputVolumeSetMethod                = generated.InputVolumeSetMethod
+	MicrophoneModeGetMethod             = generated.MicrophoneModeGetMethod
+	MicrophoneModeSetMethod             = generated.MicrophoneModeSetMethod
+	ErrorCodeInputVolumeFailed          = generated.ErrorCodeInputVolumeFailed
+	ErrorCodeMicrophoneModeFailed       = generated.ErrorCodeMicrophoneModeFailed
 )
 
 type ErrorObject struct {

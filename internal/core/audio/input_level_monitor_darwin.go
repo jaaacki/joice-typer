@@ -14,6 +14,13 @@ import (
 	"github.com/gordonklaus/portaudio"
 )
 
+// darwinInputLevelMonitor reads RMS levels from the configured input device
+// for the preferences mic-test meter. It deliberately does NOT call
+// portaudio.Initialize/Terminate — those are owned by the launcher's
+// InitAudio/TerminateAudio. PortAudio's reference count is shared with the
+// recorder's warm stream, and toggling Terminate from this monitor on macOS
+// has been observed to invalidate the recorder's pre-warmed stream, killing
+// hotkey-triggered recording.
 type darwinInputLevelMonitor struct {
 	mu         sync.Mutex
 	logger     *slog.Logger
@@ -24,7 +31,6 @@ type darwinInputLevelMonitor struct {
 	level      bridgepkg.InputLevelSnapshot
 	stopCh     chan struct{}
 	doneCh     chan struct{}
-	paInited   bool
 }
 
 func NewInputLevelMonitor(sampleRate int, deviceID string, logger *slog.Logger) (InputLevelMonitor, error) {
@@ -46,14 +52,8 @@ func NewInputLevelMonitor(sampleRate int, deviceID string, logger *slog.Logger) 
 }
 
 func (m *darwinInputLevelMonitor) start() error {
-	if err := portaudio.Initialize(); err != nil {
-		return fmt.Errorf("input monitor portaudio initialize: %w", err)
-	}
-	m.paInited = true
 	device, err := m.resolveDevice()
 	if err != nil {
-		_ = portaudio.Terminate()
-		m.paInited = false
 		return err
 	}
 	params := portaudio.StreamParameters{
@@ -67,14 +67,10 @@ func (m *darwinInputLevelMonitor) start() error {
 	}
 	stream, err := portaudio.OpenStream(params, m.buffer)
 	if err != nil {
-		_ = portaudio.Terminate()
-		m.paInited = false
 		return fmt.Errorf("input monitor open stream: %w", err)
 	}
 	if err := stream.Start(); err != nil {
 		stream.Close()
-		_ = portaudio.Terminate()
-		m.paInited = false
 		return fmt.Errorf("input monitor start stream: %w", err)
 	}
 	m.stream = stream
@@ -93,6 +89,10 @@ func (m *darwinInputLevelMonitor) resolveDevice() (*portaudio.DeviceInfo, error)
 }
 
 func (m *darwinInputLevelMonitor) readLoop(stream *portaudio.Stream, stopCh <-chan struct{}, doneCh chan<- struct{}) {
+	// readLoop owns the stream — it closes it on exit so Core Audio releases
+	// the input device. Uses non-blocking polling (AvailableToRead + sleep) so
+	// it can react to stopCh within ~20ms instead of being stuck inside a
+	// blocking Pa_ReadStream cgo call.
 	defer func() {
 		if err := stream.Close(); err != nil {
 			m.logger.Warn("input monitor close failed", "operation", "readLoop", "error", err)
@@ -105,6 +105,15 @@ func (m *darwinInputLevelMonitor) readLoop(stream *portaudio.Stream, stopCh <-ch
 			m.logger.Info("input monitor stopping", "operation", "readLoop")
 			return
 		default:
+		}
+		avail, err := stream.AvailableToRead()
+		if err != nil {
+			m.logger.Warn("input monitor available-to-read failed", "operation", "readLoop", "error", err)
+			return
+		}
+		if avail < len(m.buffer) {
+			time.Sleep(20 * time.Millisecond)
+			continue
 		}
 		if err := stream.Read(); err != nil {
 			m.logger.Warn("input monitor read failed", "operation", "readLoop", "error", err)
@@ -157,33 +166,23 @@ func (m *darwinInputLevelMonitor) SetInputDevice(deviceID string) error {
 		m.stream = nil
 		m.stopCh = nil
 		m.doneCh = nil
-		close(stopCh)
-		// Stop (not Abort) signals the stream to drain and causes the blocking
-		// Pa_ReadStream inside readLoop to return an error, unblocking doneCh.
-		_ = stream.Stop()
+		m.deviceID = deviceID
+		m.level = bridgepkg.InputLevelSnapshot{Level: 0, Quality: "poor"}
 		m.mu.Unlock()
-		waitForReadLoop(doneCh, m.logger, "SetInputDevice")
-		m.mu.Lock()
+		shutdownStreamAsync(stream, stopCh, doneCh, m.logger, "SetInputDevice")
+	} else {
+		m.deviceID = deviceID
+		m.level = bridgepkg.InputLevelSnapshot{Level: 0, Quality: "poor"}
+		m.mu.Unlock()
 	}
-	if m.paInited {
-		_ = portaudio.Terminate()
-		m.paInited = false
-	}
-	m.deviceID = deviceID
-	m.level = bridgepkg.InputLevelSnapshot{Level: 0, Quality: "poor"}
-	m.mu.Unlock()
 	m.logger.Info("switching monitored input device", "operation", "SetInputDevice", "device", deviceID)
 	return m.start()
 }
 
 func (m *darwinInputLevelMonitor) Close() error {
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	if m.stream == nil {
-		if m.paInited {
-			_ = portaudio.Terminate()
-			m.paInited = false
-		}
+		m.mu.Unlock()
 		return nil
 	}
 	stream := m.stream
@@ -192,29 +191,25 @@ func (m *darwinInputLevelMonitor) Close() error {
 	m.stream = nil
 	m.stopCh = nil
 	m.doneCh = nil
-	close(stopCh)
-	// Stop (not Abort) signals the stream to drain and causes the blocking
-	// Pa_ReadStream inside readLoop to return an error, unblocking doneCh.
-	_ = stream.Stop()
 	m.mu.Unlock()
-	waitForReadLoop(doneCh, m.logger, "Close")
-	m.mu.Lock()
-	if m.paInited {
-		_ = portaudio.Terminate()
-		m.paInited = false
-	}
+	shutdownStreamAsync(stream, stopCh, doneCh, m.logger, "Close")
 	return nil
 }
 
-// waitForReadLoop waits for the readLoop goroutine to finish after the stream
-// has been stopped. The 3-second timeout is a safety net: if Pa_StopStream did
-// not unblock the blocking Pa_ReadStream call (implementation-dependent on
-// some PortAudio backends), we log a warning rather than hanging forever.
-func waitForReadLoop(doneCh <-chan struct{}, logger *slog.Logger, operation string) {
-	select {
-	case <-doneCh:
-	case <-time.After(3 * time.Second):
-		logger.Warn("readLoop did not stop within timeout; possible goroutine leak",
-			"operation", operation)
-	}
+// shutdownStreamAsync signals the readLoop to stop. readLoop owns the stream
+// and closes it in its defer, which is what tells Core Audio to release the
+// device. Returns immediately so the caller (typically the WKWebView main
+// thread) is never blocked. We do not touch the global Pa_Initialize/Terminate
+// refcount because that is shared with the recorder's warm stream.
+func shutdownStreamAsync(stream *portaudio.Stream, stopCh chan struct{}, doneCh chan struct{}, logger *slog.Logger, operation string) {
+	close(stopCh)
+	go func() {
+		select {
+		case <-doneCh:
+			// readLoop exited cleanly; stream was closed in its defer.
+		case <-time.After(2 * time.Second):
+			logger.Warn("readLoop did not stop within timeout; leaking PortAudio stream",
+				"operation", operation)
+		}
+	}()
 }

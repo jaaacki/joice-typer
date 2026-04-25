@@ -1,5 +1,7 @@
 #import <Cocoa/Cocoa.h>
 #import <ApplicationServices/ApplicationServices.h>
+#import <CoreAudio/CoreAudio.h>
+#include <dlfcn.h>
 #include <stdatomic.h>
 #include "settings_darwin.h"
 #include "hotkey_darwin.h"
@@ -1061,3 +1063,204 @@ int copyTextToClipboard(const char *text) {
         return [pasteboard setString:value forType:NSPasteboardTypeString] ? 1 : 0;
     }
 }
+
+// SMAppServiceStatusEnabled is the raw value from the ServiceManagement enum.
+// Hardcoded to avoid linking the framework at binary load time (which measurably
+// interferes with Metal performance for whisper.cpp). Framework is loaded
+// lazily via dlopen on first use.
+#define LOGIN_ITEM_STATUS_ENABLED 1
+
+static Class loadSMAppServiceClass(void) {
+    static dispatch_once_t once;
+    static Class smClass = Nil;
+    dispatch_once(&once, ^{
+        if (dlopen("/System/Library/Frameworks/ServiceManagement.framework/ServiceManagement", RTLD_LAZY | RTLD_GLOBAL) != NULL) {
+            smClass = NSClassFromString(@"SMAppService");
+        }
+    });
+    return smClass;
+}
+
+int getLoginItemEnabled(void) {
+    if (@available(macOS 13.0, *)) {
+        Class SMAppServiceClass = loadSMAppServiceClass();
+        if (!SMAppServiceClass) return 0;
+        id service = [SMAppServiceClass performSelector:@selector(mainAppService)];
+        if (!service) return 0;
+        NSInteger status = [[service valueForKey:@"status"] integerValue];
+        return status == LOGIN_ITEM_STATUS_ENABLED ? 1 : 0;
+    }
+    return 0;
+}
+
+int setLoginItemEnabled(int enabled) {
+    if (@available(macOS 13.0, *)) {
+        Class SMAppServiceClass = loadSMAppServiceClass();
+        if (!SMAppServiceClass) return 0;
+        id service = [SMAppServiceClass performSelector:@selector(mainAppService)];
+        if (!service) return 0;
+
+        SEL sel = enabled ? @selector(registerAndReturnError:) : @selector(unregisterAndReturnError:);
+        NSMethodSignature *sig = [service methodSignatureForSelector:sel];
+        if (!sig) return 0;
+
+        NSInvocation *inv = [NSInvocation invocationWithMethodSignature:sig];
+        [inv setSelector:sel];
+        [inv setTarget:service];
+        NSError *error = nil;
+        NSError **errPtr = &error;
+        [inv setArgument:&errPtr atIndex:2];
+        [inv invoke];
+
+        BOOL result = NO;
+        [inv getReturnValue:&result];
+        return result ? 1 : 0;
+    }
+    return 0;
+}
+
+// ---- Input device volume (CoreAudio) ----
+
+static AudioDeviceID findInputAudioDeviceID(const char *deviceName) {
+    AudioObjectPropertyAddress devicesAddr = {
+        .mSelector = kAudioHardwarePropertyDevices,
+        .mScope = kAudioObjectPropertyScopeGlobal,
+        .mElement = kAudioObjectPropertyElementMain,
+    };
+    UInt32 size = 0;
+    if (AudioObjectGetPropertyDataSize(kAudioObjectSystemObject, &devicesAddr, 0, NULL, &size) != noErr || size == 0) {
+        return 0;
+    }
+    UInt32 count = size / (UInt32)sizeof(AudioDeviceID);
+    AudioDeviceID *devs = malloc(size);
+    if (!devs) return 0;
+    if (AudioObjectGetPropertyData(kAudioObjectSystemObject, &devicesAddr, 0, NULL, &size, devs) != noErr) {
+        free(devs);
+        return 0;
+    }
+
+    AudioDeviceID defaultInput = 0;
+    UInt32 defSize = sizeof(AudioDeviceID);
+    AudioObjectPropertyAddress defAddr = {
+        .mSelector = kAudioHardwarePropertyDefaultInputDevice,
+        .mScope = kAudioObjectPropertyScopeGlobal,
+        .mElement = kAudioObjectPropertyElementMain,
+    };
+    AudioObjectGetPropertyData(kAudioObjectSystemObject, &defAddr, 0, NULL, &defSize, &defaultInput);
+
+    NSString *target = (deviceName && deviceName[0]) ? [NSString stringWithUTF8String:deviceName] : nil;
+    AudioDeviceID found = 0;
+
+    for (UInt32 i = 0; i < count; i++) {
+        // Only consider devices with input streams.
+        AudioObjectPropertyAddress streamsAddr = {
+            .mSelector = kAudioDevicePropertyStreams,
+            .mScope = kAudioDevicePropertyScopeInput,
+            .mElement = kAudioObjectPropertyElementMain,
+        };
+        UInt32 streamsSize = 0;
+        if (AudioObjectGetPropertyDataSize(devs[i], &streamsAddr, 0, NULL, &streamsSize) != noErr) continue;
+        if (streamsSize == 0) continue;
+
+        if (target == nil) {
+            if (devs[i] == defaultInput) {
+                found = devs[i];
+                break;
+            }
+            continue;
+        }
+
+        CFStringRef nameRef = NULL;
+        UInt32 nameSize = sizeof(CFStringRef);
+        AudioObjectPropertyAddress nameAddr = {
+            .mSelector = kAudioObjectPropertyName,
+            .mScope = kAudioObjectPropertyScopeGlobal,
+            .mElement = kAudioObjectPropertyElementMain,
+        };
+        if (AudioObjectGetPropertyData(devs[i], &nameAddr, 0, NULL, &nameSize, &nameRef) == noErr && nameRef) {
+            NSString *deviceNameStr = (__bridge NSString *)nameRef;
+            BOOL match = [deviceNameStr isEqualToString:target];
+            CFRelease(nameRef);
+            if (match) {
+                found = devs[i];
+                break;
+            }
+        }
+    }
+
+    free(devs);
+    return found;
+}
+
+float getInputDeviceVolume(const char *deviceName) {
+    AudioDeviceID dev = findInputAudioDeviceID(deviceName);
+    if (dev == 0) return -1.0f;
+
+    Float32 vol = 0;
+    UInt32 size = sizeof(Float32);
+    AudioObjectPropertyAddress addr = {
+        .mSelector = kAudioDevicePropertyVolumeScalar,
+        .mScope = kAudioDevicePropertyScopeInput,
+        .mElement = kAudioObjectPropertyElementMain,
+    };
+    if (AudioObjectHasProperty(dev, &addr) &&
+        AudioObjectGetPropertyData(dev, &addr, 0, NULL, &size, &vol) == noErr) {
+        return vol;
+    }
+
+    // Master not supported — try per-channel and average.
+    Float32 sum = 0;
+    int n = 0;
+    for (UInt32 ch = 1; ch <= 2; ch++) {
+        addr.mElement = ch;
+        if (AudioObjectHasProperty(dev, &addr) &&
+            AudioObjectGetPropertyData(dev, &addr, 0, NULL, &size, &vol) == noErr) {
+            sum += vol;
+            n++;
+        }
+    }
+    if (n > 0) return sum / (float)n;
+    return -1.0f;
+}
+
+int setInputDeviceVolume(const char *deviceName, float volume) {
+    AudioDeviceID dev = findInputAudioDeviceID(deviceName);
+    if (dev == 0) return 0;
+    Float32 v = volume;
+    if (v < 0) v = 0;
+    if (v > 1) v = 1;
+
+    UInt32 size = sizeof(Float32);
+    AudioObjectPropertyAddress addr = {
+        .mSelector = kAudioDevicePropertyVolumeScalar,
+        .mScope = kAudioDevicePropertyScopeInput,
+        .mElement = kAudioObjectPropertyElementMain,
+    };
+    int ok = 0;
+    if (AudioObjectHasProperty(dev, &addr)) {
+        Boolean settable = false;
+        if (AudioObjectIsPropertySettable(dev, &addr, &settable) == noErr && settable) {
+            if (AudioObjectSetPropertyData(dev, &addr, 0, NULL, size, &v) == noErr) ok = 1;
+        }
+    }
+    for (UInt32 ch = 1; ch <= 2; ch++) {
+        addr.mElement = ch;
+        if (!AudioObjectHasProperty(dev, &addr)) continue;
+        Boolean settable = false;
+        if (AudioObjectIsPropertySettable(dev, &addr, &settable) == noErr && settable) {
+            if (AudioObjectSetPropertyData(dev, &addr, 0, NULL, size, &v) == noErr) ok = 1;
+        }
+    }
+    return ok;
+}
+
+// Microphone Mode (Voice Isolation) is intentionally NOT exposed
+// programmatically. AVFoundation's preferredMicrophoneMode is iOS-only on
+// modern Macs, and loading AVFoundation via dlopen has been observed to
+// activate the system mic-in-use indicator even without opening a stream.
+// On macOS the user controls voice isolation via Control Center →
+// Microphone Mode → JoiceTyper.
+
+int getPreferredMicrophoneMode(void) { return -1; }
+int getActiveMicrophoneMode(void) { return -1; }
+int setPreferredMicrophoneMode(int mode) { (void)mode; return 0; }
