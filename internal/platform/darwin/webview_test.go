@@ -15,6 +15,13 @@ import (
 	configpkg "voicetype/internal/core/config"
 )
 
+// Compile-time canary mirroring the var _ bridgepkg.Platform =
+// darwinPlatform{} assertion in webview.go. Redundant on its own but
+// keeps the drift guard visible from the test file too — if a Platform
+// method is added without a darwinPlatform implementation, this test
+// file also fails to compile.
+var _ bridgepkg.Platform = darwinPlatform{}
+
 func TestBuildSettingsBridgeService_UsesTrackedRuntimeState(t *testing.T) {
 	originalState := currentAppState()
 	originalConfigPath := webSettingsDefaultConfigPath

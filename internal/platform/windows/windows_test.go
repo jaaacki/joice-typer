@@ -3,29 +3,18 @@
 package windows
 
 import (
-	"context"
 	"testing"
 
 	bridgepkg "voicetype/internal/core/bridge"
-	configpkg "voicetype/internal/core/config"
-	apppkg "voicetype/internal/core/runtime"
 )
 
-func TestBridgeService_ConstructsFromWindowsDependencies(t *testing.T) {
-	svc := bridgepkg.NewService(&bridgepkg.Dependencies{
-		LoadConfig: func(context.Context) (configpkg.Config, error) {
-			return configpkg.Config{}, nil
-		},
-		LoadAppState: func(context.Context) (apppkg.AppState, error) {
-			return apppkg.StateReady, nil
-		},
-		LoadPermissions: func(context.Context) (bridgepkg.PermissionsSnapshot, error) {
-			return bridgepkg.PermissionsSnapshot{}, nil
-		},
-		LoadModel: func(context.Context) (bridgepkg.ModelSnapshot, error) {
-			return bridgepkg.ModelSnapshot{}, nil
-		},
-	})
+// TestWindowsPlatformSatisfiesBridgeContract is a redundant check on top of
+// the var _ bridgepkg.Platform = windowsPlatform{} assertion in settings.go,
+// kept here so the Windows test binary itself fails fast (and visibly) if a
+// future change to bridgepkg.Platform leaves windowsPlatform out of sync.
+func TestWindowsPlatformSatisfiesBridgeContract(t *testing.T) {
+	var _ bridgepkg.Platform = windowsPlatform{}
+	svc := bridgepkg.NewService(windowsPlatform{})
 	if svc == nil {
 		t.Fatal("expected bridge service")
 	}

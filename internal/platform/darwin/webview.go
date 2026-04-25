@@ -495,7 +495,11 @@ func inlineEmbeddedAssetReferences(indexHTML []byte, readFile func(string) ([]by
 
 func buildBootstrapPayload(ctx context.Context, service *bridgepkg.Service) (bridgepkg.BootstrapPayload, error) {
 	if service == nil {
-		service = bridgepkg.NewService(nil)
+		// Defensive: callers should pass a real service. We construct one
+		// from the real darwinPlatform rather than NewService(nil) — passing
+		// nil now nil-derefs (the old code returned ErrorCodeInternal because
+		// dependencies were nullable, which is no longer true).
+		service = bridgepkg.NewService(darwinPlatform{})
 	}
 	bootstrap, err := service.Bootstrap(ctx)
 	if err != nil {

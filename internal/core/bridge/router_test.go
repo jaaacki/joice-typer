@@ -60,7 +60,7 @@ func TestRouterHandleRequest_SaveConfig(t *testing.T) {
 }
 
 func TestRouterHandleRequest_UnsupportedMethod(t *testing.T) {
-	router := NewRouter(NewService(nil))
+	router := NewRouter(NewService(funcPlatform{}))
 
 	response := router.HandleRequest(context.Background(), RequestEnvelope{
 		V:      ProtocolVersion,
@@ -612,7 +612,7 @@ func TestRouterHandleRequest_ModelCommandFailuresUseExplicitCodes(t *testing.T) 
 }
 
 func TestRouterHandleRequest_OptionsGet(t *testing.T) {
-	router := NewRouter(NewService(nil))
+	router := NewRouter(NewService(funcPlatform{}))
 
 	response := router.HandleRequest(context.Background(), RequestEnvelope{
 		V:      ProtocolVersion,
