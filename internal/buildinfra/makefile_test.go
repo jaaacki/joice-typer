@@ -618,8 +618,8 @@ func TestMakePackageWindowsUsesInstallerScript(t *testing.T) {
 	if !strings.Contains(text, "fatal: missing staged Windows runtime artifact") {
 		t.Fatalf("expected windows packaging to validate staged runtime artifacts\noutput:\n%s", text)
 	}
-	if !strings.Contains(text, "/DAppVersion=") {
-		t.Fatalf("expected windows packaging to pass version into installer\noutput:\n%s", text)
+	if !strings.Contains(text, "-AppVersion") {
+		t.Fatalf("expected windows packaging to pass version into installer script\noutput:\n%s", text)
 	}
 }
 
