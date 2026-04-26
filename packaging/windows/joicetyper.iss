@@ -36,8 +36,8 @@ OutputBaseFilename=JoiceTyper-{#AppVersion}-setup
 SetupIconFile={#MyAppIcon}
 Compression=lzma
 SolidCompression=yes
-ArchitecturesAllowed=x64
-ArchitecturesInstallIn64BitMode=x64
+ArchitecturesAllowed=x64compatible
+ArchitecturesInstallIn64BitMode=x64compatible
 WizardStyle=modern
 PrivilegesRequired=lowest
 

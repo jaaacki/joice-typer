@@ -54,20 +54,27 @@ make build-windows-amd64
 Windows installer packaging:
 
 ```bash
+make windows-preflight
+make build-windows-runtime-amd64
 make package-windows
 ```
 
-Each build target now bumps the checked-in patch version in `VERSION` once per invocation before producing artifacts, so version numbers advance monotonically across macOS and Windows builds.
+Standard Win11 local dev flow:
+- `make build-windows-runtime-amd64` builds the native CGO/Vulkan/whisper runtime bundle into `build/windows-amd64/`
+- `make package-windows` packages the already-staged runtime bundle into a setup executable without bumping `VERSION`
+- `make build-windows-runtime-amd64` and `make package-windows` are repeatable local-dev commands and should not mutate repo state
+- release-only Windows version bumping lives in explicit release targets instead of normal dev targets
 
 Windows runtime build:
 
 ```bash
+make windows-preflight
 make build-windows-runtime-amd64
 make package-windows-runtime
 ```
 
 This produces a bootstrap Windows build at `build/windows-amd64/joicetyper.exe`.
-The installer path packages only the runtime build:
+The installer path packages only the staged runtime build:
 
 ```bash
 make build-windows-runtime-amd64
@@ -75,9 +82,17 @@ make package-windows
 ```
 
 `build-windows-amd64` is the non-CGO Windows shell build.
-`build-windows-runtime-amd64` is the native Windows runtime build path for whisper-backed transcription and recorder support, and requires a Windows CGO toolchain plus a local `third_party/portaudio-windows-src` checkout.
-That target now builds/stages the Windows whisper runtime automatically (AVX2-enabled ggml/whisper DLLs), generates static Windows PortAudio metadata, and bundles the extra MinGW support DLLs needed at runtime.
+`build-windows-runtime-amd64` is the native Windows runtime build path for whisper-backed transcription and recorder support, and requires the supported Windows 11 CGO toolchain plus a local `third_party/portaudio-windows-src` checkout.
+`windows-preflight` is the supported Win11 contract check: it validates MinGW GCC/G++, `mingw32-make`, `cmake`, `pkg-config`/`pkgconf`, Vulkan SDK, Inno Setup, and the expected PortAudio source checkout before the expensive runtime build runs.
+That runtime target builds/stages the Windows whisper runtime automatically (AVX2-enabled ggml/whisper DLLs), generates static Windows PortAudio metadata, and bundles the extra MinGW support DLLs needed at runtime.
 Missing runtime DLLs, the PortAudio source checkout, or the Windows CGO toolchain now fail that target immediately instead of producing a partial package.
+
+Release-only Windows flow:
+
+```bash
+make build-windows-runtime-amd64-release
+make package-windows-release RELEASE_TAG=v$(cat VERSION)
+```
 
 Frontend-only rebuild:
 

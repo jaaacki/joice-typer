@@ -532,7 +532,10 @@ func TestWindowsPackagingSource_StagesNativeWhisperRuntime(t *testing.T) {
 		"WINDOWS_RUNTIME_DIR :=",
 		"WINDOWS_RUNTIME_DLLS :=",
 		"build-windows-amd64:",
-		"package-windows: build-windows-runtime-amd64 windows-runtime-stage-check",
+		"build-windows-amd64-no-version-bump:",
+		"build-windows-runtime-amd64-no-version-bump:",
+		"package-windows: package-windows-no-version-bump",
+		"package-windows-no-version-bump: windows-runtime-stage-check",
 	} {
 		if !strings.Contains(makefile, required) {
 			t.Fatalf("expected Makefile to contain %q", required)
@@ -610,6 +613,11 @@ func TestWindowsTranscriptionSource_UsesDedicatedWindowsCGOPath(t *testing.T) {
 	makefile := string(makefileData)
 	for _, required := range []string{
 		"build-windows-runtime-amd64:",
+		"build-windows-runtime-amd64-no-version-bump:",
+		"build-windows-runtime-amd64-release:",
+		"package-windows-no-version-bump:",
+		"package-windows-release:",
+		"windows-preflight:",
 		"package-windows-runtime:",
 		"CGO_ENABLED=1",
 		"WINDOWS_CC ?=",
@@ -628,6 +636,7 @@ func TestWindowsTranscriptionSource_UsesDedicatedWindowsCGOPath(t *testing.T) {
 		"fatal: missing Windows PortAudio pkg-config file",
 		"fatal: missing Windows runtime payload",
 		"fatal: missing staged Windows runtime artifact",
+		"fatal: missing Inno Setup compiler (ISCC.exe)",
 	} {
 		if !strings.Contains(makefile, required) {
 			t.Fatalf("expected Makefile to contain %q", required)

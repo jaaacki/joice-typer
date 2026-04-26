@@ -42,7 +42,7 @@ func currentVersion(t *testing.T) string {
 	return strings.TrimSpace(string(data))
 }
 
-func TestMakeBuildTargetsBumpVersion(t *testing.T) {
+func TestMakeBuildTargetsUseExpectedVersionPolicy(t *testing.T) {
 	root := repoRoot(t)
 
 	macOut, err := makeCommand(root, "-n", "build").CombinedOutput()
@@ -57,8 +57,16 @@ func TestMakeBuildTargetsBumpVersion(t *testing.T) {
 	if err != nil {
 		t.Fatalf("make -n build-windows-runtime-amd64: %v\n%s", err, winOut)
 	}
-	if !strings.Contains(string(winOut), `printf '%s\n' "$next" > "VERSION"`) {
-		t.Fatalf("expected Windows runtime build target to bump VERSION before building\noutput:\n%s", winOut)
+	if strings.Contains(string(winOut), `printf '%s\n' "$next" > "VERSION"`) {
+		t.Fatalf("expected Windows runtime build target not to bump VERSION during local dev builds\noutput:\n%s", winOut)
+	}
+
+	winReleaseOut, err := makeCommand(root, "-n", "build-windows-runtime-amd64-release").CombinedOutput()
+	if err != nil {
+		t.Fatalf("make -n build-windows-runtime-amd64-release: %v\n%s", err, winReleaseOut)
+	}
+	if !strings.Contains(string(winReleaseOut), `printf '%s\n' "$next" > "VERSION"`) {
+		t.Fatalf("expected Windows runtime release target to bump VERSION\noutput:\n%s", winReleaseOut)
 	}
 }
 
@@ -601,20 +609,65 @@ func TestMakePackageWindowsUsesInstallerScript(t *testing.T) {
 	if !strings.Contains(text, "packaging/windows/joicetyper.iss") {
 		t.Fatalf("expected windows packaging to use packaging/windows/joicetyper.iss\noutput:\n%s", text)
 	}
-	if !strings.Contains(text, "CGO_ENABLED=1") || !strings.Contains(text, "go build -ldflags") || !strings.Contains(text, "windows-runtime-stage-check") {
-		t.Fatalf("expected windows packaging to use the runtime windows build path\noutput:\n%s", text)
+	if strings.Contains(text, "Version bumped:") {
+		t.Fatalf("expected windows packaging not to bump VERSION during local dev packaging\noutput:\n%s", text)
 	}
-	if !strings.Contains(text, "PKG_CONFIG_LIBDIR=") || !strings.Contains(text, "portaudio-windows-static-install/lib/pkgconfig/portaudio-2.0.pc") {
-		t.Fatalf("expected windows packaging to build against static Windows PortAudio metadata\noutput:\n%s", text)
+	if strings.Contains(text, "go build -ldflags") || strings.Contains(text, "CGO_ENABLED=1") {
+		t.Fatalf("expected windows packaging to consume staged runtime artifacts instead of forcing a rebuild\noutput:\n%s", text)
 	}
-	if !strings.Contains(text, "-H=windowsgui") {
-		t.Fatalf("expected windows packaging to use the Windows GUI subsystem\noutput:\n%s", text)
-	}
-	if !strings.Contains(text, "--subsystem,windows") {
-		t.Fatalf("expected windows packaging to force the Windows GUI subsystem at external link time\noutput:\n%s", text)
+	if !strings.Contains(text, "fatal: missing staged Windows runtime artifact") {
+		t.Fatalf("expected windows packaging to validate staged runtime artifacts\noutput:\n%s", text)
 	}
 	if !strings.Contains(text, "/DAppVersion=") {
 		t.Fatalf("expected windows packaging to pass version into installer\noutput:\n%s", text)
+	}
+}
+
+func TestMakeWindowsPreflightAdvertisesSupportedToolchain(t *testing.T) {
+	root := repoRoot(t)
+
+	cmd := makeCommand(root, "-n", "windows-preflight")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("make -n windows-preflight: %v\n%s", err, out)
+	}
+
+	text := string(out)
+	for _, required := range []string{
+		"checking supported Win11 build environment...",
+		"fatal: missing Windows C compiler",
+		"fatal: missing Windows C++ compiler",
+		"fatal: missing cmake",
+		"fatal: missing mingw32-make.exe",
+		"fatal: missing pkg-config or pkgconf",
+		"fatal: missing Vulkan SDK root under /c/VulkanSDK",
+		"fatal: missing Windows PortAudio source directory",
+		"fatal: missing Inno Setup compiler (ISCC.exe)",
+	} {
+		if !strings.Contains(text, required) {
+			t.Fatalf("expected windows preflight to contain %q\noutput:\n%s", required, text)
+		}
+	}
+}
+
+func TestMakeWindowsReleasePackagingUsesReleasePolicy(t *testing.T) {
+	root := repoRoot(t)
+
+	cmd := makeCommand(root, "-n", "package-windows-release")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("make -n package-windows-release: %v\n%s", err, out)
+	}
+
+	text := string(out)
+	if !strings.Contains(text, `printf '%s\n' "$next" > "VERSION"`) {
+		t.Fatalf("expected windows release packaging to bump VERSION\noutput:\n%s", text)
+	}
+	if !strings.Contains(text, "Release tag") && !strings.Contains(text, "release tag") {
+		t.Fatalf("expected windows release packaging to run release-check\noutput:\n%s", text)
+	}
+	if !strings.Contains(text, "packaging/windows/joicetyper.iss") {
+		t.Fatalf("expected windows release packaging to use installer script\noutput:\n%s", text)
 	}
 }
 

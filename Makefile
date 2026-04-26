@@ -31,8 +31,10 @@ FRONTEND_REACT_DOM_PKG := $(UI_DIR)/node_modules/react-dom/package.json
 FRONTEND_TYPESCRIPT_PKG := $(UI_DIR)/node_modules/typescript/package.json
 
 .PHONY: all setup build clean download-model whisper test frontend-build bridge-contract bridge-contract-check
-.PHONY: app dmg release-check build-windows-amd64 build-windows-runtime-amd64 package-windows package-windows-runtime
-.PHONY: windows-runtime-prereqs windows-runtime-stage-check windows-portaudio-static windows-whisper-runtime-stage
+.PHONY: app dmg release-check build-windows-amd64 build-windows-amd64-no-version-bump build-windows-amd64-release
+.PHONY: build-windows-runtime-amd64 build-windows-runtime-amd64-no-version-bump build-windows-runtime-amd64-release
+.PHONY: package-windows package-windows-no-version-bump package-windows-release package-windows-runtime
+.PHONY: windows-preflight windows-runtime-prereqs windows-runtime-stage-check windows-portaudio-static windows-whisper-runtime-stage
 
 all: whisper build
 
