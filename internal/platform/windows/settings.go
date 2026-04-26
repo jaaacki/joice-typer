@@ -325,6 +325,12 @@ func migrateWindowsInputDeviceConfig(cfg configpkg.Config) configpkg.Config {
 			return cfg
 		}
 	}
+	for _, device := range devices {
+		if cfg.InputDeviceName != "" && cfg.InputDeviceName == device.Name {
+			cfg.InputDevice = device.ID
+			return cfg
+		}
+	}
 	if defaultDevice.ID != "" {
 		cfg.InputDevice = defaultDevice.ID
 		cfg.InputDeviceName = defaultDevice.Name

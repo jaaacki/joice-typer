@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"math"
 	"sync"
+	"time"
 
 	bridgepkg "voicetype/internal/core/bridge"
 
@@ -34,7 +35,7 @@ func NewInputLevelMonitor(sampleRate int, deviceID string, logger *slog.Logger) 
 		sampleRate: float64(sampleRate),
 		deviceID:   deviceID,
 		buffer:     make([]float32, 512),
-		level:      bridgepkg.InputLevelSnapshot{Level: 0, Quality: "poor"},
+		level:      bridgepkg.InputLevelSnapshot{Level: 0, Quality: "raw"},
 	}
 	if err := m.start(); err != nil {
 		return nil, err
@@ -94,6 +95,15 @@ func (m *windowsInputLevelMonitor) readLoop(stream *portaudio.Stream, stopCh <-c
 			return
 		default:
 		}
+		avail, err := stream.AvailableToRead()
+		if err != nil {
+			m.logger.Warn("input monitor available-to-read failed", "operation", "readLoop", "error", err)
+			return
+		}
+		if avail < len(m.buffer) {
+			time.Sleep(20 * time.Millisecond)
+			continue
+		}
 		if err := stream.Read(); err != nil {
 			m.logger.Warn("input monitor read failed", "operation", "readLoop", "error", err)
 			return
@@ -104,19 +114,13 @@ func (m *windowsInputLevelMonitor) readLoop(stream *portaudio.Stream, stopCh <-c
 		}
 		level := 0.0
 		if len(m.buffer) > 0 {
-			level = math.Sqrt(sumSq / float64(len(m.buffer))) * 12
+			level = math.Sqrt(sumSq/float64(len(m.buffer))) * 4
 		}
 		if level > 1 {
 			level = 1
 		}
-		quality := "poor"
-		if level >= 0.35 {
-			quality = "good"
-		} else if level >= 0.12 {
-			quality = "acceptable"
-		}
 		m.mu.Lock()
-		m.level = bridgepkg.InputLevelSnapshot{Level: level, Quality: quality}
+		m.level = bridgepkg.InputLevelSnapshot{Level: level, Quality: "raw"}
 		m.mu.Unlock()
 	}
 }
@@ -141,13 +145,12 @@ func (m *windowsInputLevelMonitor) SetInputDevice(deviceID string) error {
 		m.stopCh = nil
 		m.doneCh = nil
 		close(stopCh)
-		stream.Abort()
 		m.mu.Unlock()
-		<-doneCh
+		shutdownWindowsInputMonitorStream(stream, doneCh, m.logger, "SetInputDevice")
 		m.mu.Lock()
 	}
 	m.deviceID = deviceID
-	m.level = bridgepkg.InputLevelSnapshot{Level: 0, Quality: "poor"}
+	m.level = bridgepkg.InputLevelSnapshot{Level: 0, Quality: "raw"}
 	m.logger.Info("switching monitored input device", "operation", "SetInputDevice", "device", deviceID)
 	return m.start()
 }
@@ -165,9 +168,20 @@ func (m *windowsInputLevelMonitor) Close() error {
 	m.stopCh = nil
 	m.doneCh = nil
 	close(stopCh)
-	stream.Abort()
 	m.mu.Unlock()
-	<-doneCh
+	shutdownWindowsInputMonitorStream(stream, doneCh, m.logger, "Close")
 	m.mu.Lock()
 	return nil
+}
+
+func shutdownWindowsInputMonitorStream(stream *portaudio.Stream, doneCh chan struct{}, logger *slog.Logger, operation string) {
+	go func() {
+		select {
+		case <-doneCh:
+		case <-time.After(2 * time.Second):
+			logger.Warn("input monitor shutdown timed out; aborting stream", "operation", operation)
+			stream.Abort()
+			<-doneCh
+		}
+	}()
 }

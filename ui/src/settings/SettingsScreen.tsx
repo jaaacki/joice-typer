@@ -138,15 +138,17 @@ function formatTransferSize(bytes: number): string {
   return `${Math.round(bytes)} B`;
 }
 
-function micQualityTone(quality: string): "warn" | "ok" | "idle" {
-  switch (quality) {
-    case "good":
-      return "ok";
-    case "acceptable":
-      return "warn";
-    default:
-      return "idle";
-  }
+function micSignalLabel(level: number): string {
+  if (level <= 0.01) return "No raw input";
+  if (level < 0.08) return "Low raw input";
+  if (level < 0.35) return "Raw input detected";
+  return "Strong raw input";
+}
+
+function micSignalTone(level: number): "warn" | "ok" | "idle" {
+  if (level <= 0.01) return "idle";
+  if (level < 0.08) return "warn";
+  return "ok";
 }
 
 function MicLevelMeter({ level }: { level: number }) {
@@ -197,7 +199,8 @@ export function SettingsScreen({ bootstrap }: SettingsScreenProps) {
   const [confirmDeleteModelSize, setConfirmDeleteModelSize] = useState<string | null>(null);
   const [hotkeyCapture, setHotkeyCapture] = useState<HotkeyCaptureSnapshot | null>(null);
   const [downloadProgress, setDownloadProgress] = useState<ModelDownloadProgressSnapshot | null>(null);
-  const [inputLevel, setInputLevel] = useState<InputLevelSnapshot>({ level: 0, quality: "poor" });
+  const [inputLevel, setInputLevel] = useState<InputLevelSnapshot>({ level: 0, quality: "raw" });
+  const [displayInputLevel, setDisplayInputLevel] = useState(0);
   const [micTestActive, setMicTestActive] = useState(false);
   const [loginItem, setLoginItem] = useState<LoginItemSnapshot>({ enabled: false });
   const [inputVolume, setInputVolume] = useState<InputVolumeSnapshot>({ volume: 0, supported: false });
@@ -412,7 +415,13 @@ export function SettingsScreen({ bootstrap }: SettingsScreenProps) {
   );
   useEffect(() => subscribeDevicesChanged((nextDevices) => setDevices(nextDevices)), []);
   useEffect(() => subscribeHotkeyCaptureChanged((snapshot) => setHotkeyCapture(snapshot)), []);
-  useEffect(() => subscribeInputLevelChanged((snapshot) => setInputLevel(snapshot)), []);
+  useEffect(() => subscribeInputLevelChanged((snapshot) => {
+    setInputLevel(snapshot);
+    setDisplayInputLevel((current) => {
+      const next = Math.max(0, Math.min(1, snapshot.level));
+      return next > current ? current * 0.35 + next * 0.65 : current * 0.8 + next * 0.2;
+    });
+  }), []);
   useEffect(
     () =>
       subscribeModelDownloadProgress((progress: ModelDownloadProgressSnapshot) => {
@@ -622,7 +631,8 @@ export function SettingsScreen({ bootstrap }: SettingsScreenProps) {
     try {
       await stopAudioInputMonitor();
       setMicTestActive(false);
-      setInputLevel({ level: 0, quality: "poor" });
+      setInputLevel({ level: 0, quality: "raw" });
+      setDisplayInputLevel(0);
       setStatus("Mic test stopped.");
     } catch (error) {
       setStatus(describeBridgeError(error, "Failed to stop mic test"));
@@ -793,7 +803,8 @@ export function SettingsScreen({ bootstrap }: SettingsScreenProps) {
                         update("inputDevice", selected?.id ?? "");
                         update("inputDeviceName", selected?.name ?? "");
                         setMicTestActive(false);
-                        setInputLevel({ level: 0, quality: "poor" });
+                        setInputLevel({ level: 0, quality: "raw" });
+                        setDisplayInputLevel(0);
                       }}
                     >
                       {devices.map((device) => (
@@ -840,12 +851,12 @@ export function SettingsScreen({ bootstrap }: SettingsScreenProps) {
                   <MicIcon />
                 </span>
                 <div className="mic-preview__instruction">
-                  Click Start mic test, then speak a short phrase in your normal voice. Click Stop when done.
+                  Click Start mic test to view raw level from the selected microphone. This does not run VAD or transcription.
                 </div>
                 {micTestActive && (
                   <span className="mic-preview__label">
-                    <StatusBadge tone={inputLevel.level === 0 ? "idle" : micQualityTone(inputLevel.quality)}>
-                      {inputLevel.level === 0 ? "No detection" : inputLevel.quality === "good" ? "Good" : inputLevel.quality === "acceptable" ? "Acceptable" : "Poor"}
+                    <StatusBadge tone={micSignalTone(displayInputLevel)}>
+                      {micSignalLabel(displayInputLevel)}
                     </StatusBadge>
                   </span>
                 )}
@@ -858,7 +869,7 @@ export function SettingsScreen({ bootstrap }: SettingsScreenProps) {
                     Stop Mic Test
                   </button>
                 )}
-                <MicLevelMeter level={inputLevel.level} />
+                <MicLevelMeter level={displayInputLevel} />
               </div>
 
               {/* Future template slot: advanced capture tuning is intentionally hidden until the backend has hard constraints instead of accepting arbitrary integers.

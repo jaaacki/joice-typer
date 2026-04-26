@@ -30,7 +30,10 @@ const (
 	maxTranscribeBytes    = 50000            // cap output text to ~50KB
 	transcribeTimeout     = 90 * time.Second // hard deadline for whisper_full
 	whisperBeamSize       = 5
-	longFormSeconds       = 8                // medium utterances should preserve more context than short push-to-talk clips
+	longFormSeconds       = 8 // medium utterances should preserve more context than short push-to-talk clips
+	shortFormMaxTokens    = 8
+	shortFormMaxLen       = 32
+	minTranscribeRMS      = 0.001
 )
 
 type whisperTranscriber struct {
@@ -51,11 +54,38 @@ type decodeConfig struct {
 	beamSize int
 }
 
+type runtimeDecodeMode struct {
+	applySilenceGate bool
+	logAudioRMS      bool
+}
+
+func audioRMS(audio []float32) float64 {
+	if len(audio) == 0 {
+		return 0
+	}
+	var sumSq float64
+	for _, s := range audio {
+		sumSq += float64(s) * float64(s)
+	}
+	return math.Sqrt(sumSq / float64(len(audio)))
+}
+
+func shortFormTokenLimit(durationSeconds float64) int {
+	return min(shortFormMaxTokens, max(4, int(math.Ceil(durationSeconds*2.5))+2))
+}
+
 func decodeConfigForMode(mode string) decodeConfig {
 	if mode == "greedy" {
 		return decodeConfig{strategy: "greedy"}
 	}
 	return decodeConfig{strategy: "beam", beamSize: whisperBeamSize}
+}
+
+func effectiveDecodeConfig(mode string, longForm bool, outputMode string) decodeConfig {
+	if outputMode != "translation" && !longForm {
+		return decodeConfigForMode("greedy")
+	}
+	return decodeConfigForMode(mode)
 }
 
 func whisperThreadCount(longForm bool) int {
@@ -64,6 +94,13 @@ func whisperThreadCount(longForm bool) int {
 		return min(n, 4)
 	}
 	return min(n, 2)
+}
+
+func runtimeDecodeModeForOutputMode(outputMode string) runtimeDecodeMode {
+	if outputMode == "translation" {
+		return runtimeDecodeMode{applySilenceGate: true, logAudioRMS: true}
+	}
+	return runtimeDecodeMode{}
 }
 
 func WhisperSystemInfo() string {
@@ -260,30 +297,15 @@ func (t *whisperTranscriber) transcribeBlocking(audio []float32) (string, error)
 		return "", fmt.Errorf("transcriber.Transcribe: transcriber is closed")
 	}
 
-	var sumSq float64
-	for _, s := range audio {
-		sumSq += float64(s) * float64(s)
-	}
-	rms := 0.0
-	if len(audio) > 0 {
-		rms = math.Sqrt(sumSq / float64(len(audio)))
-	}
+	rms := audioRMS(audio)
 	durationSeconds := 0.0
 	if t.sampleRate > 0 {
 		durationSeconds = float64(len(audio)) / float64(t.sampleRate)
 	}
 	longForm := durationSeconds >= longFormSeconds
-	t.logger.Info("transcribing", "operation", "Transcribe", "samples", len(audio), "audio_rms", rms, "duration_sec", durationSeconds, "long_form", longForm)
+	mode := runtimeDecodeModeForOutputMode(t.outputMode)
 
-	// Pre-flight energy gate: if the recording is near-silent, skip whisper
-	// entirely. Whisper hallucinates on silence — returning phantom text.
-	// -40 dBFS (RMS ~0.01) is well below any usable speech level.
-	if rms < 0.01 {
-		t.logger.Info("skipping transcription — audio below energy threshold", "operation", "Transcribe", "rms", rms)
-		return "", nil
-	}
-
-	decodeCfg := decodeConfigForMode(t.decodeMode)
+	decodeCfg := effectiveDecodeConfig(t.decodeMode, longForm, t.outputMode)
 	params := C.whisper_full_default_params(C.WHISPER_SAMPLING_GREEDY)
 	if decodeCfg.strategy == "beam" {
 		params = C.whisper_full_default_params(C.WHISPER_SAMPLING_BEAM_SEARCH)
@@ -295,34 +317,49 @@ func (t *whisperTranscriber) transcribeBlocking(audio []float32) (string, error)
 	params.n_threads = C.int(whisperThreadCount(longForm))
 	params.no_timestamps = C._Bool(true)
 
-	// Decode behaviour follows config preferences (decode_mode, language,
-	// output_mode, punctuation_mode) plus a small set of safe defaults that
-	// match whisper.cpp's intended use. We do NOT toggle internal whisper
-	// quality knobs (suppress_blank, suppress_nst, audio_ctx clipping,
-	// greedy temp/best_of pinning) based on heuristics — those flags were
-	// added in 01a8c37 ("transcription quality") but combined destructively
-	// with the vocabulary initial_prompt path: short utterances under prompt
-	// bias collapsed to single letters or empty output. Users control
-	// behaviour through the config; the engine should not silently override.
-	//
-	// Defaults below match the pre-01a8c37 behaviour that worked across
-	// many prior versions for both vocab and no-vocab usage.
-	if longForm && t.outputMode != "translation" {
-		// Long form transcription: allow multi-segment with cross-segment
-		// context so whisper can use the prior segment as a prompt for
-		// continuity. Translation mode always stays single-segment to avoid
-		// the cross-segment hallucination loop we hit earlier.
-		params.no_context = C._Bool(false)
-		params.single_segment = C._Bool(false)
-	} else {
+	audioCtxFrames := 1500
+	t.logger.Info("transcribing", "operation", "Transcribe", "samples", len(audio), "audio_rms", rms, "duration_sec", durationSeconds, "long_form", longForm)
+	if rms < minTranscribeRMS {
+		t.logger.Info("skipping transcription — audio below energy threshold", "operation", "Transcribe", "rms", rms)
+		return "", nil
+	}
+	if mode.logAudioRMS {
 		params.no_context = C._Bool(true)
 		params.single_segment = C._Bool(false)
+		params.translate = C._Bool(true)
+	} else {
+		params.no_context = C._Bool(true)
+		params.single_segment = C._Bool(true)
+		params.suppress_blank = C._Bool(true)
+		params.suppress_nst = C._Bool(true)
+		if decodeCfg.strategy == "greedy" {
+			params.greedy.best_of = C.int(1)
+			params.temperature = C.float(0.0)
+		}
+		if longForm {
+			params.no_context = C._Bool(false)
+			params.no_timestamps = C._Bool(false)
+			params.single_segment = C._Bool(false)
+		} else {
+			params.max_tokens = C.int(shortFormTokenLimit(durationSeconds))
+			params.max_len = C.int(shortFormMaxLen)
+			params.split_on_word = C._Bool(true)
+			params.duration_ms = C.int(durationSeconds*1000) + C.int(250)
+			params.temperature_inc = C.float(0.0)
+			params.no_speech_thold = C.float(0.55)
+			params.entropy_thold = C.float(2.4)
+			params.logprob_thold = C.float(-1.0)
+		}
+		audioCtxFrames = int(durationSeconds*50) + 64
+		if audioCtxFrames > 1500 {
+			audioCtxFrames = 1500
+		}
+		params.audio_ctx = C.int(audioCtxFrames)
 	}
 
 	if decodeCfg.strategy == "beam" {
 		params.beam_search.beam_size = C.int(decodeCfg.beamSize)
 	}
-	audioCtxFrames := 1500 // default = full 30s mel context
 
 	if t.lang != "" {
 		cLang := C.CString(t.lang)
@@ -330,12 +367,6 @@ func (t *whisperTranscriber) transcribeBlocking(audio []float32) (string, error)
 		params.language = cLang
 	}
 
-	if t.outputMode == "translation" {
-		params.translate = C._Bool(true)
-	}
-
-	// Vocabulary (initial_prompt) biases output toward user-defined English
-	// words. In translation mode this corrupts the translation — skip it.
 	if t.vocab != "" && t.outputMode != "translation" {
 		cPrompt := C.CString(t.vocab)
 		defer C.free(unsafe.Pointer(cPrompt))
@@ -357,20 +388,6 @@ func (t *whisperTranscriber) transcribeBlocking(audio []float32) (string, error)
 
 	var sb strings.Builder
 	for i := 0; i < n; i++ {
-		// no_speech_prob is only used in transcription mode. For translation,
-		// whisper's speech detector is poorly calibrated for non-English input —
-		// valid speech regularly scores above 0.6, so the filter produces both
-		// false negatives (valid speech dropped) and false positives (rubbish
-		// passed). The RMS energy gate above is the sole silence guard for
-		// translation.
-		if t.outputMode != "translation" {
-			noSpeechProb := float64(C.whisper_full_get_segment_no_speech_prob(t.ctx, C.int(i)))
-			if noSpeechProb > 0.6 {
-				t.logger.Info("skipping segment — high no_speech_prob", "operation", "Transcribe",
-					"segment", i, "no_speech_prob", noSpeechProb)
-				continue
-			}
-		}
 		cText := C.whisper_full_get_segment_text(t.ctx, C.int(i))
 		if cText == nil {
 			continue
@@ -385,7 +402,7 @@ func (t *whisperTranscriber) transcribeBlocking(audio []float32) (string, error)
 	text := sanitizeTranscript(strings.TrimSpace(sb.String()))
 	text = applyPunctuationMode(t.punctMode, text)
 	t.logger.Info("transcribed", "operation", "Transcribe",
-		"segments", n, "text_length", len(text), "decode_ms", decodeMs, "threads", int(params.n_threads), "audio_ctx", audioCtxFrames)
+		"segments", n, "text_length", len(text), "decode_ms", decodeMs, "threads", int(params.n_threads), "audio_ctx", audioCtxFrames, "decode_strategy", decodeCfg.strategy, "max_tokens", int(params.max_tokens), "max_len", int(params.max_len))
 	return text, nil
 }
 

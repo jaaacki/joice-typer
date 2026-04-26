@@ -146,11 +146,17 @@ func focusWindowsWebView2Host() {
 }
 
 func dispatchWindowsWebView2Envelope(payloadJSON string, closeWindow bool) {
+	if preferencesOpenLoad() == 0 && !closeWindow {
+		return
+	}
 	if err := sharedWindowsWebView2Host.ensureStarted(); err != nil {
 		webSettingsNativeTransportWarning("dispatchWindowsWebView2Envelope", err.Error())
 		return
 	}
 	if err := sharedWindowsWebView2Host.invoke(func(host *windowsWebView2Host) error {
+		if host.chromium == nil && !host.visible && !closeWindow {
+			return nil
+		}
 		return host.dispatch(payloadJSON, closeWindow)
 	}); err != nil {
 		webSettingsNativeTransportWarning("dispatchWindowsWebView2Envelope", err.Error())

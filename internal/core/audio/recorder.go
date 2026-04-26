@@ -11,29 +11,30 @@ import (
 	"sync"
 	"time"
 
-	apppkg "voicetype/internal/core/runtime"
 	config "voicetype/internal/core/config"
+	apppkg "voicetype/internal/core/runtime"
 
 	"github.com/gordonklaus/portaudio"
 )
 
 type portaudioRecorder struct {
-	sampleRate   float64 // target sample rate for whisper (e.g. 16000)
-	captureRate  float64 // actual capture rate used by the open stream
-	deviceName   string
-	stream       *portaudio.Stream
-	activeStream *portaudio.Stream // guarded by mu; used by Stop to force-abort on timeout
-	warmStream   *portaudio.Stream // pre-opened stream for instant start
-	buffer       []float32
-	audio        []float32
-	mu           sync.Mutex
-	recording    bool
-	done         chan struct{}
-	sessionID    uint64
-	logger       *slog.Logger
-	maxSamples   int
-	totalSamples int
-	unhealthy    bool
+	sampleRate     float64 // target sample rate for whisper (e.g. 16000)
+	captureRate    float64 // actual capture rate used by the open stream
+	deviceName     string
+	stream         *portaudio.Stream
+	activeStream   *portaudio.Stream // guarded by mu; used by Stop to force-abort on timeout
+	warmStream     *portaudio.Stream // pre-opened stream for instant start
+	warmStreamRate float64
+	buffer         []float32
+	audio          []float32
+	mu             sync.Mutex
+	recording      bool
+	done           chan struct{}
+	sessionID      uint64
+	logger         *slog.Logger
+	maxSamples     int
+	totalSamples   int
+	unhealthy      bool
 }
 
 func NewRecorder(sampleRate int, deviceName string, logger *slog.Logger) apppkg.Recorder {
@@ -79,7 +80,7 @@ func resampleLinear(src []float32, srcRate, dstRate float64) []float32 {
 	out := make([]float32, outLen)
 	for i := range out {
 		center := float64(i) * srcRate / dstRate
-		start := int(math.Floor(center-filterRadius+1))
+		start := int(math.Floor(center - filterRadius + 1))
 		end := int(math.Ceil(center + filterRadius))
 		var sum float64
 		var norm float64
@@ -330,6 +331,7 @@ func (r *portaudioRecorder) Warm() {
 		return
 	}
 	r.warmStream = stream
+	r.warmStreamRate = actualRate
 	r.captureRate = actualRate
 	r.maxSamples = int(actualRate * 90.0)
 	r.buffer = buf
@@ -401,6 +403,11 @@ func (r *portaudioRecorder) Start(ctx context.Context) error {
 	if r.warmStream != nil {
 		stream = r.warmStream
 		r.warmStream = nil
+		if r.warmStreamRate > 0 {
+			r.captureRate = r.warmStreamRate
+			r.maxSamples = int(r.warmStreamRate * 90.0)
+		}
+		r.warmStreamRate = 0
 		wasWarm = true
 		r.logger.Debug("using pre-warmed stream", "operation", "Start",
 			"elapsed_us", time.Since(startTime).Microseconds())
@@ -502,7 +509,7 @@ func (r *portaudioRecorder) readLoop(stream *portaudio.Stream, buffer []float32,
 			r.mu.Unlock()
 			return
 		}
-						r.audio = append(r.audio, buffer...)
+		r.audio = append(r.audio, buffer...)
 		r.totalSamples += len(buffer)
 		if r.totalSamples >= r.maxSamples {
 			r.recording = false
@@ -597,7 +604,7 @@ func (r *portaudioRecorder) Stop() ([]float32, error) {
 
 	if captureRate != r.sampleRate && captureRate > 0 {
 		audio = resampleLinear(audio, captureRate, r.sampleRate)
-		r.logger.Debug("resampled audio", "operation", "Stop",
+		r.logger.Info("resampled audio", "operation", "Stop",
 			"from_rate", captureRate, "to_rate", r.sampleRate,
 			"input_samples", total, "output_samples", len(audio))
 	}

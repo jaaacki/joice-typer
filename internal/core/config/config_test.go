@@ -371,6 +371,30 @@ type_mode: clipboard
 	}
 }
 
+func TestLoadConfig_MigratesLegacyTranslateFlag(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+
+	content := []byte(`trigger_key: [fn, shift]
+model_size: small
+language: en
+sample_rate: 16000
+sound_feedback: true
+translate: true
+`)
+	if err := os.WriteFile(path, content, 0644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	cfg, err := LoadConfig(path)
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	if cfg.OutputMode != "translation" {
+		t.Fatalf("expected output_mode translation, got %q", cfg.OutputMode)
+	}
+}
+
 func TestLoadConfig_AppliesNewDefaultsToExistingConfig(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.yaml")

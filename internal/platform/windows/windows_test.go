@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	bridgepkg "voicetype/internal/core/bridge"
+	configpkg "voicetype/internal/core/config"
 )
 
 // TestWindowsPlatformSatisfiesBridgeContract is a redundant check on top of
@@ -17,6 +18,29 @@ func TestWindowsPlatformSatisfiesBridgeContract(t *testing.T) {
 	svc := bridgepkg.NewService(windowsPlatform{})
 	if svc == nil {
 		t.Fatal("expected bridge service")
+	}
+}
+
+func TestMigrateWindowsInputDeviceConfig_PreservesSavedDeviceNameWhenIDChanges(t *testing.T) {
+	originalList := webSettingsListInputDevices
+	defer func() { webSettingsListInputDevices = originalList }()
+
+	webSettingsListInputDevices = func() ([]bridgepkg.DeviceSnapshot, error) {
+		return []bridgepkg.DeviceSnapshot{
+			{ID: "default-id", Name: "Microphone Array (AMD Audio Device)", IsDefault: true},
+			{ID: "new-headset-id", Name: "Microphone (2- Logi USB Headset H340)"},
+		}, nil
+	}
+
+	cfg := MigrateWindowsInputDeviceConfig(configpkg.Config{
+		InputDevice:     "old-headset-id",
+		InputDeviceName: "Microphone (2- Logi USB Headset H340)",
+	})
+	if cfg.InputDevice != "new-headset-id" {
+		t.Fatalf("expected migrated headset ID, got %q", cfg.InputDevice)
+	}
+	if cfg.InputDeviceName != "Microphone (2- Logi USB Headset H340)" {
+		t.Fatalf("expected headset name to be preserved, got %q", cfg.InputDeviceName)
 	}
 }
 

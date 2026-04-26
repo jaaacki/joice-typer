@@ -1,4 +1,4 @@
-//go:build darwin
+//go:build darwin || (windows && cgo)
 
 package transcription
 
@@ -30,6 +30,61 @@ func TestDecodeConfigForMode_Beam(t *testing.T) {
 	}
 	if cfg.beamSize != whisperBeamSize {
 		t.Fatalf("expected beam size %d, got %d", whisperBeamSize, cfg.beamSize)
+	}
+}
+
+func TestAudioRMS(t *testing.T) {
+	if got := audioRMS([]float32{0, 0, 0}); got != 0 {
+		t.Fatalf("expected zero RMS for silence, got %v", got)
+	}
+	if got := audioRMS([]float32{1, -1}); got != 1 {
+		t.Fatalf("expected RMS 1, got %v", got)
+	}
+}
+
+func TestEffectiveDecodeConfig_ForcesShortTranscriptionToGreedy(t *testing.T) {
+	cfg := effectiveDecodeConfig("beam", false, "transcription")
+	if cfg.strategy != "greedy" {
+		t.Fatalf("expected short transcription to force greedy, got %q", cfg.strategy)
+	}
+}
+
+func TestEffectiveDecodeConfig_PreservesLongTranscriptionMode(t *testing.T) {
+	cfg := effectiveDecodeConfig("beam", true, "transcription")
+	if cfg.strategy != "beam" {
+		t.Fatalf("expected long transcription to preserve beam, got %q", cfg.strategy)
+	}
+}
+
+func TestShortFormTokenLimit_UsesFullDuration(t *testing.T) {
+	if got := shortFormTokenLimit(0.9); got != 5 {
+		t.Fatalf("expected 0.9s clip to allow 5 tokens, got %d", got)
+	}
+	if got := shortFormTokenLimit(1.3); got != 6 {
+		t.Fatalf("expected 1.3s clip to allow 6 tokens, got %d", got)
+	}
+	if got := shortFormTokenLimit(4); got != shortFormMaxTokens {
+		t.Fatalf("expected token limit to cap at %d, got %d", shortFormMaxTokens, got)
+	}
+}
+
+func TestRuntimeDecodeModeForOutputMode_Translation(t *testing.T) {
+	mode := runtimeDecodeModeForOutputMode("translation")
+	if !mode.applySilenceGate {
+		t.Fatal("expected translation mode to apply silence gate")
+	}
+	if !mode.logAudioRMS {
+		t.Fatal("expected translation mode to log RMS")
+	}
+}
+
+func TestRuntimeDecodeModeForOutputMode_Transcription(t *testing.T) {
+	mode := runtimeDecodeModeForOutputMode("transcription")
+	if mode.applySilenceGate {
+		t.Fatal("expected transcription mode not to apply silence gate")
+	}
+	if mode.logAudioRMS {
+		t.Fatal("expected transcription mode not to use translation-only RMS behavior")
 	}
 }
 

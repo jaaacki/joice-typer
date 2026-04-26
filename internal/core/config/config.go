@@ -40,6 +40,11 @@ type Config struct {
 	Vocabulary      string   `yaml:"vocabulary"`
 }
 
+type legacyConfig struct {
+	Config          `yaml:",inline"`
+	LegacyTranslate *bool `yaml:"translate,omitempty"`
+}
+
 var validModelSizes = map[string]bool{
 	"tiny": true, "base": true, "small": true, "medium": true,
 	"tiny.en": true, "base.en": true, "small.en": true, "medium.en": true,
@@ -248,7 +253,16 @@ func LoadConfig(path string) (Config, error) {
 	dec := yaml.NewDecoder(bytes.NewReader(data))
 	dec.KnownFields(true)
 	if err := dec.Decode(&cfg); err != nil {
-		return Config{}, fmt.Errorf("config.LoadConfig: parse %s: %w", path, err)
+		var legacy legacyConfig
+		legacyDec := yaml.NewDecoder(bytes.NewReader(data))
+		legacyDec.KnownFields(true)
+		if legacyErr := legacyDec.Decode(&legacy); legacyErr != nil {
+			return Config{}, fmt.Errorf("config.LoadConfig: parse %s: %w", path, err)
+		}
+		cfg = legacy.Config
+		if cfg.OutputMode == "" && legacy.LegacyTranslate != nil && *legacy.LegacyTranslate {
+			cfg.OutputMode = "translation"
+		}
 	}
 
 	if cfg.DecodeMode == "" {
