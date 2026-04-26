@@ -13,7 +13,7 @@ tmp_audio_probe/
 *.o
 *.a
 *.dylib
-build/
+/build/
 
 # whisper.cpp build directory
 third_party/whisper.cpp/build/

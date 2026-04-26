@@ -10,6 +10,10 @@ import (
 
 var Version = "dev"
 
+func DisplayVersion() string {
+	return Version
+}
+
 var semverPattern = regexp.MustCompile(`^(\d+)\.(\d+)\.(\d+)$`)
 
 type Semver struct {

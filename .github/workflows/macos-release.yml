@@ -119,7 +119,7 @@ jobs:
             gh release create "$RELEASE_TAG" --repo "${{ github.repository }}" --verify-tag --title "$RELEASE_TAG" --generate-notes
 
       - name: Build notarized release artifacts
-        run: make mac-release-artifacts
+        run: make mac-release-artifacts RELEASE_TAG="$RELEASE_TAG"
 
       - name: Publish release artifacts
         run: make mac-publish-github-release RELEASE_TAG="$RELEASE_TAG"

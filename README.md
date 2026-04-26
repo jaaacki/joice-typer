@@ -63,7 +63,7 @@ Standard Win11 local dev flow:
 - `make build-windows-runtime-amd64` builds the native CGO/Vulkan/whisper runtime bundle into `build/windows-amd64/`
 - `make package-windows` packages the already-staged runtime bundle into a setup executable without bumping `VERSION`
 - `make build-windows-runtime-amd64` and `make package-windows` are repeatable local-dev commands and should not mutate repo state
-- release-only Windows version bumping lives in explicit release targets instead of normal dev targets
+- release-only Windows targets validate `VERSION` against `RELEASE_TAG` and require a clean tree; they do not bump `VERSION`
 
 Windows runtime build:
 
@@ -90,7 +90,7 @@ Missing runtime DLLs, the PortAudio source checkout, or the Windows CGO toolchai
 Release-only Windows flow:
 
 ```bash
-make build-windows-runtime-amd64-release
+make build-windows-runtime-amd64-release RELEASE_TAG=v$(cat VERSION)
 make package-windows-release RELEASE_TAG=v$(cat VERSION)
 ```
 
@@ -115,14 +115,10 @@ Repository structure note:
 - release tag format: `vX.Y.Z`
 - app bundle and Go binary both derive their version from `VERSION`
 
-Typical release flow:
+Typical local artifact flow:
 
 ```bash
-printf '1.0.0\n' > VERSION
-git add VERSION
-git commit -m "release: bump version to 1.0.0"
-git tag v1.0.0
-make release-check
+make app-no-version-bump
 make dmg
 ```
 
@@ -136,7 +132,7 @@ make mac-dev-update-artifacts
 make mac-release-preflight
 make mac-notarize-preflight
 make mac-publish-preflight RELEASE_TAG=v$(cat VERSION)
-make mac-release-artifacts
+make mac-release-artifacts RELEASE_TAG=v$(cat VERSION)
 make mac-publish-github-release RELEASE_TAG=v$(cat VERSION)
 ```
 

@@ -95,15 +95,19 @@ func TestRepoLayout_FrontendToolchainFilesExist(t *testing.T) {
 	}
 }
 
-func TestFrontendBuild_ProducesDistIndex(t *testing.T) {
+func TestFrontendBuild_UsesViteBuild(t *testing.T) {
 	root := repoRoot(t)
-	cmd := makeCommand(root, "frontend-build")
+	cmd := makeCommand(root, "-n", "frontend-build")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		t.Fatalf("make frontend-build: %v\n%s", err, out)
+		t.Fatalf("make -n frontend-build: %v\n%s", err, out)
 	}
-	if _, err := os.Stat(filepath.Join(root, "ui", "dist", "index.html")); err != nil {
-		t.Fatalf("expected ui/dist/index.html: %v", err)
+	text := string(out)
+	if !strings.Contains(text, "go run ./scripts/generate_bridge_contract -check") {
+		t.Fatalf("expected frontend-build to check generated bridge contract\noutput:\n%s", text)
+	}
+	if !strings.Contains(text, "cd ui && npm run build") {
+		t.Fatalf("expected frontend-build to run Vite build\noutput:\n%s", text)
 	}
 }
 
@@ -657,7 +661,7 @@ func TestMacReleaseSourcesContainUpdaterPaths(t *testing.T) {
 		"build-no-version-bump:",
 		"app-no-version-bump:",
 		"mac-dev-update-artifacts:",
-		"mac-release-app: mac-release-preflight app-no-version-bump mac-stage-sparkle",
+		"mac-release-app: release-check mac-release-preflight app-no-version-bump mac-stage-sparkle",
 		"mac-notarize-release: mac-notarize-preflight mac-release-app",
 		"mac-release-archive: mac-notarize-release",
 		"mac-release-dmg: mac-notarize-release",
@@ -668,7 +672,8 @@ func TestMacReleaseSourcesContainUpdaterPaths(t *testing.T) {
 		"mac-release-archive:",
 		"mac-notarize-release:",
 		"mac-appcast:",
-		"mac-release-artifacts:",
+		".NOTPARALLEL: mac-release-artifacts",
+		"mac-release-artifacts: mac-appcast mac-release-dmg",
 		"mac-publish-github-release:",
 		"MACOS_RELEASE_DIR :=",
 		"MACOS_RELEASE_ENV_SCRIPT :=",

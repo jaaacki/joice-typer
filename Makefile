@@ -5,9 +5,7 @@ WHISPER_DIR := third_party/whisper.cpp
 WHISPER_BUILD := $(WHISPER_DIR)/build
 CURL ?= curl
 VERSION_FILE := VERSION
-VERSION := $(shell tr -d '[:space:]' < $(VERSION_FILE))
-GO_LDFLAGS := -X 'voicetype/internal/core/version.Version=$(VERSION)'
-WINDOWS_GO_LDFLAGS := $(GO_LDFLAGS) -H=windowsgui -extldflags=-Wl,--subsystem,windows
+include scripts/make/version.mk
 
 ifeq ($(HOST_GOOS),darwin)
 CONFIG_ROOT := $(HOME)/Library/Application Support
@@ -30,7 +28,8 @@ FRONTEND_REACT_PKG := $(UI_DIR)/node_modules/react/package.json
 FRONTEND_REACT_DOM_PKG := $(UI_DIR)/node_modules/react-dom/package.json
 FRONTEND_TYPESCRIPT_PKG := $(UI_DIR)/node_modules/typescript/package.json
 
-.PHONY: all setup build clean download-model whisper test frontend-build bridge-contract bridge-contract-check
+.PHONY: all setup build clean download-model whisper test frontend-build bridge-contract bridge-contract-check whisper-ready
+.PHONY: verify verify-buildinfra verify-mac verify-windows
 .PHONY: app dmg release-check build-windows-amd64 build-windows-amd64-no-version-bump build-windows-amd64-release
 .PHONY: build-windows-runtime-amd64 build-windows-runtime-amd64-no-version-bump build-windows-runtime-amd64-release
 .PHONY: package-windows package-windows-no-version-bump package-windows-release package-windows-runtime
@@ -62,7 +61,7 @@ $(FRONTEND_INSTALL_STAMP): $(UI_DIR)/package-lock.json $(UI_DIR)/package.json $(
 	@mkdir -p "$(dir $@)"
 	@touch $@
 
-frontend-build: bridge-contract $(FRONTEND_INSTALL_STAMP)
+frontend-build: bridge-contract-check $(FRONTEND_INSTALL_STAMP)
 	cd $(UI_DIR) && npm run build
 
 download-model:
@@ -73,12 +72,16 @@ download-model:
 		$(CURL) -L --progress-bar -o "$(MODEL_FILE)" "$(MODEL_URL)"; \
 	fi
 
+whisper-ready:
+	@test -f "$(WHISPER_DIR)/include/whisper.h" || (echo "fatal: missing whisper.cpp submodule headers; run 'git submodule update --init --recursive'" && exit 1)
+	@test -d "$(WHISPER_BUILD)" || (echo "fatal: missing whisper.cpp build; run 'make whisper'" && exit 1)
+
 clean:
 	rm -rf build
 	rm -rf $(WHISPER_BUILD)
 	rm -rf $(UI_DIR)/node_modules
 
-test: bridge-contract
+test: bridge-contract-check whisper-ready
 	go test -v -count=1 ./...
 
 # vet-cross is the bridge contract check. Both bridge.Platform itself
@@ -100,7 +103,10 @@ RELEASE_TAG ?= $(shell git describe --tags --exact-match 2>/dev/null || true)
 release-check:
 	@test -n "$(RELEASE_TAG)" || (echo "fatal: no release tag provided or checked out" && exit 1)
 	@test "v$(VERSION)" = "$(RELEASE_TAG)" || (echo "fatal: release tag $(RELEASE_TAG) does not match VERSION $(VERSION)" && exit 1)
+	@test "$$(git rev-parse HEAD)" = "$$(git rev-list -n 1 "$(RELEASE_TAG)")" || (echo "fatal: release tag $(RELEASE_TAG) does not point at HEAD" && exit 1)
+	@test -z "$$(git status --porcelain)" || (echo "fatal: release requires a clean working tree" && exit 1)
 	@echo "Release tag $(RELEASE_TAG) matches VERSION $(VERSION)"
 
 include scripts/make/macos.mk
 include scripts/make/windows.mk
+include scripts/make/verify.mk

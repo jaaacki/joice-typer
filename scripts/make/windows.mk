@@ -22,8 +22,8 @@ WINDOWS_OPTIONAL_RUNTIME_DLLS := libwinpthread-1.dll
 WINDOWS_APP_ICON := assets/windows/joicetyper.ico
 WINDOWS_RUNTIME_STAGE_FILES := joicetyper.exe joicetyper.ico $(WINDOWS_RUNTIME_DLLS) $(WINDOWS_EXTRA_RUNTIME_DLLS)
 WINDOWS_INSTALLER_SCRIPT := packaging/windows/joicetyper.iss
-WINDOWS_INSTALLER_NAME := JoiceTyper-$(VERSION)-setup.exe
-WINDOWS_INSTALLER_PATH := $(WINDOWS_BUILD_DIR)/$(WINDOWS_INSTALLER_NAME)
+WINDOWS_INSTALLER_NAME = JoiceTyper-$(PACKAGE_VERSION)-setup.exe
+WINDOWS_INSTALLER_PATH = $(WINDOWS_BUILD_DIR)/$(WINDOWS_INSTALLER_NAME)
 ISCC ?= $(shell command -v iscc 2>/dev/null || command -v ISCC.exe 2>/dev/null || for d in '/c/Users/Eko04/AppData/Local/Programs/Inno Setup 6/ISCC.exe' '/c/Program Files/Inno Setup 6/ISCC.exe' '/c/Program Files (x86)/Inno Setup 6/ISCC.exe'; do if [ -f "$$d" ]; then printf '%s\n' "$$d"; break; fi; done)
 WINDOWS_HAS_ISCC := $(if $(strip $(ISCC)),1,)
 WINDOWS_PKG_CONFIG ?= $(shell command -v pkg-config 2>/dev/null || command -v pkgconf 2>/dev/null)
@@ -39,11 +39,12 @@ WINDOWS_WEBVIEW2_BOOTSTRAPPER := packaging/windows/MicrosoftEdgeWebview2Setup.ex
 
 build-windows-amd64: build-windows-amd64-no-version-bump
 
-build-windows-amd64-no-version-bump: bridge-contract frontend-build
+build-windows-amd64-no-version-bump: bridge-contract-check frontend-build
 	mkdir -p $(WINDOWS_BUILD_DIR)
 	GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -ldflags "$(WINDOWS_GO_LDFLAGS)" -o $(WINDOWS_BIN_PATH) ./cmd/joicetyper
 
-build-windows-amd64-release: version-bump build-windows-amd64-no-version-bump
+build-windows-amd64-release: BUILD_TYPE := release
+build-windows-amd64-release: release-check build-windows-amd64-no-version-bump
 
 windows-preflight:
 	@echo "checking supported Win11 build environment..."
@@ -162,7 +163,7 @@ windows-runtime-stage-check:
 
 build-windows-runtime-amd64: build-windows-runtime-amd64-no-version-bump
 
-build-windows-runtime-amd64-no-version-bump: bridge-contract frontend-build windows-runtime-prereqs
+build-windows-runtime-amd64-no-version-bump: bridge-contract-check frontend-build windows-runtime-prereqs
 	mkdir -p $(WINDOWS_BUILD_DIR)
 	rm -f "$(WINDOWS_BUILD_DIR)/libportaudio-2.dll"
 	go clean -cache
@@ -185,15 +186,17 @@ build-windows-runtime-amd64-no-version-bump: bridge-contract frontend-build wind
 		test -f "$(WINDOWS_BUILD_DIR)/$$artifact" || (echo "fatal: missing staged Windows runtime artifact $(WINDOWS_BUILD_DIR)/$$artifact" && exit 1); \
 	done
 
-build-windows-runtime-amd64-release: version-bump build-windows-runtime-amd64-no-version-bump
+build-windows-runtime-amd64-release: BUILD_TYPE := release
+build-windows-runtime-amd64-release: release-check build-windows-runtime-amd64-no-version-bump
 
 package-windows: package-windows-no-version-bump
 
 package-windows-no-version-bump: windows-runtime-stage-check
 	@test -f "$(WINDOWS_INSTALLER_SCRIPT)" || (echo "fatal: missing $(WINDOWS_INSTALLER_SCRIPT)" && exit 1)
 	@test -n "$(WINDOWS_HAS_ISCC)" || (echo "fatal: missing Inno Setup compiler (ISCC.exe)" && exit 1)
-	powershell.exe -ExecutionPolicy Bypass -NoProfile -NonInteractive -File "$(CURDIR)/scripts/release/windows_package_installer.ps1" -IsccPath "$(subst /,\,$(ISCC))" -AppVersion "$(VERSION)" -RepoRoot "$(subst /,\,$(CURDIR))" -OutputDir "$(subst /,\,$(CURDIR)/$(WINDOWS_BUILD_DIR))" -ScriptPath "$(subst /,\,$(CURDIR)/$(WINDOWS_INSTALLER_SCRIPT))"
+	powershell.exe -ExecutionPolicy Bypass -NoProfile -NonInteractive -File "$(CURDIR)/scripts/release/windows_package_installer.ps1" -IsccPath "$(subst /,\,$(ISCC))" -AppVersion "$(PACKAGE_VERSION)" -RepoRoot "$(subst /,\,$(CURDIR))" -OutputDir "$(subst /,\,$(CURDIR)/$(WINDOWS_BUILD_DIR))" -ScriptPath "$(subst /,\,$(CURDIR)/$(WINDOWS_INSTALLER_SCRIPT))"
 
-package-windows-release: release-check build-windows-runtime-amd64-release package-windows-no-version-bump
+package-windows-release: BUILD_TYPE := release
+package-windows-release: build-windows-runtime-amd64-release package-windows-no-version-bump
 
 package-windows-runtime: package-windows

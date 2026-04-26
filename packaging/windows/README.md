@@ -29,7 +29,7 @@ Local-dev Windows targets are now deterministic and do not bump `VERSION`:
 - `build-windows-runtime-amd64` builds/stages the native runtime into `build/windows-amd64`
 - `package-windows` packages the already-staged runtime bundle into a setup executable
 
-Release-only version mutation is explicit:
+Release-only targets validate `VERSION` against `RELEASE_TAG` and require a clean tree:
 - `build-windows-runtime-amd64-release`
 - `package-windows-release`
 

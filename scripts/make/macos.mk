@@ -46,13 +46,11 @@ whisper:
 		-DCMAKE_BUILD_TYPE=Release
 	cd $(WHISPER_DIR) && cmake --build build --config Release -j$$(sysctl -n hw.ncpu)
 
-build: version-bump build-no-version-bump
+build: build-no-version-bump
 
-build-no-version-bump: bridge-contract whisper frontend-build
+build-no-version-bump: bridge-contract-check whisper frontend-build
 	mkdir -p $(BUILD_DIR)
 	CGO_ENABLED=1 go build -ldflags "$(GO_LDFLAGS)" -o $(BIN_PATH) ./cmd/joicetyper
-
-app: build
 
 app-no-version-bump: build-no-version-bump
 	rm -rf $(APP_BUNDLE)
@@ -91,7 +89,7 @@ mac-stage-sparkle:
 
 mac-dev-update-artifacts: app-no-version-bump
 	mkdir -p "$(MACOS_DRYRUN_UPDATE_DIR)"
-	@sh "$(MACOS_DEV_ARCHIVE_SCRIPT)" "$(APP_BUNDLE)" "$(MACOS_DRYRUN_ARCHIVE)" "$(VERSION)" "$(MACOS_DRYRUN_METADATA)"
+	@sh "$(MACOS_DEV_ARCHIVE_SCRIPT)" "$(APP_BUNDLE)" "$(MACOS_DRYRUN_ARCHIVE)" "$(PACKAGE_VERSION)" "$(MACOS_DRYRUN_METADATA)"
 	@python3 "$(MACOS_APPCAST_SCRIPT)" "$(MACOS_APPCAST_TEMPLATE)" "$(MACOS_DRYRUN_APPCAST)" "$(APP_NAME)" "https://example.invalid/joicetyper/appcast.xml" "https://example.invalid/joicetyper/$(notdir $(MACOS_DRYRUN_ARCHIVE))" "DEV_ONLY_UNSIGNED" "$(MACOS_DRYRUN_METADATA)"
 
 mac-release-preflight:
@@ -104,7 +102,8 @@ mac-publish-preflight: release-check
 	@. "$(MACOS_RELEASE_ENV_FILE)"; \
 		RELEASE_TAG="$(RELEASE_TAG)" sh "$(MACOS_PREFLIGHT_SCRIPT)" publish
 
-mac-release-app: mac-release-preflight app-no-version-bump mac-stage-sparkle
+mac-release-app: BUILD_TYPE := release
+mac-release-app: release-check mac-release-preflight app-no-version-bump mac-stage-sparkle
 	@sh "$(MACOS_RELEASE_ENV_SCRIPT)" archive
 	@sh "$(MACOS_RELEASE_ENV_SCRIPT)" appcast
 	mkdir -p "$(MACOS_RELEASE_DIR)"
@@ -147,6 +146,7 @@ mac-release-dmg: mac-notarize-release
 		sh "$(MACOS_NOTARIZE_SCRIPT)" "$(MACOS_RELEASE_DMG)" "$${MACOS_NOTARYTOOL_PROFILE}"
 	@echo "Built $(MACOS_RELEASE_DMG)"
 
+.NOTPARALLEL: mac-release-artifacts
 mac-release-artifacts: mac-appcast mac-release-dmg
 	mkdir -p "$(MACOS_RELEASE_DIR)"
 

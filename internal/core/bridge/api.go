@@ -103,7 +103,7 @@ func (s *Service) AppState(ctx context.Context) (AppStateSnapshot, error) {
 	}
 	return AppStateSnapshot{
 		State:   state.String(),
-		Version: versionpkg.Version,
+		Version: versionpkg.DisplayVersion(),
 	}, nil
 }
 

@@ -116,6 +116,16 @@ func TestResolveVersionTemplateSupportsUpdaterPlaceholders(t *testing.T) {
 	}
 }
 
+func TestDisplayVersionUsesBuildVersion(t *testing.T) {
+	old := Version
+	defer func() { Version = old }()
+
+	Version = "1.2.3-dev+abcdef0.dirty"
+	if got := DisplayVersion(); got != "1.2.3-dev+abcdef0.dirty" {
+		t.Fatalf("unexpected display version: %q", got)
+	}
+}
+
 func TestFormatVersion(t *testing.T) {
 	if got := FormatVersion("1.0.0"); got != "JoiceTyper 1.0.0" {
 		t.Fatalf("unexpected formatted version: %q", got)

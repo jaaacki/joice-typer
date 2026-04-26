@@ -49,8 +49,25 @@ func TestMakeBuildTargetsUseExpectedVersionPolicy(t *testing.T) {
 	if err != nil {
 		t.Fatalf("make -n build: %v\n%s", err, macOut)
 	}
-	if !strings.Contains(string(macOut), `printf '%s\n' "$next" > "VERSION"`) {
-		t.Fatalf("expected macOS build target to bump VERSION before building\noutput:\n%s", macOut)
+	if strings.Contains(string(macOut), `printf '%s\n' "$next" > "VERSION"`) {
+		t.Fatalf("expected macOS build target not to bump VERSION during local dev builds\noutput:\n%s", macOut)
+	}
+	if !strings.Contains(string(macOut), "-dev+") {
+		t.Fatalf("expected macOS build target to pass dev version metadata\noutput:\n%s", macOut)
+	}
+
+	macReleaseOut, err := makeCommand(root, "-n", "mac-release-app").CombinedOutput()
+	if err != nil {
+		t.Fatalf("make -n mac-release-app: %v\n%s", err, macReleaseOut)
+	}
+	if !strings.Contains(string(macReleaseOut), "does not point at HEAD") {
+		t.Fatalf("expected macOS release target to verify release tag points at HEAD\noutput:\n%s", macReleaseOut)
+	}
+	if !strings.Contains(string(macReleaseOut), "release requires a clean working tree") {
+		t.Fatalf("expected macOS release target to require a clean tree\noutput:\n%s", macReleaseOut)
+	}
+	if strings.Contains(string(macReleaseOut), "-dev+") {
+		t.Fatalf("expected macOS release target to use clean release version metadata\noutput:\n%s", macReleaseOut)
 	}
 
 	winOut, err := makeCommand(root, "-n", "build-windows-runtime-amd64").CombinedOutput()
@@ -60,13 +77,41 @@ func TestMakeBuildTargetsUseExpectedVersionPolicy(t *testing.T) {
 	if strings.Contains(string(winOut), `printf '%s\n' "$next" > "VERSION"`) {
 		t.Fatalf("expected Windows runtime build target not to bump VERSION during local dev builds\noutput:\n%s", winOut)
 	}
+	if !strings.Contains(string(winOut), "-dev+") {
+		t.Fatalf("expected Windows runtime build target to pass dev version metadata\noutput:\n%s", winOut)
+	}
 
 	winReleaseOut, err := makeCommand(root, "-n", "build-windows-runtime-amd64-release").CombinedOutput()
 	if err != nil {
 		t.Fatalf("make -n build-windows-runtime-amd64-release: %v\n%s", err, winReleaseOut)
 	}
-	if !strings.Contains(string(winReleaseOut), `printf '%s\n' "$next" > "VERSION"`) {
-		t.Fatalf("expected Windows runtime release target to bump VERSION\noutput:\n%s", winReleaseOut)
+	if strings.Contains(string(winReleaseOut), `printf '%s\n' "$next" > "VERSION"`) {
+		t.Fatalf("expected Windows runtime release target not to mutate VERSION\noutput:\n%s", winReleaseOut)
+	}
+	if !strings.Contains(string(winReleaseOut), "does not point at HEAD") {
+		t.Fatalf("expected Windows runtime release target to verify release tag points at HEAD\noutput:\n%s", winReleaseOut)
+	}
+	if !strings.Contains(string(winReleaseOut), "release requires a clean working tree") {
+		t.Fatalf("expected Windows runtime release target to require a clean tree\noutput:\n%s", winReleaseOut)
+	}
+	if strings.Contains(string(winReleaseOut), "-dev+") {
+		t.Fatalf("expected Windows runtime release target to use clean release version metadata\noutput:\n%s", winReleaseOut)
+	}
+	winShellReleaseOut, err := makeCommand(root, "-n", "build-windows-amd64-release").CombinedOutput()
+	if err != nil {
+		t.Fatalf("make -n build-windows-amd64-release: %v\n%s", err, winShellReleaseOut)
+	}
+	if strings.Contains(string(winShellReleaseOut), `printf '%s\n' "$next" > "VERSION"`) {
+		t.Fatalf("expected Windows shell release target not to mutate VERSION\noutput:\n%s", winShellReleaseOut)
+	}
+	if !strings.Contains(string(winShellReleaseOut), "does not point at HEAD") {
+		t.Fatalf("expected Windows shell release target to verify release tag points at HEAD\noutput:\n%s", winShellReleaseOut)
+	}
+	if !strings.Contains(string(winShellReleaseOut), "release requires a clean working tree") {
+		t.Fatalf("expected Windows shell release target to require a clean tree\noutput:\n%s", winShellReleaseOut)
+	}
+	if strings.Contains(string(winShellReleaseOut), "-dev+") {
+		t.Fatalf("expected Windows shell release target to use clean release version metadata\noutput:\n%s", winShellReleaseOut)
 	}
 }
 
@@ -621,6 +666,9 @@ func TestMakePackageWindowsUsesInstallerScript(t *testing.T) {
 	if !strings.Contains(text, "-AppVersion") {
 		t.Fatalf("expected windows packaging to pass version into installer script\noutput:\n%s", text)
 	}
+	if !strings.Contains(text, "-dev-") {
+		t.Fatalf("expected local windows packaging to pass dev package metadata\noutput:\n%s", text)
+	}
 }
 
 func TestMakeWindowsPreflightAdvertisesSupportedToolchain(t *testing.T) {
@@ -660,11 +708,14 @@ func TestMakeWindowsReleasePackagingUsesReleasePolicy(t *testing.T) {
 	}
 
 	text := string(out)
-	if !strings.Contains(text, `printf '%s\n' "$next" > "VERSION"`) {
-		t.Fatalf("expected windows release packaging to bump VERSION\noutput:\n%s", text)
+	if strings.Contains(text, `printf '%s\n' "$next" > "VERSION"`) {
+		t.Fatalf("expected windows release packaging not to mutate VERSION\noutput:\n%s", text)
 	}
-	if !strings.Contains(text, "Release tag") && !strings.Contains(text, "release tag") {
-		t.Fatalf("expected windows release packaging to run release-check\noutput:\n%s", text)
+	if !strings.Contains(text, "does not point at HEAD") {
+		t.Fatalf("expected windows release packaging to verify release tag points at HEAD\noutput:\n%s", text)
+	}
+	if !strings.Contains(text, "release requires a clean working tree") {
+		t.Fatalf("expected windows release packaging to require a clean tree\noutput:\n%s", text)
 	}
 	if !strings.Contains(text, "packaging/windows/joicetyper.iss") {
 		t.Fatalf("expected windows release packaging to use installer script\noutput:\n%s", text)
@@ -673,7 +724,13 @@ func TestMakeWindowsReleasePackagingUsesReleasePolicy(t *testing.T) {
 
 func TestMakeBuildSkipsFrontendInstallWhenStampPresent(t *testing.T) {
 	root := repoRoot(t)
-	stampPath := filepath.Join(root, "ui", "node_modules", ".package-lock.stamp")
+	nodeModulesPath := filepath.Join(root, "ui", "node_modules")
+	if _, err := os.Stat(nodeModulesPath); err == nil {
+		t.Skip("skipping because ui/node_modules already exists")
+	} else if !os.IsNotExist(err) {
+		t.Fatalf("stat node_modules: %v", err)
+	}
+	stampPath := filepath.Join(nodeModulesPath, ".package-lock.stamp")
 	lockPath := filepath.Join(root, "ui", "package-lock.json")
 	requiredPaths := []string{
 		filepath.Join(root, "ui", "node_modules", ".bin", "vite"),
@@ -720,7 +777,13 @@ func TestMakeBuildSkipsFrontendInstallWhenStampPresent(t *testing.T) {
 
 func TestMakeBuildReinstallsFrontendWhenViteBinaryMissing(t *testing.T) {
 	root := repoRoot(t)
-	stampPath := filepath.Join(root, "ui", "node_modules", ".package-lock.stamp")
+	nodeModulesPath := filepath.Join(root, "ui", "node_modules")
+	if _, err := os.Stat(nodeModulesPath); err == nil {
+		t.Skip("skipping because ui/node_modules already exists")
+	} else if !os.IsNotExist(err) {
+		t.Fatalf("stat node_modules: %v", err)
+	}
+	stampPath := filepath.Join(nodeModulesPath, ".package-lock.stamp")
 	lockPath := filepath.Join(root, "ui", "package-lock.json")
 	viteBinPath := filepath.Join(root, "ui", "node_modules", ".bin", "vite")
 

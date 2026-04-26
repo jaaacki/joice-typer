@@ -24,9 +24,9 @@ import (
 	"time"
 	"unsafe"
 
+	audiopkg "voicetype/internal/core/audio"
 	bridgepkg "voicetype/internal/core/bridge"
 	configpkg "voicetype/internal/core/config"
-	audiopkg "voicetype/internal/core/audio"
 	loggingpkg "voicetype/internal/core/logging"
 	transcriptionpkg "voicetype/internal/core/transcription"
 	versionpkg "voicetype/internal/core/version"
@@ -706,7 +706,7 @@ func currentLastDispatchedEvent() string {
 func publishRuntimeStateChanged(state AppState) {
 	dispatchWebSettingsEvent(bridgepkg.NewEvent(bridgepkg.RuntimeStateChangedEvent, bridgepkg.AppStateSnapshot{
 		State:   state.String(),
-		Version: versionpkg.Version,
+		Version: versionpkg.DisplayVersion(),
 	}))
 }
 

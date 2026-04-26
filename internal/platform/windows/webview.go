@@ -271,7 +271,7 @@ func dispatchWebSettingsEvent(event bridgepkg.EventEnvelope) {
 func publishRuntimeStateChanged(state AppState) {
 	dispatchWebSettingsEvent(bridgepkg.NewEvent(bridgepkg.RuntimeStateChangedEvent, bridgepkg.AppStateSnapshot{
 		State:   state.String(),
-		Version: versionpkg.Version,
+		Version: versionpkg.DisplayVersion(),
 	}))
 }
 
