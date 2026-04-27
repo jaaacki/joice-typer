@@ -11,7 +11,7 @@ export default function VocabularyPane({ draft, onVocabularyChange }: Vocabulary
     <div className="pane-stack">
       <Panel eyebrow="Domain terms" title="Custom vocabulary">
         <p className="settings-lead">
-          Bias the transcriber toward names, jargon, and commands you use often. Keep one term per line, or use commas if that is already how
+          Bias transcription toward names, jargon, and commands you use often. Vocabulary is not applied in Whisper translation mode. Keep one term per line, or use commas if that is already how
           your config is managed.
         </p>
         <textarea

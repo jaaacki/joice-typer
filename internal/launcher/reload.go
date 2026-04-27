@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	apppkg "voicetype/internal/core/runtime"
 	configpkg "voicetype/internal/core/config"
+	apppkg "voicetype/internal/core/runtime"
 )
 
 type runtimeConfigState struct {
@@ -70,9 +70,7 @@ func applyReloadedConfig(runtime *runtimeConfigState, app *apppkg.App, newCfg co
 			deps.updateStatusBar(apppkg.StateReady)
 			return err
 		}
-		if vocabularyChanged {
-			stagedTranscriber.SetVocabulary(newCfg.Vocabulary)
-		}
+		stagedTranscriber.SetVocabulary(newCfg.Vocabulary)
 	}
 
 	if hotkeyChanged {

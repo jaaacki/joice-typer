@@ -17,13 +17,13 @@ import (
 	"syscall"
 	"time"
 
-	apppkg "voicetype/internal/core/runtime"
 	audiopkg "voicetype/internal/core/audio"
 	config "voicetype/internal/core/config"
 	loggingpkg "voicetype/internal/core/logging"
-	platformpkg "voicetype/internal/platform"
+	apppkg "voicetype/internal/core/runtime"
 	transcriptionpkg "voicetype/internal/core/transcription"
 	version "voicetype/internal/core/version"
+	platformpkg "voicetype/internal/platform"
 )
 
 func Main() {
@@ -479,6 +479,8 @@ func runTerminalMode(configPath string) {
 			"component", "main", "operation", "runTerminalMode", "error", err)
 		os.Exit(1)
 	}
+
+	transcriber.SetVocabulary(cfg.Vocabulary)
 
 	// --- Init recorder ---
 	recorder := audiopkg.NewRecorder(cfg.SampleRate, cfg.InputDevice, logger)

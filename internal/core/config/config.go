@@ -45,6 +45,8 @@ type legacyConfig struct {
 	LegacyTranslate *bool `yaml:"translate,omitempty"`
 }
 
+const maxVocabularyBytes = 16 * 1024
+
 var validModelSizes = map[string]bool{
 	"tiny": true, "base": true, "small": true, "medium": true,
 	"tiny.en": true, "base.en": true, "small.en": true, "medium.en": true,
@@ -327,6 +329,21 @@ func SaveConfig(path string, cfg Config) error {
 	return nil
 }
 
+func validateVocabulary(vocabulary string) error {
+	if len(vocabulary) > maxVocabularyBytes {
+		return fmt.Errorf("vocabulary exceeds %d bytes", maxVocabularyBytes)
+	}
+	for _, r := range vocabulary {
+		if r < 0x20 && r != '\n' && r != '\r' && r != '\t' {
+			return fmt.Errorf("vocabulary contains unsupported control character U+%04X", r)
+		}
+		if r == 0x7f {
+			return fmt.Errorf("vocabulary contains unsupported control character U+007F")
+		}
+	}
+	return nil
+}
+
 func (c Config) Validate() error {
 	if len(c.TriggerKey) == 0 {
 		return fmt.Errorf("config.Validate: trigger_key must have at least one key")
@@ -360,6 +377,9 @@ func (c Config) Validate() error {
 				return fmt.Errorf("config.Validate: translation mode requires a multilingual model, but %q is English-only", c.ModelSize)
 			}
 		}
+	}
+	if err := validateVocabulary(c.Vocabulary); err != nil {
+		return fmt.Errorf("config.Validate: %w", err)
 	}
 	return nil
 }

@@ -51,6 +51,10 @@ func TestLoadConfig_CreatesDefault(t *testing.T) {
 		t.Error("expected sound_feedback true")
 	}
 
+	if cfg.Vocabulary != "" {
+		t.Errorf("expected default vocabulary empty, got %q", cfg.Vocabulary)
+	}
+
 	// Verify file was created
 	if _, err := os.Stat(path); os.IsNotExist(err) {
 		t.Fatalf("config file not created at %s", path)
@@ -248,6 +252,50 @@ func TestValidate_ValidPunctuationModes(t *testing.T) {
 		if err := cfg.Validate(); err != nil {
 			t.Errorf("expected punctuation_mode %q to be valid, got error: %v", mode, err)
 		}
+	}
+}
+
+func TestValidate_ValidVocabulary(t *testing.T) {
+	cfg := Config{
+		TriggerKey: []string{"fn", "shift"},
+		ModelSize:  "small",
+		SampleRate: 16000,
+		Vocabulary: "JoiceTyper\nPostgreSQL\tTanStack",
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("expected valid vocabulary, got error: %v", err)
+	}
+}
+
+func TestValidate_VocabularyRejectsControlCharacters(t *testing.T) {
+	cfg := Config{
+		TriggerKey: []string{"fn", "shift"},
+		ModelSize:  "small",
+		SampleRate: 16000,
+		Vocabulary: "good\x00bad",
+	}
+	err := cfg.Validate()
+	if err == nil {
+		t.Fatal("expected error for vocabulary control character")
+	}
+	if !strings.Contains(err.Error(), "vocabulary") {
+		t.Fatalf("expected vocabulary error, got %v", err)
+	}
+}
+
+func TestValidate_VocabularyRejectsOversize(t *testing.T) {
+	cfg := Config{
+		TriggerKey: []string{"fn", "shift"},
+		ModelSize:  "small",
+		SampleRate: 16000,
+		Vocabulary: strings.Repeat("a", maxVocabularyBytes+1),
+	}
+	err := cfg.Validate()
+	if err == nil {
+		t.Fatal("expected error for oversized vocabulary")
+	}
+	if !strings.Contains(err.Error(), "vocabulary") {
+		t.Fatalf("expected vocabulary error, got %v", err)
 	}
 }
 

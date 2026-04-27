@@ -127,6 +127,20 @@ func TestApplyPunctuationMode_ConservativePreservesOuterWhitespace(t *testing.T)
 	}
 }
 
+func TestSetVocabularyUpdatesAndClearsPromptText(t *testing.T) {
+	transcriber := &whisperTranscriber{}
+
+	transcriber.SetVocabulary("JoiceTyper\nPostgreSQL")
+	if transcriber.vocab != "JoiceTyper\nPostgreSQL" {
+		t.Fatalf("expected vocabulary to update, got %q", transcriber.vocab)
+	}
+
+	transcriber.SetVocabulary("")
+	if transcriber.vocab != "" {
+		t.Fatalf("expected vocabulary to clear, got %q", transcriber.vocab)
+	}
+}
+
 func TestValidateCachedModel_DoesNotTrustSidecarWithoutHashing(t *testing.T) {
 	dir := t.TempDir()
 	modelPath := filepath.Join(dir, "ggml-test.bin")

@@ -143,6 +143,58 @@ func TestApplyReloadedConfig_RollsBackOnTranscriberFailure(t *testing.T) {
 	}
 }
 
+func TestApplyReloadedConfig_ReappliesUnchangedVocabularyToNewTranscriber(t *testing.T) {
+	logger := testReloadLogger()
+	oldHotkey := &fakeReloadHotkey{id: "old-hotkey"}
+	oldRecorder := &fakeReloadRecorder{id: "old-recorder"}
+	oldTranscriber := &fakeReloadTranscriber{id: "old-transcriber"}
+	app := apppkg.NewApp(oldRecorder, oldTranscriber, noopReloadPaster{}, nil, logger)
+
+	runtime := &runtimeConfigState{
+		cfg: configpkg.Config{
+			TriggerKey:      []string{"fn", "shift"},
+			ModelSize:       "small",
+			Language:        "en",
+			SampleRate:      16000,
+			InputDevice:     "mic-a",
+			DecodeMode:      "beam",
+			PunctuationMode: "conservative",
+			Vocabulary:      "joice, typer",
+		},
+		hotkey:      oldHotkey,
+		recorder:    oldRecorder,
+		transcriber: oldTranscriber,
+	}
+
+	newTranscriber := &fakeReloadTranscriber{id: "new-transcriber"}
+	newCfg := runtime.cfg
+	newCfg.ModelSize = "medium"
+
+	if err := applyReloadedConfig(runtime, app, newCfg, logger, runtimeReloadDeps{
+		newHotkey:        func(keys []string, logger *slog.Logger) apppkg.HotkeyListener { return oldHotkey },
+		newRecorder:      func(sampleRate int, device string, logger *slog.Logger) apppkg.Recorder { return oldRecorder },
+		defaultModelPath: func(modelSize string) (string, error) { return "/tmp/model.bin", nil },
+		newTranscriber: func(ctx context.Context, modelPath, modelSize, language string, sampleRate int, decodeMode, punctuationMode, outputMode string, logger *slog.Logger) (apppkg.Transcriber, error) {
+			return newTranscriber, nil
+		},
+		setActiveHotkey:     func(apppkg.HotkeyListener) {},
+		setSettingsRecorder: func(apppkg.Recorder) {},
+		updateStatusBar:     func(apppkg.AppState) {},
+		postNotification:    func(string, string) {},
+		formatHotkeyDisplay: func(keys []string) string { return "fn + shift" },
+		setStatusBarText:    func(string) {},
+	}); err != nil {
+		t.Fatalf("applyReloadedConfig: %v", err)
+	}
+
+	if runtime.transcriber != newTranscriber {
+		t.Fatal("expected transcriber to swap to new instance")
+	}
+	if len(newTranscriber.vocabulary) != 1 || newTranscriber.vocabulary[0] != "joice, typer" {
+		t.Fatalf("expected unchanged vocabulary applied to rebuilt transcriber, got %v", newTranscriber.vocabulary)
+	}
+}
+
 func TestApplyReloadedConfig_AppliesAtomicallyOnSuccess(t *testing.T) {
 	logger := testReloadLogger()
 	oldHotkey := &fakeReloadHotkey{id: "old-hotkey"}
