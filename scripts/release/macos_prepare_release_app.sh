@@ -1,8 +1,8 @@
 #!/bin/sh
 set -eu
 
-if [ "$#" -ne 9 ]; then
-  echo "usage: $0 <source-app> <release-app> <sparkle-stage-dir> <version> <feed-url> <public-ed-key> <codesign-identity> <plist-template> <plist-render-script>"
+if [ "$#" -ne 10 ]; then
+  echo "usage: $0 <source-app> <release-app> <sparkle-stage-dir> <version> <feed-url> <public-ed-key> <codesign-identity> <plist-template> <plist-render-script> <entitlements-file>"
   exit 2
 fi
 
@@ -15,6 +15,12 @@ public_ed_key="$6"
 codesign_identity="$7"
 plist_template="$8"
 plist_render_script="$9"
+entitlements_file="${10}"
+
+if [ ! -f "$entitlements_file" ]; then
+  echo "fatal: missing entitlements file $entitlements_file"
+  exit 1
+fi
 
 if [ ! -d "$source_app" ]; then
   echo "fatal: missing source app bundle $source_app"
@@ -50,7 +56,7 @@ python3 "$plist_render_script" "$plist_template" "$release_app/Contents/Info.pli
 if [ -d "$release_app/Contents/Frameworks/Sparkle.framework" ]; then
   # Sparkle carries nested helpers inside the framework bundle. Sign the framework
   # recursively before signing the containing app bundle.
-  codesign --force --sign "$codesign_identity" --timestamp --options runtime --deep "$release_app/Contents/Frameworks/Sparkle.framework"
+  codesign --force --sign "$codesign_identity" --timestamp --options runtime --entitlements "$entitlements_file" --deep "$release_app/Contents/Frameworks/Sparkle.framework"
 fi
 
-codesign --force --sign "$codesign_identity" --timestamp --options runtime --deep "$release_app"
+codesign --force --sign "$codesign_identity" --timestamp --options runtime --entitlements "$entitlements_file" --deep "$release_app"

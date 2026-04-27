@@ -1,14 +1,15 @@
 #!/bin/sh
 set -eu
 
-if [ "$#" -ne 3 ]; then
-  echo "usage: $0 <archive-path> <dmg-path> <appcast-path>"
+if [ "$#" -ne 4 ]; then
+  echo "usage: $0 <archive-path> <dmg-path> <appcast-path> <checksums-path>"
   exit 2
 fi
 
 archive_path="$1"
 dmg_path="$2"
 appcast_path="$3"
+checksums_path="$4"
 
 tag="${RELEASE_TAG:-}"
 if [ -z "$tag" ]; then
@@ -21,7 +22,7 @@ if ! command -v gh >/dev/null 2>&1; then
   exit 1
 fi
 
-for path in "$archive_path" "$dmg_path" "$appcast_path"; do
+for path in "$archive_path" "$dmg_path" "$appcast_path" "$checksums_path"; do
   if [ ! -f "$path" ]; then
     echo "fatal: missing release artifact $path"
     exit 1
@@ -49,4 +50,4 @@ if [ -z "$repo" ]; then
 fi
 
 gh release view "$tag" --repo "$repo" >/dev/null
-gh release upload "$tag" "$archive_path" "$dmg_path" "$appcast_path" --clobber --repo "$repo"
+gh release upload "$tag" "$archive_path" "$dmg_path" "$appcast_path" "$checksums_path" --clobber --repo "$repo"

@@ -765,8 +765,6 @@ func TestMacReleaseSourcesContainUpdaterPaths(t *testing.T) {
 	for _, required := range []string{
 		`name: macOS Release`,
 		`workflow_dispatch:`,
-		`push:`,
-		`tags:`,
 		`uses: actions/checkout@v4`,
 		`uses: actions/setup-go@v5`,
 		`uses: actions/setup-node@v4`,
@@ -794,13 +792,18 @@ func TestMacReleaseSourcesContainUpdaterPaths(t *testing.T) {
 		}
 	}
 
+	workflowSource := string(workflowData)
+	if strings.Contains(workflowSource, "push:\n") || strings.Contains(workflowSource, "tags:") {
+		t.Fatalf("expected macos-release workflow to stay manual-only before Apple release credentials are configured")
+	}
+
 	releaseEnvData, err := os.ReadFile(filepath.Join(root, "packaging", "macos", "release.env.example"))
 	if err != nil {
 		t.Fatalf("read packaging/macos/release.env.example: %v", err)
 	}
 	for _, required := range []string{
-		`MACOS_APPCAST_URL="https://github.com/jaaacki/joice-typer/releases/latest/download/appcast.xml"`,
-		`MACOS_RELEASE_DOWNLOAD_BASE_URL="https://github.com/jaaacki/joice-typer/releases/download/v1.1.3"`,
+		`MACOS_APPCAST_URL="https://example.com/joicetyper/appcast.xml"`,
+		`MACOS_RELEASE_DOWNLOAD_BASE_URL="https://example.com/joicetyper/releases/vX.Y.Z"`,
 		`MACOS_SPARKLE_DOWNLOAD_SHA256=`,
 	} {
 		if !strings.Contains(string(releaseEnvData), required) {

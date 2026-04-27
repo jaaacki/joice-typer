@@ -7,9 +7,6 @@ on:
         description: Git tag to release, for example v1.2.3
         required: true
         type: string
-  push:
-    tags:
-      - "v*"
 
 permissions:
   contents: write
@@ -121,11 +118,15 @@ jobs:
       - name: Build notarized release artifacts
         run: make mac-release-artifacts RELEASE_TAG="$RELEASE_TAG"
 
-      - name: Publish release artifacts
-        run: make mac-publish-github-release RELEASE_TAG="$RELEASE_TAG"
-
       - name: Upload release artifacts for inspection
         uses: actions/upload-artifact@v4
         with:
           name: macos-release-${{ env.RELEASE_TAG }}
-          path: build/macos-release/
+          path: |
+            build/macos-release/JoiceTyper-*-macos.zip
+            build/macos-release/JoiceTyper-*.dmg
+            build/macos-release/appcast.xml
+            build/macos-release/SHA256SUMS
+
+      - name: Publish release artifacts
+        run: make mac-publish-github-release RELEASE_TAG="$RELEASE_TAG"

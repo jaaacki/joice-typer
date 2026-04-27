@@ -5,13 +5,27 @@ This directory contains macOS packaging templates and release/update metadata.
 Current roles:
 - `sparkle-appcast.xml.tmpl`: template for Sparkle appcast generation
 - `release.env.example`: example release-only configuration inputs
+- `../../assets/macos/JoiceTyper.entitlements`: hardened-runtime entitlements used for Developer ID release signing
 
 Normal development remains credential-free:
 - `make app`
 - `make dmg`
 - `make mac-dev-update-artifacts`
+- `make mac-local-release-candidate`
 
-Release/update targets are separate and fail closed when required inputs are missing:
+`mac-local-release-candidate` builds a release-versioned app with local ad-hoc hardened-runtime signing, then produces and validates accountless release-candidate artifacts under `build/macos-local-rc/`:
+- `JoiceTyper-<version>-macos.zip`
+- `JoiceTyper-<version>.dmg`
+- `JoiceTyper-<version>-macos.env`
+- `SHA256SUMS`
+
+The local RC validator checks bundle structure, bundled PortAudio linkage, arm64 architecture, app metadata, icon presence, hardened-runtime ad-hoc code-signature validity, empty release entitlements, ZIP contents, DMG readability, checksum consistency, metadata consistency, and package extraction/install-copy smoke. Set `MACOS_LOCAL_RC_SMOKE_LAUNCH=1 make mac-local-release-candidate` to also launch the app from a temporary DMG install copy and verify the process starts.
+
+Accountless artifacts are intentionally not Developer ID signed or notarized. They may be valid on disk but still be rejected by Gatekeeper after download/quarantine; `spctl --assess` rejection is expected until the Developer ID notarization path is run with an Apple Developer account.
+
+The official release signing path uses `assets/macos/JoiceTyper.entitlements` with hardened runtime when Developer ID credentials are available.
+
+Release/update targets are separate and fail closed when required inputs are missing. The official GitHub Actions release workflow is manual-only until Apple Developer credentials and release secrets are configured:
 - `make mac-release-preflight`
 - `make mac-notarize-preflight`
 - `make mac-publish-preflight RELEASE_TAG=vX.Y.Z`
@@ -28,7 +42,7 @@ Local secret/config inputs are intentionally untracked:
 - `packaging/macos/*.private`
 
 GitHub Releases remains the first hosting target:
-- `mac-release-artifacts` produces the archive, dmg, and appcast under `build/macos-release/`
+- `mac-release-artifacts` produces the archive, dmg, appcast, and checksum manifest under `build/macos-release/`
 - `mac-publish-github-release` uploads those artifacts to the tagged GitHub release using `gh`
 - use a stable `MACOS_APPCAST_URL` for the embedded feed, for example `.../releases/latest/download/appcast.xml`
 - use `MACOS_RELEASE_DOWNLOAD_BASE_URL` for the versioned archive URLs referenced by each generated appcast item
@@ -45,7 +59,8 @@ Local dry-run updater validation:
 - it deliberately uses placeholder URLs and `EDDSA_SIGNATURE=UNSIGNED`
 
 GitHub Actions release automation now lives at:
-- `.github/workflows/macos-release.yml`
+- `.github/workflows/macos-accountless-rc.yml` for credential-free PR/workflow-dispatch validation of local RC artifacts
+- `.github/workflows/macos-release.yml` for manual Developer ID signing, notarization, stapler validation, Gatekeeper assessment, Sparkle appcast generation, artifact validation, and GitHub Release publishing
 
 Expected GitHub Actions secrets:
 - `MACOS_DEVELOPER_ID_P12_BASE64`
@@ -63,5 +78,14 @@ The workflow:
 - writes `packaging/macos/release.env.local`
 - runs the release preflight checks
 - notarizes and staples the release app before the Sparkle archive is generated
+- validates stapling and Gatekeeper assessment for notarized app and DMG artifacts
 - signs, notarizes, and staples the release DMG before publishing
-- publishes the archive, dmg, and appcast to GitHub Releases
+- validates app, archive, DMG, appcast, metadata, and checksum consistency before publishing
+- publishes the archive, dmg, appcast, and checksum manifest to GitHub Releases
+
+Manual accountless install smoke checklist:
+- run `make mac-local-release-candidate`
+- open the generated DMG and copy `JoiceTyper.app` to a temporary folder or `/Applications`
+- launch the copied app and confirm the menu bar item appears
+- verify onboarding can request Microphone, Accessibility, and Input Monitoring permissions; TCC grants made to an ad-hoc local build may not carry over to the future Developer ID identity
+- expect Gatekeeper rejection/warnings for downloaded accountless artifacts until notarization is available

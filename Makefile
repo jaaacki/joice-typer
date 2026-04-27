@@ -30,7 +30,7 @@ FRONTEND_TYPESCRIPT_PKG := $(UI_DIR)/node_modules/typescript/package.json
 
 .PHONY: all setup build clean download-model whisper test frontend-build bridge-contract bridge-contract-check whisper-ready
 .PHONY: verify verify-buildinfra verify-mac verify-windows
-.PHONY: app dmg release-check build-windows-amd64 build-windows-amd64-no-version-bump build-windows-amd64-release
+.PHONY: app dmg mac-local-release-candidate release-check build-windows-amd64 build-windows-amd64-no-version-bump build-windows-amd64-release
 .PHONY: build-windows-runtime-amd64 build-windows-runtime-amd64-no-version-bump build-windows-runtime-amd64-release
 .PHONY: package-windows package-windows-no-version-bump package-windows-release package-windows-runtime
 .PHONY: package-windows-msix package-windows-msix-no-version-bump package-windows-msix-test-sign package-windows-msix-release

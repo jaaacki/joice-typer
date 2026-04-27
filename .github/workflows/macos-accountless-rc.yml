@@ -1,0 +1,57 @@
+name: macOS Accountless Release Candidate
+
+on:
+  pull_request:
+    paths:
+      - "Makefile"
+      - "VERSION"
+      - "go.mod"
+      - "go.sum"
+      - "cmd/**"
+      - "internal/**"
+      - "*.go"
+      - "assets/**"
+      - "packaging/macos/**"
+      - "scripts/**"
+      - "ui/**"
+      - ".github/workflows/macos-accountless-rc.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  macos-accountless-rc:
+    runs-on: macos-14
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+
+      - name: Install macOS build dependencies
+        run: brew install portaudio cmake
+
+      - name: Verify build infrastructure
+        run: make verify-mac
+
+      - name: Build accountless release candidate
+        run: make mac-local-release-candidate
+
+      - name: Upload accountless artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-accountless-rc
+          path: build/macos-local-rc/

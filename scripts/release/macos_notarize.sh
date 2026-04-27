@@ -45,4 +45,10 @@ xcrun notarytool submit "$submit_path" --keychain-profile "$profile" --wait
 
 if [ -n "$staple_path" ]; then
   xcrun stapler staple "$staple_path"
+  xcrun stapler validate "$staple_path"
+  if [ -d "$staple_path" ]; then
+    spctl --assess --type execute --verbose=4 "$staple_path"
+  else
+    spctl --assess --type open --verbose=4 "$staple_path"
+  fi
 fi

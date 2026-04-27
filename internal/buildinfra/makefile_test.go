@@ -228,6 +228,123 @@ func TestMakefileHasMacReleaseTargets(t *testing.T) {
 	}
 }
 
+func TestMacLocalReleaseCandidateTargetIsCredentialFree(t *testing.T) {
+	root := repoRoot(t)
+
+	cmd := makeCommand(root, "-n", "mac-local-release-candidate")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("make -n mac-local-release-candidate: %v\n%s", err, out)
+	}
+
+	text := string(out)
+	for _, required := range []string{
+		`rm -rf "build/macos-local-rc"`,
+		`codesign --force --sign - JoiceTyper.app`,
+		`codesign --force --sign - --options runtime --entitlements "assets/macos/JoiceTyper.entitlements"`,
+		"build/macos-local-rc/JoiceTyper.app",
+		"-macos.zip",
+		".dmg",
+		"SHA256SUMS",
+		"scripts/release/macos_archive_dev.sh",
+		"scripts/release/macos_validate_local_rc.sh",
+		"macos_validate_local_rc.sh\" \"build/macos-local-rc/JoiceTyper.app\" \"build/macos-local-rc/JoiceTyper-1.1.112-macos.zip\" \"build/macos-local-rc/JoiceTyper-1.1.112.dmg\"",
+		"scripts/release/macos_smoke_local_rc.sh",
+	} {
+		if !strings.Contains(text, required) {
+			t.Fatalf("expected local mac release candidate flow to contain %q\noutput:\n%s", required, text)
+		}
+	}
+
+	for _, forbidden := range []string{
+		"macos_release_env.sh",
+		"MACOS_CODESIGN_IDENTITY",
+		"MACOS_NOTARYTOOL_PROFILE",
+		"notarytool submit",
+		"stapler staple",
+		"macos_stage_sparkle.sh",
+		"-dev+",
+	} {
+		if strings.Contains(text, forbidden) {
+			t.Fatalf("expected local mac release candidate flow not to require %q\noutput:\n%s", forbidden, text)
+		}
+	}
+}
+
+func TestMacReleaseSigningUsesEntitlements(t *testing.T) {
+	root := repoRoot(t)
+
+	cmd := makeCommand(root, "-n", "mac-release-app")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("make -n mac-release-app: %v\n%s", err, out)
+	}
+
+	text := string(out)
+	for _, required := range []string{
+		"assets/macos/JoiceTyper.entitlements",
+		"scripts/release/macos_prepare_release_app.sh",
+	} {
+		if !strings.Contains(text, required) {
+			t.Fatalf("expected mac release signing flow to contain %q\noutput:\n%s", required, text)
+		}
+	}
+
+	data, err := os.ReadFile(filepath.Join(root, "scripts", "release", "macos_prepare_release_app.sh"))
+	if err != nil {
+		t.Fatalf("read macos_prepare_release_app.sh: %v", err)
+	}
+	source := string(data)
+	for _, required := range []string{
+		`codesign --force --sign "$codesign_identity" --timestamp --options runtime --entitlements "$entitlements_file" --deep "$release_app/Contents/Frameworks/Sparkle.framework"`,
+		`codesign --force --sign "$codesign_identity" --timestamp --options runtime --entitlements "$entitlements_file" --deep "$release_app"`,
+	} {
+		if !strings.Contains(source, required) {
+			t.Fatalf("expected release signing script to contain %q\nsource:\n%s", required, source)
+		}
+	}
+}
+
+func TestMacLocalReleaseValidatorChecksArtifactShape(t *testing.T) {
+	root := repoRoot(t)
+
+	data, err := os.ReadFile(filepath.Join(root, "scripts", "release", "macos_validate_local_rc.sh"))
+	if err != nil {
+		t.Fatalf("read macos_validate_local_rc.sh: %v", err)
+	}
+
+	source := string(data)
+	for _, required := range []string{
+		"codesign --verify --deep --strict",
+		"codesign -d --verbose=4",
+		"flags=",
+		"runtime",
+		"adhoc",
+		"codesign -d --entitlements :-",
+		"lipo -archs",
+		"icon.icns",
+		"LSMinimumSystemVersion",
+		"NSMicrophoneUsageDescription",
+		"PlistBuddy",
+		"@executable_path/../Frameworks/libportaudio.2.dylib",
+		"/opt/homebrew/opt/portaudio",
+		"zipinfo -1",
+		"hdiutil imageinfo",
+		"shasum -a 256",
+		"ARCHIVE_SHA256",
+		"metadata_archive_sha",
+		"metadata_archive_length",
+		"metadata_archive_path",
+		"metadata VERSION",
+		"expected_version",
+		`metadata_signature" != "UNSIGNED`,
+	} {
+		if !strings.Contains(source, required) {
+			t.Fatalf("expected local rc validator to contain %q\nsource:\n%s", required, source)
+		}
+	}
+}
+
 func TestMakeBuildRunsFrontendBuild(t *testing.T) {
 	root := repoRoot(t)
 
@@ -319,6 +436,9 @@ func TestMacReleaseTargetsProduceGitHubReleaseFriendlyOutputs(t *testing.T) {
 		"build/macos-release/JoiceTyper-",
 		"-macos.zip",
 		"appcast.xml",
+		"SHA256SUMS",
+		"shasum -a 256",
+		"scripts/release/macos_validate_release.sh",
 		"build/macos-release/JoiceTyper-",
 		".dmg",
 		"macos_notarize.sh",
@@ -335,6 +455,180 @@ func TestMacReleaseTargetsProduceGitHubReleaseFriendlyOutputs(t *testing.T) {
 	appcastIndex := strings.Index(text, "macos_appcast.py")
 	if notarizeIndex == -1 || appcastIndex == -1 || notarizeIndex > appcastIndex {
 		t.Fatalf("expected notarization to happen before appcast generation\noutput:\n%s", text)
+	}
+}
+
+func TestMacReleaseValidatorChecksOfficialArtifactConsistency(t *testing.T) {
+	root := repoRoot(t)
+
+	data, err := os.ReadFile(filepath.Join(root, "scripts", "release", "macos_validate_release.sh"))
+	if err != nil {
+		t.Fatalf("read macos_validate_release.sh: %v", err)
+	}
+	source := string(data)
+	for _, required := range []string{
+		"TeamIdentifier=not set",
+		"runtime",
+		"codesign --verify --deep --strict --verbose=2 \"$dmg_path\"",
+		"codesign -d --entitlements :-",
+		"lipo -archs",
+		"icon.icns",
+		"LSMinimumSystemVersion",
+		"NSMicrophoneUsageDescription",
+		"ARCHIVE_SHA256",
+		"EDDSA_SIGNATURE",
+		"appcast sparkle:version",
+		"appcast Sparkle signature",
+		"appcast download URL",
+		"/opt/homebrew/opt/portaudio",
+		"checksums file does not contain",
+	} {
+		if !strings.Contains(source, required) {
+			t.Fatalf("expected official release validator to contain %q\nsource:\n%s", required, source)
+		}
+	}
+}
+
+func TestMacOfficialReleaseWorkflowIsManualOnlyAndUploadsExactArtifacts(t *testing.T) {
+	root := repoRoot(t)
+
+	data, err := os.ReadFile(filepath.Join(root, ".github", "workflows", "macos-release.yml"))
+	if err != nil {
+		t.Fatalf("read macos-release workflow: %v", err)
+	}
+	source := string(data)
+	if strings.Contains(source, "push:\n") || strings.Contains(source, "tags:") {
+		t.Fatalf("expected official macOS release workflow to be manual-only before Apple credentials are configured\nsource:\n%s", source)
+	}
+	for _, required := range []string{
+		"workflow_dispatch",
+		"build/macos-release/JoiceTyper-*-macos.zip",
+		"build/macos-release/JoiceTyper-*.dmg",
+		"build/macos-release/appcast.xml",
+		"build/macos-release/SHA256SUMS",
+	} {
+		if !strings.Contains(source, required) {
+			t.Fatalf("expected official macOS release workflow to contain %q\nsource:\n%s", required, source)
+		}
+	}
+}
+
+func TestMacNotarizeScriptValidatesStapleAndGatekeeper(t *testing.T) {
+	root := repoRoot(t)
+
+	data, err := os.ReadFile(filepath.Join(root, "scripts", "release", "macos_notarize.sh"))
+	if err != nil {
+		t.Fatalf("read macos_notarize.sh: %v", err)
+	}
+	source := string(data)
+	for _, required := range []string{
+		"xcrun stapler staple",
+		"xcrun stapler validate",
+		"spctl --assess --type execute",
+		"spctl --assess --type open",
+	} {
+		if !strings.Contains(source, required) {
+			t.Fatalf("expected notarize script to contain %q\nsource:\n%s", required, source)
+		}
+	}
+}
+
+func TestReleaseEnvExampleAvoidsStaleConcreteReleaseUrls(t *testing.T) {
+	root := repoRoot(t)
+
+	data, err := os.ReadFile(filepath.Join(root, "packaging", "macos", "release.env.example"))
+	if err != nil {
+		t.Fatalf("read release.env.example: %v", err)
+	}
+	source := string(data)
+	if strings.Contains(source, "releases/download/v1.") || strings.Contains(source, "jaaacki/joice-typer") {
+		t.Fatalf("expected release.env.example to avoid stale concrete release URLs\nsource:\n%s", source)
+	}
+	for _, required := range []string{
+		"https://example.com/joicetyper/appcast.xml",
+		"https://example.com/joicetyper/releases/vX.Y.Z",
+	} {
+		if !strings.Contains(source, required) {
+			t.Fatalf("expected release.env.example to contain placeholder %q\nsource:\n%s", required, source)
+		}
+	}
+}
+
+func TestMacPublishUploadsChecksums(t *testing.T) {
+	root := repoRoot(t)
+
+	cmd := makeCommand(root, "-n", "mac-publish-github-release")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("make -n mac-publish-github-release: %v\n%s", err, out)
+	}
+	text := string(out)
+	for _, required := range []string{
+		"build/macos-release/SHA256SUMS",
+		"scripts/release/macos_publish_github.sh",
+	} {
+		if !strings.Contains(text, required) {
+			t.Fatalf("expected publish flow to contain %q\noutput:\n%s", required, text)
+		}
+	}
+
+	data, err := os.ReadFile(filepath.Join(root, "scripts", "release", "macos_publish_github.sh"))
+	if err != nil {
+		t.Fatalf("read macos_publish_github.sh: %v", err)
+	}
+	source := string(data)
+	for _, required := range []string{
+		"<checksums-path>",
+		`gh release upload "$tag" "$archive_path" "$dmg_path" "$appcast_path" "$checksums_path"`,
+	} {
+		if !strings.Contains(source, required) {
+			t.Fatalf("expected publish script to contain %q\nsource:\n%s", required, source)
+		}
+	}
+}
+
+func TestMacAccountlessCIWorkflowExists(t *testing.T) {
+	root := repoRoot(t)
+
+	data, err := os.ReadFile(filepath.Join(root, ".github", "workflows", "macos-accountless-rc.yml"))
+	if err != nil {
+		t.Fatalf("read macos-accountless-rc workflow: %v", err)
+	}
+	source := string(data)
+	for _, required := range []string{
+		"macos-14",
+		"submodules: recursive",
+		"brew install portaudio cmake",
+		"make verify-mac",
+		"make mac-local-release-candidate",
+		"build/macos-local-rc/",
+	} {
+		if !strings.Contains(source, required) {
+			t.Fatalf("expected accountless macOS workflow to contain %q\nsource:\n%s", required, source)
+		}
+	}
+}
+
+func TestMacLocalReleaseSmokeScriptChecksPackagedArtifacts(t *testing.T) {
+	root := repoRoot(t)
+
+	data, err := os.ReadFile(filepath.Join(root, "scripts", "release", "macos_smoke_local_rc.sh"))
+	if err != nil {
+		t.Fatalf("read macos_smoke_local_rc.sh: %v", err)
+	}
+	source := string(data)
+	for _, required := range []string{
+		"ditto -x -k",
+		"hdiutil attach",
+		"hdiutil detach",
+		"codesign --verify --deep --strict",
+		"MACOS_LOCAL_RC_SMOKE_LAUNCH",
+		"open -n",
+		"pgrep -f",
+	} {
+		if !strings.Contains(source, required) {
+			t.Fatalf("expected local rc smoke script to contain %q\nsource:\n%s", required, source)
+		}
 	}
 }
 
@@ -393,6 +687,10 @@ func TestMacNotarizeScriptSubmitsZipWhenGivenAppBundle(t *testing.T) {
 	if err := os.WriteFile(fakeXcrun, []byte(fakeScript), 0755); err != nil {
 		t.Fatalf("write fake xcrun: %v", err)
 	}
+	fakeSpctl := filepath.Join(binDir, "spctl")
+	if err := os.WriteFile(fakeSpctl, []byte(fakeScript), 0755); err != nil {
+		t.Fatalf("write fake spctl: %v", err)
+	}
 
 	cmd := exec.Command("sh", filepath.Join(root, "scripts", "release", "macos_notarize.sh"), appPath, "test-profile")
 	cmd.Env = append(os.Environ(), "PATH="+binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
@@ -414,6 +712,12 @@ func TestMacNotarizeScriptSubmitsZipWhenGivenAppBundle(t *testing.T) {
 	}
 	if !strings.Contains(logText, "stapler staple "+appPath) {
 		t.Fatalf("expected script to staple the original app bundle\nxcrun log:\n%s", logText)
+	}
+	if !strings.Contains(logText, "stapler validate "+appPath) {
+		t.Fatalf("expected script to validate the stapled app bundle\nxcrun log:\n%s", logText)
+	}
+	if !strings.Contains(logText, "--assess --type execute --verbose=4 "+appPath) {
+		t.Fatalf("expected script to assess the stapled app bundle\ncommand log:\n%s", logText)
 	}
 }
 
