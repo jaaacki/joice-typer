@@ -1,0 +1,309 @@
+name: Windows Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Git tag to release, for example v1.2.3
+        required: true
+        type: string
+      build_msix:
+        description: Also build unsigned MSIX for Microsoft Store submission
+        required: false
+        type: boolean
+        default: true
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  # Fast smoke test: validates that the toolchain installs correctly on
+  # the runner and that MakeAppx is reachable. Skips the multi-minute
+  # whisper.cpp build so toolchain regressions surface in ~3-5 minutes
+  # instead of after a full release attempt. Always runs first; the
+  # release job depends on it.
+  toolchain-smoke:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Install Inno Setup + pkg-config
+        shell: pwsh
+        run: |
+          choco install --no-progress -y innosetup
+          choco install --no-progress -y pkgconfiglite
+
+      - name: Install MinGW-w64 (msys2)
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          install: >-
+            mingw-w64-x86_64-gcc
+            mingw-w64-x86_64-make
+            mingw-w64-x86_64-cmake
+            mingw-w64-x86_64-pkg-config
+          update: true
+
+      - name: Verify required tools
+        shell: pwsh
+        run: |
+          $errors = @()
+
+          $expected = @(
+            @{ Name = 'x86_64-w64-mingw32-gcc'; Path = 'C:\msys64\mingw64\bin\x86_64-w64-mingw32-gcc.exe' },
+            @{ Name = 'mingw32-make';            Path = 'C:\msys64\mingw64\bin\mingw32-make.exe' },
+            @{ Name = 'cmake';                   Path = 'C:\msys64\mingw64\bin\cmake.exe' },
+            @{ Name = 'pkg-config';              Path = 'C:\ProgramData\chocolatey\bin\pkg-config.exe' },
+            @{ Name = 'ISCC.exe';                Path = 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe' }
+          )
+          foreach ($item in $expected) {
+            if (Test-Path -LiteralPath $item.Path) {
+              Write-Host "ok  $($item.Name): $($item.Path)"
+            } else {
+              $errors += "missing: $($item.Name) (expected $($item.Path))"
+            }
+          }
+
+          $sdkBins = Get-ChildItem -LiteralPath 'C:\Program Files (x86)\Windows Kits\10\bin' -Directory -ErrorAction SilentlyContinue |
+            Where-Object { $_.Name -match '^10\.' }
+          $makeAppx = $null
+          foreach ($d in ($sdkBins | Sort-Object Name -Descending)) {
+            $p = Join-Path $d.FullName 'x64\MakeAppx.exe'
+            if (Test-Path -LiteralPath $p) { $makeAppx = $p; break }
+          }
+          if ($makeAppx) {
+            Write-Host "ok  MakeAppx.exe: $makeAppx"
+          } else {
+            $errors += "missing: MakeAppx.exe (no Windows 10 SDK found under C:\Program Files (x86)\Windows Kits\10\bin\10.*)"
+          }
+
+          if ($errors.Count -gt 0) {
+            Write-Host ""
+            Write-Host "Toolchain smoke test FAILED:"
+            $errors | ForEach-Object { Write-Host "  - $_" }
+            exit 1
+          }
+          Write-Host ""
+          Write-Host "Toolchain smoke test passed."
+
+  windows-release:
+    needs: toolchain-smoke
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+    env:
+      # Tag-push uses github.ref_name; manual dispatch uses the input.
+      RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.ref_name }}
+      # build_msix only exists on workflow_dispatch; default to true for tag-push.
+      BUILD_MSIX: ${{ github.event_name == 'workflow_dispatch' && inputs.build_msix || 'true' }}
+      GH_TOKEN: ${{ github.token }}
+      VULKAN_VERSION: 1.3.290.0
+      WINDOWS_MSIX_IDENTITY_NAME: ${{ secrets.WINDOWS_MSIX_IDENTITY_NAME }}
+      WINDOWS_MSIX_PUBLISHER: ${{ secrets.WINDOWS_MSIX_PUBLISHER }}
+      WINDOWS_MSIX_PUBLISHER_DISPLAY_NAME: ${{ secrets.WINDOWS_MSIX_PUBLISHER_DISPLAY_NAME }}
+      WINDOWS_MSIX_DISPLAY_NAME: ${{ secrets.WINDOWS_MSIX_DISPLAY_NAME }}
+      WINDOWS_AUTHENTICODE_PFX_BASE64: ${{ secrets.WINDOWS_AUTHENTICODE_PFX_BASE64 }}
+      WINDOWS_AUTHENTICODE_PFX_PASSWORD: ${{ secrets.WINDOWS_AUTHENTICODE_PFX_PASSWORD }}
+      WINDOWS_AUTHENTICODE_TIMESTAMP_URL: http://timestamp.digicert.com
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: recursive
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+
+      - name: Install build tools (Inno Setup, pkg-config)
+        shell: pwsh
+        run: |
+          choco install --no-progress -y innosetup
+          choco install --no-progress -y pkgconfiglite
+
+      - name: Install MinGW-w64 (msys2)
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          install: >-
+            mingw-w64-x86_64-gcc
+            mingw-w64-x86_64-make
+            mingw-w64-x86_64-cmake
+            mingw-w64-x86_64-pkg-config
+          update: true
+
+      - name: Expose MinGW + Inno Setup on PATH
+        shell: bash
+        run: |
+          echo "/c/msys64/mingw64/bin" >> "$GITHUB_PATH"
+          echo "/c/Program Files (x86)/Inno Setup 6" >> "$GITHUB_PATH"
+
+      - name: Cache Vulkan SDK
+        id: cache-vulkan
+        uses: actions/cache@v4
+        with:
+          path: C:\VulkanSDK\${{ env.VULKAN_VERSION }}
+          key: vulkan-sdk-${{ env.VULKAN_VERSION }}
+
+      - name: Install Vulkan SDK
+        if: steps.cache-vulkan.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: |
+          $version = $env:VULKAN_VERSION
+          $url = "https://sdk.lunarg.com/sdk/download/$version/windows/VulkanSDK-$version-Installer.exe"
+          $installer = "$env:RUNNER_TEMP\vulkan-sdk-installer.exe"
+          Write-Host "Downloading $url"
+          Invoke-WebRequest -Uri $url -OutFile $installer
+          Write-Host "Installing Vulkan SDK silently"
+          Start-Process -FilePath $installer -ArgumentList @('--root', "C:\VulkanSDK\$version", '--accept-licenses', '--default-answer', '--confirm-command', 'install') -Wait -NoNewWindow
+
+      - name: Verify release tag matches VERSION
+        run: |
+          test -n "$RELEASE_TAG" || { echo "fatal: RELEASE_TAG is empty"; exit 1; }
+          expected="v$(tr -d '[:space:]' < VERSION)"
+          test "$RELEASE_TAG" = "$expected" || { echo "fatal: RELEASE_TAG $RELEASE_TAG does not match VERSION ($expected)"; exit 1; }
+
+      # ----- Authenticode signing setup (skipped when secrets absent) -----
+
+      - name: Resolve signing availability
+        id: signing
+        shell: bash
+        run: |
+          if [ -n "$WINDOWS_AUTHENTICODE_PFX_BASE64" ] && [ -n "$WINDOWS_AUTHENTICODE_PFX_PASSWORD" ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+            echo "Authenticode signing: ENABLED"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "Authenticode signing: DISABLED (set WINDOWS_AUTHENTICODE_PFX_BASE64 + WINDOWS_AUTHENTICODE_PFX_PASSWORD secrets to enable)"
+          fi
+
+      - name: Materialize Authenticode .pfx
+        if: steps.signing.outputs.enabled == 'true'
+        shell: pwsh
+        run: |
+          $pfx = "$env:RUNNER_TEMP\authenticode.pfx"
+          [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:WINDOWS_AUTHENTICODE_PFX_BASE64))
+          echo "AUTHENTICODE_PFX_PATH=$pfx" >> $env:GITHUB_ENV
+
+      - name: Locate signtool.exe
+        if: steps.signing.outputs.enabled == 'true'
+        shell: pwsh
+        run: |
+          $signTool = $null
+          $sdkBins = Get-ChildItem -LiteralPath 'C:\Program Files (x86)\Windows Kits\10\bin' -Directory -ErrorAction SilentlyContinue |
+            Where-Object { $_.Name -match '^10\.' } | Sort-Object Name -Descending
+          foreach ($d in $sdkBins) {
+            $p = Join-Path $d.FullName 'x64\signtool.exe'
+            if (Test-Path -LiteralPath $p) { $signTool = $p; break }
+          }
+          if (-not $signTool) { throw "signtool.exe not found under any Windows 10 SDK" }
+          echo "SIGNTOOL=$signTool" >> $env:GITHUB_ENV
+          Write-Host "signtool: $signTool"
+
+      # ----- Heavy build steps -----
+
+      - name: Cache portaudio static build
+        uses: actions/cache@v4
+        with:
+          path: third_party/portaudio-windows-static-install
+          key: portaudio-static-${{ hashFiles('third_party/portaudio-windows-src/**/CMakeLists.txt', 'scripts/make/windows.mk') }}
+
+      - name: Cache whisper.cpp Windows build
+        uses: actions/cache@v4
+        with:
+          path: third_party/whisper.cpp/build
+          key: whisper-win-${{ hashFiles('.gitmodules', 'scripts/make/windows.mk') }}-${{ hashFiles('third_party/whisper.cpp/CMakeLists.txt') }}
+
+      - name: Preflight Windows toolchain
+        run: make windows-preflight
+
+      - name: Build whisper.cpp + PortAudio static
+        run: |
+          make windows-portaudio-static
+          make windows-whisper-runtime-stage
+
+      - name: Build Windows release binary + stage runtime
+        run: make build-windows-runtime-amd64-release RELEASE_TAG="$RELEASE_TAG"
+
+      - name: Sign staged joicetyper.exe (Authenticode)
+        if: steps.signing.outputs.enabled == 'true'
+        shell: pwsh
+        run: |
+          & $env:SIGNTOOL sign /fd SHA256 /tr $env:WINDOWS_AUTHENTICODE_TIMESTAMP_URL /td SHA256 `
+            /f $env:AUTHENTICODE_PFX_PATH /p $env:WINDOWS_AUTHENTICODE_PFX_PASSWORD `
+            "build\windows-amd64\joicetyper.exe"
+          if ($LASTEXITCODE -ne 0) { throw "signtool failed on joicetyper.exe" }
+
+      - name: Build Inno Setup installer (.exe)
+        run: make package-windows-release RELEASE_TAG="$RELEASE_TAG"
+
+      - name: Sign installer .exe (Authenticode)
+        if: steps.signing.outputs.enabled == 'true'
+        shell: pwsh
+        run: |
+          $version = (Get-Content -Path VERSION -Raw).Trim()
+          $installer = "build\windows-amd64\JoiceTyper-$version-setup.exe"
+          if (-not (Test-Path -LiteralPath $installer)) { throw "missing $installer" }
+          & $env:SIGNTOOL sign /fd SHA256 /tr $env:WINDOWS_AUTHENTICODE_TIMESTAMP_URL /td SHA256 `
+            /f $env:AUTHENTICODE_PFX_PATH /p $env:WINDOWS_AUTHENTICODE_PFX_PASSWORD `
+            $installer
+          if ($LASTEXITCODE -ne 0) { throw "signtool failed on installer" }
+
+      - name: Build unsigned MSIX (Store package)
+        if: env.BUILD_MSIX == 'true'
+        run: |
+          for v in WINDOWS_MSIX_IDENTITY_NAME WINDOWS_MSIX_PUBLISHER WINDOWS_MSIX_PUBLISHER_DISPLAY_NAME WINDOWS_MSIX_DISPLAY_NAME; do
+            eval "val=\$$v"
+            test -n "$val" || { echo "fatal: secret $v is unset; cannot build MSIX"; exit 1; }
+          done
+          make package-windows-msix-release RELEASE_TAG="$RELEASE_TAG"
+
+      # ----- Publish -----
+
+      - name: Ensure GitHub release exists
+        shell: pwsh
+        run: |
+          gh release view "$env:RELEASE_TAG" --repo "${{ github.repository }}" 2>$null
+          if ($LASTEXITCODE -ne 0) {
+            gh release create "$env:RELEASE_TAG" --repo "${{ github.repository }}" --verify-tag --title "$env:RELEASE_TAG" --generate-notes
+          }
+
+      - name: Publish .exe installer to GitHub Release
+        shell: bash
+        run: |
+          version="$(tr -d '[:space:]' < VERSION)"
+          installer="build/windows-amd64/JoiceTyper-${version}-setup.exe"
+          test -f "$installer" || { echo "fatal: missing $installer"; exit 1; }
+          gh release upload "$RELEASE_TAG" "$installer" --repo "${{ github.repository }}" --clobber
+
+      - name: Upload .msix as workflow artifact (manual Partner Center upload)
+        if: env.BUILD_MSIX == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: msix-store-${{ env.RELEASE_TAG }}
+          path: build/windows-amd64/JoiceTyper-*.msix
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload installer for inspection
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-release-${{ env.RELEASE_TAG }}
+          path: |
+            build/windows-amd64/JoiceTyper-*-setup.exe
+            build/windows-amd64/joicetyper.exe

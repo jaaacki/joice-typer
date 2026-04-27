@@ -34,6 +34,8 @@ JoiceTyper.app/
 dmg-staging/
 packaging/macos/release.env.local
 packaging/macos/*.private
+packaging/windows/msix/identity.local.env
+packaging/windows/msix/*.pfx
 
 # IDE
 .idea/

@@ -37,6 +37,16 @@ WINDOWS_VULKAN_LIBRARY ?= $(if $(WINDOWS_VULKAN_SDK_ROOT),$(WINDOWS_VULKAN_SDK_R
 
 WINDOWS_WEBVIEW2_BOOTSTRAPPER := packaging/windows/MicrosoftEdgeWebview2Setup.exe
 
+WINDOWS_MSIX_DIR := packaging/windows/msix
+WINDOWS_MSIX_MANIFEST_TEMPLATE := $(WINDOWS_MSIX_DIR)/AppxManifest.xml.tmpl
+WINDOWS_MSIX_ASSETS_DIR := $(WINDOWS_MSIX_DIR)/Assets
+WINDOWS_MSIX_IDENTITY_ENV := $(WINDOWS_MSIX_DIR)/identity.local.env
+WINDOWS_MSIX_SCRIPT := scripts/release/windows_package_msix.ps1
+ifneq ("$(wildcard $(WINDOWS_MSIX_IDENTITY_ENV))","")
+include $(WINDOWS_MSIX_IDENTITY_ENV)
+export WINDOWS_MSIX_IDENTITY_NAME WINDOWS_MSIX_PUBLISHER WINDOWS_MSIX_PUBLISHER_DISPLAY_NAME WINDOWS_MSIX_DISPLAY_NAME
+endif
+
 build-windows-amd64: build-windows-amd64-no-version-bump
 
 build-windows-amd64-no-version-bump: bridge-contract-check frontend-build
@@ -200,3 +210,49 @@ package-windows-release: BUILD_TYPE := release
 package-windows-release: build-windows-runtime-amd64-release package-windows-no-version-bump
 
 package-windows-runtime: package-windows
+
+package-windows-msix: package-windows-msix-no-version-bump
+
+package-windows-msix-no-version-bump: windows-runtime-stage-check
+	@test -f "$(WINDOWS_MSIX_MANIFEST_TEMPLATE)" || (echo "fatal: missing $(WINDOWS_MSIX_MANIFEST_TEMPLATE)" && exit 1)
+	@test -f "$(WINDOWS_MSIX_SCRIPT)" || (echo "fatal: missing $(WINDOWS_MSIX_SCRIPT)" && exit 1)
+	@test -n "$(WINDOWS_MSIX_IDENTITY_NAME)" || (echo "fatal: WINDOWS_MSIX_IDENTITY_NAME unset (set in $(WINDOWS_MSIX_IDENTITY_ENV) or env)" && exit 1)
+	@test -n "$(WINDOWS_MSIX_PUBLISHER)" || (echo "fatal: WINDOWS_MSIX_PUBLISHER unset" && exit 1)
+	@test -n "$(WINDOWS_MSIX_PUBLISHER_DISPLAY_NAME)" || (echo "fatal: WINDOWS_MSIX_PUBLISHER_DISPLAY_NAME unset" && exit 1)
+	@test -n "$(WINDOWS_MSIX_DISPLAY_NAME)" || (echo "fatal: WINDOWS_MSIX_DISPLAY_NAME unset" && exit 1)
+	powershell.exe -ExecutionPolicy Bypass -NoProfile -NonInteractive -File "$(CURDIR)/$(WINDOWS_MSIX_SCRIPT)" \
+		-RepoRoot "$(subst /,\,$(CURDIR))" \
+		-AppVersion "$(PACKAGE_VERSION)" \
+		-IdentityName "$(WINDOWS_MSIX_IDENTITY_NAME)" \
+		-Publisher "$(WINDOWS_MSIX_PUBLISHER)" \
+		-PublisherDisplayName "$(WINDOWS_MSIX_PUBLISHER_DISPLAY_NAME)" \
+		-DisplayName "$(WINDOWS_MSIX_DISPLAY_NAME)" \
+		-StagedBuildDir "$(subst /,\,$(CURDIR)/$(WINDOWS_BUILD_DIR))" \
+		-OutputDir "$(subst /,\,$(CURDIR)/$(WINDOWS_BUILD_DIR))" \
+		-ManifestTemplate "$(subst /,\,$(CURDIR)/$(WINDOWS_MSIX_MANIFEST_TEMPLATE))" \
+		-AssetsDir "$(subst /,\,$(CURDIR)/$(WINDOWS_MSIX_ASSETS_DIR))"
+
+package-windows-msix-test-sign: windows-runtime-stage-check
+	@test -n "$(WINDOWS_MSIX_TEST_PFX)" || (echo "fatal: WINDOWS_MSIX_TEST_PFX unset (path to self-signed .pfx for sideload testing)" && exit 1)
+	@test -f "$(WINDOWS_MSIX_TEST_PFX)" || (echo "fatal: pfx not found: $(WINDOWS_MSIX_TEST_PFX)" && exit 1)
+	@test -n "$(WINDOWS_MSIX_IDENTITY_NAME)" || (echo "fatal: WINDOWS_MSIX_IDENTITY_NAME unset" && exit 1)
+	@test -n "$(WINDOWS_MSIX_PUBLISHER)" || (echo "fatal: WINDOWS_MSIX_PUBLISHER unset" && exit 1)
+	@test -n "$(WINDOWS_MSIX_PUBLISHER_DISPLAY_NAME)" || (echo "fatal: WINDOWS_MSIX_PUBLISHER_DISPLAY_NAME unset" && exit 1)
+	@test -n "$(WINDOWS_MSIX_DISPLAY_NAME)" || (echo "fatal: WINDOWS_MSIX_DISPLAY_NAME unset" && exit 1)
+	powershell.exe -ExecutionPolicy Bypass -NoProfile -NonInteractive -File "$(CURDIR)/$(WINDOWS_MSIX_SCRIPT)" \
+		-RepoRoot "$(subst /,\,$(CURDIR))" \
+		-AppVersion "$(PACKAGE_VERSION)" \
+		-IdentityName "$(WINDOWS_MSIX_IDENTITY_NAME)" \
+		-Publisher "$(WINDOWS_MSIX_PUBLISHER)" \
+		-PublisherDisplayName "$(WINDOWS_MSIX_PUBLISHER_DISPLAY_NAME)" \
+		-DisplayName "$(WINDOWS_MSIX_DISPLAY_NAME)" \
+		-StagedBuildDir "$(subst /,\,$(CURDIR)/$(WINDOWS_BUILD_DIR))" \
+		-OutputDir "$(subst /,\,$(CURDIR)/$(WINDOWS_BUILD_DIR))" \
+		-ManifestTemplate "$(subst /,\,$(CURDIR)/$(WINDOWS_MSIX_MANIFEST_TEMPLATE))" \
+		-AssetsDir "$(subst /,\,$(CURDIR)/$(WINDOWS_MSIX_ASSETS_DIR))" \
+		-TestSign \
+		-PfxPath "$(subst /,\,$(WINDOWS_MSIX_TEST_PFX))" \
+		-PfxPassword "$(WINDOWS_MSIX_TEST_PFX_PASSWORD)"
+
+package-windows-msix-release: BUILD_TYPE := release
+package-windows-msix-release: build-windows-runtime-amd64-release package-windows-msix-no-version-bump
