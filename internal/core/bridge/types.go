@@ -76,13 +76,14 @@ type InputVolumeSnapshot struct {
 }
 
 type BootstrapPayload struct {
-	Config      ConfigSnapshot          `json:"config"`
-	AppState    AppStateSnapshot        `json:"appState"`
-	Permissions PermissionsSnapshot     `json:"permissions"`
-	Model       ModelSnapshot           `json:"model"`
-	MachineInfo MachineInfoSnapshot     `json:"machineInfo"`
-	Options     SettingsOptionsSnapshot `json:"options"`
-	LoginItem   LoginItemSnapshot       `json:"loginItem"`
+	Config       ConfigSnapshot          `json:"config"`
+	AppState     AppStateSnapshot        `json:"appState"`
+	Permissions  PermissionsSnapshot     `json:"permissions"`
+	Model        ModelSnapshot           `json:"model"`
+	MachineInfo  MachineInfoSnapshot     `json:"machineInfo"`
+	Options      SettingsOptionsSnapshot `json:"options"`
+	LoginItem    LoginItemSnapshot       `json:"loginItem"`
+	IsOnboarding bool                    `json:"isOnboarding"`
 }
 
 type OptionSnapshot struct {

@@ -33,7 +33,9 @@
     { "goName": "LoginItemGetMethod", "tsName": "loginItemGet", "value": "login_item.get" },
     { "goName": "LoginItemSetMethod", "tsName": "loginItemSet", "value": "login_item.set" },
     { "goName": "InputVolumeGetMethod", "tsName": "inputVolumeGet", "value": "input_volume.get" },
-    { "goName": "InputVolumeSetMethod", "tsName": "inputVolumeSet", "value": "input_volume.set" }
+    { "goName": "InputVolumeSetMethod", "tsName": "inputVolumeSet", "value": "input_volume.set" },
+    { "goName": "OnboardingCompleteMethod", "tsName": "onboardingComplete", "value": "onboarding.complete" },
+    { "goName": "OnboardingCancelMethod", "tsName": "onboardingCancel", "value": "onboarding.cancel" }
   ],
   "events": [
     { "goName": "RuntimeStateChangedEvent", "tsName": "runtimeStateChanged", "value": "runtime.state_changed" },
@@ -72,6 +74,7 @@
     { "goName": "ErrorCodeUpdaterUnavailable", "tsName": "updaterUnavailable", "value": "updater.unavailable" },
     { "goName": "ErrorCodeUpdaterCheckFailed", "tsName": "updaterCheckFailed", "value": "updater.check_failed" },
     { "goName": "ErrorCodeLoginItemFailed", "tsName": "loginItemFailed", "value": "login_item.failed" },
-    { "goName": "ErrorCodeInputVolumeFailed", "tsName": "inputVolumeFailed", "value": "input_volume.failed" }
+    { "goName": "ErrorCodeInputVolumeFailed", "tsName": "inputVolumeFailed", "value": "input_volume.failed" },
+    { "goName": "ErrorCodeOnboardingFailed", "tsName": "onboardingFailed", "value": "onboarding.failed" }
   ]
 }

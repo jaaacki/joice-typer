@@ -1290,3 +1290,29 @@ svg {
     justify-content: flex-start;
   }
 }
+
+.onboarding-shell {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+}
+
+.onboarding-banner {
+  padding: 24px 32px;
+  background: linear-gradient(180deg, rgba(78, 96, 128, 0.18), rgba(78, 96, 128, 0));
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.onboarding-banner h1 {
+  margin: 0 0 6px;
+  font-size: 22px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.onboarding-banner p {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  opacity: 0.8;
+}

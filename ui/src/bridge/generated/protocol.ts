@@ -38,6 +38,8 @@ export const METHODS = {
   loginItemSet: "login_item.set",
   inputVolumeGet: "input_volume.get",
   inputVolumeSet: "input_volume.set",
+  onboardingComplete: "onboarding.complete",
+  onboardingCancel: "onboarding.cancel",
 } as const;
 export type BridgeMethod = (typeof METHODS)[keyof typeof METHODS];
 
@@ -81,6 +83,7 @@ export const ERROR_CODES = {
   updaterCheckFailed: "updater.check_failed",
   loginItemFailed: "login_item.failed",
   inputVolumeFailed: "input_volume.failed",
+  onboardingFailed: "onboarding.failed",
 } as const;
 export type BridgeErrorCode = (typeof ERROR_CODES)[keyof typeof ERROR_CODES];
 

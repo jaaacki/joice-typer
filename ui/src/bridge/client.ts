@@ -75,6 +75,7 @@ export type BootstrapPayload = {
   machineInfo: MachineInfoSnapshot;
   options: SettingsOptionsSnapshot;
   loginItem: LoginItemSnapshot;
+  isOnboarding?: boolean;
 };
 
 export type PermissionsSnapshot = {

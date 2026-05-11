@@ -35,6 +35,8 @@ const (
 	LoginItemSetMethod                  = "login_item.set"
 	InputVolumeGetMethod                = "input_volume.get"
 	InputVolumeSetMethod                = "input_volume.set"
+	OnboardingCompleteMethod            = "onboarding.complete"
+	OnboardingCancelMethod              = "onboarding.cancel"
 	RuntimeStateChangedEvent            = "runtime.state_changed"
 	PermissionsChangedEvent             = "permissions.changed"
 	DevicesChangedEvent                 = "devices.changed"
@@ -70,4 +72,5 @@ const (
 	ErrorCodeUpdaterCheckFailed         = "updater.check_failed"
 	ErrorCodeLoginItemFailed            = "login_item.failed"
 	ErrorCodeInputVolumeFailed          = "input_volume.failed"
+	ErrorCodeOnboardingFailed           = "onboarding.failed"
 )

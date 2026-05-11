@@ -164,16 +164,24 @@ func runAppMode() {
 		}
 	}()
 
-	// First-run: show setup wizard
+	// First-run: show the embedded webview in onboarding mode. The native
+	// AppKit setup wizard is no longer reachable — webview is the only UI.
 	firstRun := platformpkg.IsFirstRun()
 	logger.Info("first run check", "component", "main", "operation", "runAppMode", "first_run", firstRun)
 	if firstRun {
-		selectedDevice, setupErr := platformpkg.RunSetupWizard(startupCtx, logger)
-		if setupErr != nil {
-			logger.Error("setup wizard failed", "component", "main", "operation", "runAppMode", "error", setupErr)
+		if setupErr := platformpkg.RunWebOnboardingWizard(startupCtx, logger); setupErr != nil {
+			logger.Error("web onboarding wizard failed", "component", "main", "operation", "runAppMode", "error", setupErr)
 			os.Exit(1)
 		}
-		logger.Info("setup complete", "component", "main", "operation", "runAppMode", "device", selectedDevice)
+		// Onboarding closed; the React app saved config via bridge. If the
+		// user closed without configuring (no config file), bail out so we
+		// don't spin up the hotkey listener with empty defaults.
+		if platformpkg.IsFirstRun() {
+			logger.Error("web onboarding wizard closed before configuration was saved",
+				"component", "main", "operation", "runAppMode")
+			os.Exit(1)
+		}
+		logger.Info("setup complete via webview", "component", "main", "operation", "runAppMode")
 	}
 
 	// Load config (now exists after setup)

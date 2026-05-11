@@ -152,7 +152,11 @@ func TestNotifyWebSettingsLogsUpdated_DispatchesBridgeEvent(t *testing.T) {
 	}
 }
 
-func TestShouldUseWebSettings_DefaultsToWebAndAllowsFallbackEnv(t *testing.T) {
+func TestShouldUseWebSettings_AlwaysReturnsTrue(t *testing.T) {
+	// The native AppKit preferences are no longer reachable. The webview is
+	// the only supported preferences/onboarding UI; even setting the legacy
+	// env vars must not flip back to native. See CLAUDE.md "we should never
+	// ever use the native preference ever".
 	t.Setenv("JOICETYPER_USE_WEB_SETTINGS", "")
 	t.Setenv("JOICETYPER_USE_NATIVE_PREFERENCES", "")
 	if !shouldUseWebSettings() {
@@ -160,14 +164,14 @@ func TestShouldUseWebSettings_DefaultsToWebAndAllowsFallbackEnv(t *testing.T) {
 	}
 
 	t.Setenv("JOICETYPER_USE_NATIVE_PREFERENCES", "1")
-	if shouldUseWebSettings() {
-		t.Fatal("expected native fallback env to disable web settings")
+	if !shouldUseWebSettings() {
+		t.Fatal("expected JOICETYPER_USE_NATIVE_PREFERENCES=1 to be ignored — native preferences are no longer reachable")
 	}
 
 	t.Setenv("JOICETYPER_USE_NATIVE_PREFERENCES", "")
 	t.Setenv("JOICETYPER_USE_WEB_SETTINGS", "0")
-	if shouldUseWebSettings() {
-		t.Fatal("expected explicit JOICETYPER_USE_WEB_SETTINGS=0 to disable web settings")
+	if !shouldUseWebSettings() {
+		t.Fatal("expected JOICETYPER_USE_WEB_SETTINGS=0 to be ignored — webview is the only supported UI")
 	}
 }
 

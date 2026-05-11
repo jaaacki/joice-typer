@@ -13,7 +13,16 @@ import (
 // adding a new method to Platform breaks every adapter that hasn't
 // implemented it.
 type Service struct {
-	p Platform
+	p            Platform
+	isOnboarding bool
+}
+
+// SetOnboarding marks the service as serving the first-run onboarding flow.
+// The flag is exposed via Bootstrap().IsOnboarding so the embedded webview
+// can render an onboarding chrome (welcome banner + "Start JoiceTyper" CTA)
+// instead of the regular preferences chrome.
+func (s *Service) SetOnboarding(isOnboarding bool) {
+	s.isOnboarding = isOnboarding
 }
 
 // NewService wires a Platform into a bridge Service. The caller MUST
@@ -182,12 +191,13 @@ func (s *Service) Bootstrap(ctx context.Context) (BootstrapPayload, error) {
 	// preferences-open, which adds perceptible latency. The UI fetches it
 	// lazily via fetchLoginItem() after mount.
 	return BootstrapPayload{
-		Config:      configSnapshot,
-		AppState:    appStateSnapshot,
-		Permissions: permissionsSnapshot,
-		Model:       modelSnapshot,
-		MachineInfo: machineInfoSnapshot,
-		Options:     settingsOptionsSnapshot(),
+		Config:       configSnapshot,
+		AppState:     appStateSnapshot,
+		Permissions:  permissionsSnapshot,
+		Model:        modelSnapshot,
+		MachineInfo:  machineInfoSnapshot,
+		Options:      settingsOptionsSnapshot(),
+		IsOnboarding: s.isOnboarding,
 	}, nil
 }
 

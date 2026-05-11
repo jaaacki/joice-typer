@@ -121,8 +121,8 @@ internal/
     transcription/          # whisper.cpp wrapper, model files, decode modes
     version/                # version string + ldflags glue
   platform/
-    darwin/                 # cgo + Objective-C: hotkey, paster, statusbar, settings (native fallback), webview (WKWebView), notification, power, updater (Sparkle)
-    windows/                # cgo + Win32/COM: hotkey, paster, tray, settings (native fallback), webview (WebView2), notification, power, updater
+    darwin/                 # cgo + Objective-C: hotkey, paster, statusbar, webview (WKWebView), notification, power, updater (Sparkle); legacy settings*.{go,m} are unreachable
+    windows/                # cgo + Win32/COM: hotkey, paster, tray, webview (WebView2), notification, power, updater; legacy settings.go is unreachable
 ui/                         # Vite + React + TypeScript frontend (gitignored: dist/, node_modules/)
   embed.go                  # package uiembed — //go:embed dist + ValidateBuiltAssets(); fail-fast both at compile and runtime
   src/
@@ -161,17 +161,19 @@ The preferences/onboarding UI is a webview that talks to Go via a strict, versio
 - `internal/core/bridge/generated/` and `ui/src/bridge/generated/` — emitted by `scripts/generate_bridge_contract`. Run `make bridge-contract` after changing `Platform` or DTOs; `make bridge-contract-check` (in CI and chained from most build targets) fails on drift.
 - `contracts/bridge/v1/` — versioned snapshot of the contract committed for compatibility tracking.
 
-### Preferences UI
+### Preferences & Onboarding UI
 
-**Important:** the preferences window is a **webview loading the embedded React app**, not a native AppKit/Win32 form. Do not regress this.
+**The webview is the only UI.** Both preferences and the first-run onboarding wizard load the embedded React app. Native AppKit/Win32 preferences/onboarding are never used — there is no env-var fallback, no debug toggle, no exception. Do not regress this.
 
 - macOS: `internal/platform/darwin/webview.go` + `webview_darwin.{h,m}` host a `WKWebView` and serve assets out of `ui/embed.go` (`uiembed.EmbeddedAssets` from `//go:embed dist`). Bridge calls round-trip via JS message handlers into `bridge.Service`.
-- Windows: `internal/platform/windows/webview.go` + `webview_host_windows.go` host the WebView2 runtime and serve the same embedded assets.
-- Native settings code (`internal/platform/darwin/settings.go` + `settings_darwin.{h,m}`, `internal/platform/windows/settings.go`) still exists as a debug-only fallback. Setting `JOICETYPER_USE_NATIVE_PREFERENCES=1` (or `JOICETYPER_USE_WEB_SETTINGS=0`) flips back to the native window. The webview is the default and the surface users see (left-rail navigation: Capture / Mode / Vocabulary / Permissions / Logs / About).
-- The TypeScript entry `ui/src/App.tsx` reads a bootstrap blob from `window`; if present it renders `SettingsScreen`, otherwise a placeholder shell.
+- Windows: `internal/platform/windows/webview.go` + `webview_host_windows.go` host the WebView2 runtime and serve the same embedded assets. Windows' first-run already routes through the webview via `openPreferences`.
+- First-run on macOS: `launcher.runAppMode` calls `platformpkg.RunWebOnboardingWizard(ctx, logger)` which builds a `bridge.Service` with `SetOnboarding(true)`, opens the webview window, and blocks on a Go channel signaled by `webSettingsWindowClosed`. The launcher then re-checks `IsFirstRun()` — if no config was saved it exits with a clear error rather than starting the hotkey listener with empty defaults.
+- React: `ui/src/App.tsx` reads `bootstrap.isOnboarding`; when true it wraps `SettingsScreen` in an `.onboarding-shell` with a "Welcome to JoiceTyper" banner; when false it renders `SettingsScreen` plain.
+- `shouldUseWebSettings()` is hardcoded `true`. The legacy env vars `JOICETYPER_USE_NATIVE_PREFERENCES` and `JOICETYPER_USE_WEB_SETTINGS` are intentionally ignored; `TestShouldUseWebSettings_AlwaysReturnsTrue` enforces this.
+- The native AppKit code (`internal/platform/darwin/settings.go` + `settings_darwin.{h,m}`) and the legacy `RunSetupWizard` entry point still compile but are **unreachable** in normal flows. They are scheduled for removal; do not add new entry points to them.
 - `ui/dist/` is **gitignored** and produced by `npm run build` via `make frontend-build`. Do not commit it. `ui/embed.go` enforces both compile-time (`//go:embed dist/index.html`) and runtime (`ValidateBuiltAssets()`) checks so a missing/stub UI cannot ship.
 
-When an AI agent in another environment "rebuilds the native preferences screen": it edited `internal/platform/*/settings*.{go,m}` instead of `ui/src/settings/`. The webview path is the source of truth.
+When an AI agent in another environment "rebuilds the native preferences/onboarding screen": it edited `internal/platform/*/settings*.{go,m}` instead of `ui/src/settings/` or `ui/src/App.tsx`. The webview path — including onboarding — is the source of truth, period.
 
 ### Threading model
 

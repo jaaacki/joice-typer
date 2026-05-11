@@ -15,7 +15,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
-	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
@@ -34,15 +33,12 @@ import (
 )
 
 var (
-	webSettingsEnabled = func() bool {
-		if os.Getenv("JOICETYPER_USE_NATIVE_PREFERENCES") == "1" {
-			return false
-		}
-		if value := os.Getenv("JOICETYPER_USE_WEB_SETTINGS"); value != "" {
-			return value == "1"
-		}
-		return true
-	}
+	// webSettingsEnabled is intentionally constant-true. The webview is the
+	// only supported preferences/onboarding UI; the legacy native AppKit
+	// settings code is unreachable in normal flows. Do not reintroduce an
+	// env-var escape hatch — see CLAUDE.md ("we should never ever use the
+	// native preference ever").
+	webSettingsEnabled           = func() bool { return true }
 	webSettingsDefaultConfigPath = configpkg.DefaultConfigPath
 	webSettingsLoadConfig        = configpkg.LoadConfig
 	webSettingsSaveConfig        = configpkg.SaveConfig
@@ -661,6 +657,73 @@ func webSettingsWindowClosed() {
 	cancelPreferencesContext()
 	clearActiveWebSettingsBridgeService()
 	preferencesOpenStore(0)
+	signalWebOnboardingDone()
+}
+
+// onboardingDoneCh is signaled by webSettingsWindowClosed (and by an
+// explicit OnboardingComplete bridge call once that ships). RunWebOnboardingWizard
+// blocks on it so launcher.runAppMode does not start the hotkey listener
+// until the user finishes first-run setup.
+var (
+	onboardingDoneMu sync.Mutex
+	onboardingDoneCh chan struct{}
+)
+
+func armWebOnboardingDone() <-chan struct{} {
+	onboardingDoneMu.Lock()
+	defer onboardingDoneMu.Unlock()
+	onboardingDoneCh = make(chan struct{}, 1)
+	return onboardingDoneCh
+}
+
+func signalWebOnboardingDone() {
+	onboardingDoneMu.Lock()
+	ch := onboardingDoneCh
+	onboardingDoneCh = nil
+	onboardingDoneMu.Unlock()
+	if ch == nil {
+		return
+	}
+	select {
+	case ch <- struct{}{}:
+	default:
+	}
+}
+
+// RunWebOnboardingWizard opens the embedded webview in onboarding mode and
+// blocks until the user closes the window. The launcher calls this on first
+// run instead of the legacy native AppKit setup wizard.
+//
+// Behavior:
+//   - Builds a bridge.Service with IsOnboarding=true so the React app renders
+//     the onboarding chrome.
+//   - Shows the standard webview window. The React app saves config via the
+//     normal config.save bridge call as the user picks values.
+//   - Returns when the window is closed (Start button or red X both close it).
+//   - The caller is responsible for re-loading config and verifying required
+//     fields are populated; if the user closes the window without choosing
+//     a microphone the launcher should treat that as a cancellation.
+func RunWebOnboardingWizard(ctx context.Context, logger *slog.Logger) error {
+	l := logger.With("component", "onboarding")
+	SetSettingsLogger(logger.With("component", "settings"))
+	l.Info("starting web onboarding wizard", "operation", "RunWebOnboardingWizard")
+
+	cfg, _ := configpkg.LoadConfig("")
+	bridgeService := buildSettingsBridgeService(cfg)
+	bridgeService.SetOnboarding(true)
+	doneCh := armWebOnboardingDone()
+	if err := ShowWebSettingsWindowWithBridge(ctx, bridgeService); err != nil {
+		signalWebOnboardingDone()
+		return fmt.Errorf("darwin.RunWebOnboardingWizard: %w", err)
+	}
+	preferencesOpenStore(1)
+	select {
+	case <-doneCh:
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	l.Info("web onboarding wizard closed", "operation", "RunWebOnboardingWizard")
+	return nil
 }
 
 func webSettingsResponseJSON(response webSettingsResponse) string {

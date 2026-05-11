@@ -32,6 +32,13 @@ func RunSetupWizard(ctx context.Context, logger *slog.Logger) (string, error) {
 	return darwinpkg.RunSetupWizard(ctx, logger)
 }
 
+// RunWebOnboardingWizard opens the embedded webview in onboarding mode and
+// blocks until the user closes the window. This replaces the legacy native
+// AppKit setup wizard exposed via RunSetupWizard.
+func RunWebOnboardingWizard(ctx context.Context, logger *slog.Logger) error {
+	return darwinpkg.RunWebOnboardingWizard(ctx, logger)
+}
+
 func InitStatusBar() {
 	darwinpkg.InitStatusBar()
 }
