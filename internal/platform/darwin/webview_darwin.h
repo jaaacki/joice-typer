@@ -1,5 +1,6 @@
 void showWebSettingsWindow(const char *htmlContent);
 void focusWebSettingsWindow(void);
+void closeWebSettingsWindow(void);
 void dispatchWebSettingsEnvelope(const char *payloadJSON, int closeWindow);
 char *handleWebSettingsMessage(char *messageJSON, int *closeWindow);
 void webSettingsWindowClosed(void);

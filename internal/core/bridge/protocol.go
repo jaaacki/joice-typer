@@ -74,6 +74,9 @@ const (
 	InputVolumeGetMethod                = generated.InputVolumeGetMethod
 	InputVolumeSetMethod                = generated.InputVolumeSetMethod
 	ErrorCodeInputVolumeFailed          = generated.ErrorCodeInputVolumeFailed
+	OnboardingCompleteMethod            = generated.OnboardingCompleteMethod
+	OnboardingCancelMethod              = generated.OnboardingCancelMethod
+	ErrorCodeOnboardingFailed           = generated.ErrorCodeOnboardingFailed
 )
 
 type ErrorObject struct {

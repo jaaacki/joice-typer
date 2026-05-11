@@ -66,6 +66,14 @@ type Platform interface {
 	// Login item (launch at login)
 	GetLoginItem(ctx context.Context) (LoginItemSnapshot, error)
 	SetLoginItem(ctx context.Context, enabled bool) (LoginItemSnapshot, error)
+
+	// Onboarding lifecycle. Called by the embedded webview's "Start
+	// JoiceTyper" button (CompleteOnboarding) or its cancel/close path
+	// (CancelOnboarding). The platform adapter is responsible for closing
+	// the onboarding webview window so the launcher's blocking
+	// RunWebOnboardingWizard call returns.
+	CompleteOnboarding(ctx context.Context) error
+	CancelOnboarding(ctx context.Context) error
 }
 
 // errPlatformMethodNotStubbed is returned by funcPlatform when a method is
@@ -107,6 +115,8 @@ type funcPlatform struct {
 	CheckForUpdatesFn        func(ctx context.Context) error
 	GetLoginItemFn           func(ctx context.Context) (LoginItemSnapshot, error)
 	SetLoginItemFn           func(ctx context.Context, enabled bool) (LoginItemSnapshot, error)
+	CompleteOnboardingFn     func(ctx context.Context) error
+	CancelOnboardingFn       func(ctx context.Context) error
 }
 
 // Compile-time assertion that funcPlatform satisfies Platform. If you add a
@@ -294,4 +304,18 @@ func (p funcPlatform) SetLoginItem(ctx context.Context, enabled bool) (LoginItem
 		return LoginItemSnapshot{}, errPlatformMethodNotStubbed
 	}
 	return p.SetLoginItemFn(ctx, enabled)
+}
+
+func (p funcPlatform) CompleteOnboarding(ctx context.Context) error {
+	if p.CompleteOnboardingFn == nil {
+		return errPlatformMethodNotStubbed
+	}
+	return p.CompleteOnboardingFn(ctx)
+}
+
+func (p funcPlatform) CancelOnboarding(ctx context.Context) error {
+	if p.CancelOnboardingFn == nil {
+		return errPlatformMethodNotStubbed
+	}
+	return p.CancelOnboardingFn(ctx)
 }

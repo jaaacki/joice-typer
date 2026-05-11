@@ -145,8 +145,13 @@ func runWindowsDesktopMode(configPath string) {
 	firstRun := platformpkg.IsFirstRun()
 	logger.Info("first run check", "component", "main", "operation", "runWindowsDesktopMode", "first_run", firstRun)
 	if firstRun {
-		if _, setupErr := platformpkg.RunSetupWizard(startupCtx, logger); setupErr != nil {
-			logger.Error("setup wizard failed", "component", "main", "operation", "runWindowsDesktopMode", "error", setupErr)
+		if setupErr := platformpkg.RunWebOnboardingWizard(startupCtx, logger); setupErr != nil {
+			logger.Error("web onboarding wizard failed", "component", "main", "operation", "runWindowsDesktopMode", "error", setupErr)
+			os.Exit(1)
+		}
+		if platformpkg.IsFirstRun() {
+			logger.Error("web onboarding wizard closed before configuration was saved",
+				"component", "main", "operation", "runWindowsDesktopMode")
 			os.Exit(1)
 		}
 	}

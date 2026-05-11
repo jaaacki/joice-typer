@@ -431,6 +431,20 @@ void focusWebSettingsWindow(void) {
     });
 }
 
+void closeWebSettingsWindow(void) {
+    dispatch_async(dispatch_get_main_queue(), ^{
+        if (sWebSettingsWindow == nil) {
+            return;
+        }
+        // [NSWindow close] triggers windowWillClose: which fires the
+        // webSettingsWindowClosed Go callback; the callback signals
+        // RunWebOnboardingWizard's done channel so the launcher unblocks.
+        [sWebSettingsWindow close];
+        reportWebSettingsNativeTransportInfo(@"closed web settings window",
+                                             @"programmatic close of web preferences window");
+    });
+}
+
 void dispatchWebSettingsEnvelope(const char *payloadJSON, int closeWindow) {
     // Copy payloadJSON into an NSString BEFORE dispatch_async. The char* comes
     // from a C.CString allocated in Go and freed via defer once the cgo call

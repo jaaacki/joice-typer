@@ -29,17 +29,11 @@ func IsFirstRun() bool {
 	return windowspkg.IsFirstRun()
 }
 
-func RunSetupWizard(ctx context.Context, logger *slog.Logger) (string, error) {
-	return windowspkg.RunSetupWizard(ctx, logger)
-}
-
 // RunWebOnboardingWizard opens the embedded WebView2 in onboarding mode and
-// blocks until the user closes the window. Windows already routed first-run
-// through the webview path; this is the cross-platform-symmetric entry point
-// the launcher uses on both macOS and Windows.
+// blocks until the user closes the window. The legacy native AppKit setup
+// wizard is gone — webview is the only UI.
 func RunWebOnboardingWizard(ctx context.Context, logger *slog.Logger) error {
-	_, err := windowspkg.RunSetupWizard(ctx, logger)
-	return err
+	return windowspkg.RunWebOnboardingWizard(ctx, logger)
 }
 
 func InitStatusBar() {

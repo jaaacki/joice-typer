@@ -96,24 +96,28 @@ func IsFirstRun() bool {
 	return os.IsNotExist(err)
 }
 
-func RunSetupWizard(ctx context.Context, logger *slog.Logger) (string, error) {
+// RunWebOnboardingWizard opens the embedded WebView2 in onboarding mode and
+// blocks until the user closes the window. Cancelling the preferences
+// context (via the Start button's CompleteOnboarding bridge call, the
+// Cancel path, or the user closing the window) unblocks the launcher.
+func RunWebOnboardingWizard(ctx context.Context, logger *slog.Logger) error {
 	if err := openPreferences(); err != nil {
-		return "", err
+		return err
 	}
 	prefsCtx := currentPreferencesContext()
 	if prefsCtx == nil {
-		return "", fmt.Errorf("preferences context unavailable after opening setup")
+		return fmt.Errorf("preferences context unavailable after opening setup")
 	}
 	select {
 	case <-prefsCtx.Done():
 		if logger != nil {
-			logger.Info("first-run preferences closed", "operation", "RunSetupWizard")
+			logger.Info("web onboarding closed", "operation", "RunWebOnboardingWizard")
 		}
 	case <-ctx.Done():
 		cancelPreferencesContext()
-		return "", ctx.Err()
+		return ctx.Err()
 	}
-	return "", nil
+	return nil
 }
 
 func OpenPreferences() {
@@ -585,6 +589,18 @@ func (windowsPlatform) SetInputVolume(_ context.Context, deviceName string, _ fl
 		false,
 		map[string]any{"deviceName": deviceName},
 	)
+}
+
+func (windowsPlatform) CompleteOnboarding(context.Context) error {
+	// Cancelling the preferences context releases the launcher's blocking
+	// wait inside RunWebOnboardingWizard.
+	cancelPreferencesContext()
+	return nil
+}
+
+func (windowsPlatform) CancelOnboarding(context.Context) error {
+	cancelPreferencesContext()
+	return nil
 }
 
 // prefsActiveModel tracks the in-use model for the current preferences session.

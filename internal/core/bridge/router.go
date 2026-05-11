@@ -319,6 +319,22 @@ func (r *Router) HandleRequest(ctx context.Context, request RequestEnvelope) Res
 			return NewErrorResponseFromError(request.ID, err, ErrorCodeInputVolumeFailed, "failed to set input volume", true, nil)
 		}
 		return NewSuccessResponse(request.ID, snapshot)
+	case OnboardingCompleteMethod:
+		if response := ensureEmptyParams(request); response != nil {
+			return *response
+		}
+		if err := r.service.CompleteOnboarding(ctx); err != nil {
+			return NewErrorResponseFromError(request.ID, err, ErrorCodeOnboardingFailed, "failed to complete onboarding", false, nil)
+		}
+		return NewSuccessResponse(request.ID, map[string]any{"completed": true})
+	case OnboardingCancelMethod:
+		if response := ensureEmptyParams(request); response != nil {
+			return *response
+		}
+		if err := r.service.CancelOnboarding(ctx); err != nil {
+			return NewErrorResponseFromError(request.ID, err, ErrorCodeOnboardingFailed, "failed to cancel onboarding", false, nil)
+		}
+		return NewSuccessResponse(request.ID, map[string]any{"cancelled": true})
 	default:
 		return NewErrorResponse(request.ID, ErrorCodeBadMethod, fmt.Sprintf("unsupported bridge method %q", request.Method), false, map[string]any{
 			"method": request.Method,

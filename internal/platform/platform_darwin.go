@@ -28,13 +28,9 @@ func IsFirstRun() bool {
 	return darwinpkg.IsFirstRun()
 }
 
-func RunSetupWizard(ctx context.Context, logger *slog.Logger) (string, error) {
-	return darwinpkg.RunSetupWizard(ctx, logger)
-}
-
 // RunWebOnboardingWizard opens the embedded webview in onboarding mode and
-// blocks until the user closes the window. This replaces the legacy native
-// AppKit setup wizard exposed via RunSetupWizard.
+// blocks until the user closes the window. The legacy native AppKit setup
+// wizard is gone — webview is the only UI.
 func RunWebOnboardingWizard(ctx context.Context, logger *slog.Logger) error {
 	return darwinpkg.RunWebOnboardingWizard(ctx, logger)
 }

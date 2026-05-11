@@ -102,6 +102,10 @@ func FocusWebSettingsWindow() {
 	C.focusWebSettingsWindow()
 }
 
+func closeWebSettingsWindow() {
+	C.closeWebSettingsWindow()
+}
+
 func ShowWebSettingsWindowWithBridge(ctx context.Context, service *bridgepkg.Service) error {
 	if service == nil {
 		service = buildSettingsBridgeService(configpkg.Config{})
@@ -323,6 +327,16 @@ func (darwinPlatform) CancelHotkeyCapture(context.Context) error {
 
 func (darwinPlatform) ConfirmHotkeyCapture(context.Context) (bridgepkg.HotkeyCaptureSnapshot, error) {
 	return confirmWebSettingsHotkeyCapture()
+}
+
+func (darwinPlatform) CompleteOnboarding(context.Context) error {
+	closeWebSettingsWindow()
+	return nil
+}
+
+func (darwinPlatform) CancelOnboarding(context.Context) error {
+	closeWebSettingsWindow()
+	return nil
 }
 
 func (darwinPlatform) SetAudioInputMonitor(_ context.Context, inputDevice string) error {

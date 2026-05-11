@@ -437,6 +437,14 @@ export function checkForUpdates(): Promise<void> {
   return query<{ started: boolean }, Record<string, never>>(METHODS.updaterCheck, {}).then(() => undefined);
 }
 
+export function completeOnboarding(): Promise<void> {
+  return query<{ completed: boolean }, Record<string, never>>(METHODS.onboardingComplete, {}).then(() => undefined);
+}
+
+export function cancelOnboarding(): Promise<void> {
+  return query<{ cancelled: boolean }, Record<string, never>>(METHODS.onboardingCancel, {}).then(() => undefined);
+}
+
 export function fetchLoginItem(): Promise<LoginItemSnapshot> {
   return query<LoginItemSnapshot, Record<string, never>>(METHODS.loginItemGet, {});
 }

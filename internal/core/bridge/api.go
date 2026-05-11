@@ -166,6 +166,21 @@ func (s *Service) SetInputVolume(ctx context.Context, deviceName string, volume 
 	return s.p.SetInputVolume(ctx, deviceName, volume)
 }
 
+// CompleteOnboarding signals the platform to close the onboarding webview
+// window. The launcher's blocking RunWebOnboardingWizard call returns once
+// the window closes.
+func (s *Service) CompleteOnboarding(ctx context.Context) error {
+	return s.p.CompleteOnboarding(ctx)
+}
+
+// CancelOnboarding signals the platform to close the onboarding webview
+// window without finalizing setup. The launcher treats a cancel the same
+// as a window-close: it re-checks IsFirstRun() and exits if config wasn't
+// saved.
+func (s *Service) CancelOnboarding(ctx context.Context) error {
+	return s.p.CancelOnboarding(ctx)
+}
+
 func (s *Service) Bootstrap(ctx context.Context) (BootstrapPayload, error) {
 	configSnapshot, err := s.Config(ctx)
 	if err != nil {
