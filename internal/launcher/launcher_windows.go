@@ -24,6 +24,7 @@ import (
 	transcriptionpkg "voicetype/internal/core/transcription"
 	versionpkg "voicetype/internal/core/version"
 	platformpkg "voicetype/internal/platform"
+	uiembed "voicetype/ui"
 
 	"golang.org/x/sys/windows"
 )
@@ -80,6 +81,12 @@ func Main() {
 			fmt.Fprintf(os.Stderr, "warning: failed to terminate audio: %v\n", tErr)
 		}
 		return
+	}
+
+	if err := uiembed.ValidateBuiltAssets(); err != nil {
+		fmt.Fprintf(os.Stderr, "fatal: %v\n", err)
+		fmt.Fprintln(os.Stderr, "fatal: refusing to start with a missing/stub embedded webview UI; build with `make build` or `make app`, not `go build` directly")
+		os.Exit(1)
 	}
 
 	runWindowsDesktopMode(*configPath)

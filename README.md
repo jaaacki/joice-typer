@@ -30,6 +30,17 @@ make whisper        # build whisper.cpp with Metal GPU support
 make build          # build the embedded frontend, then the Go binary
 ```
 
+> **Build only via `make build` / `make app` — never `go build` directly.**
+> The preferences/onboarding UI is a Vite-built React app embedded into the Go
+> binary via `//go:embed ui/dist`. `ui/dist/` is gitignored and produced by
+> `make frontend-build` (which `make build` and `make app` chain in
+> automatically). Running `go build ./cmd/joicetyper` on a fresh clone fails
+> with `pattern dist/index.html: no matching files found` — that is intentional
+> and tells you the frontend has not been built. The binary also validates the
+> embedded assets at startup and exits if they are missing or a stub, so you
+> cannot accidentally ship a binary that silently falls back to the native
+> debug preferences window.
+
 ## Run
 
 ### Terminal (development)
