@@ -13,6 +13,22 @@ import (
 	"testing"
 )
 
+func TestWhisperAbortFlag_Cancel(t *testing.T) {
+	flag, err := newWhisperAbortFlag()
+	if err != nil {
+		t.Fatalf("newWhisperAbortFlag: %v", err)
+	}
+	defer flag.free()
+
+	if flag.cancelled() {
+		t.Fatal("expected new abort flag to be unset")
+	}
+	flag.cancel()
+	if !flag.cancelled() {
+		t.Fatal("expected abort flag to be set after cancel")
+	}
+}
+
 func TestDecodeConfigForMode_Greedy(t *testing.T) {
 	cfg := decodeConfigForMode("greedy")
 	if cfg.strategy != "greedy" {
@@ -42,29 +58,43 @@ func TestAudioRMS(t *testing.T) {
 	}
 }
 
-func TestEffectiveDecodeConfig_ForcesShortTranscriptionToGreedy(t *testing.T) {
-	cfg := effectiveDecodeConfig("beam", false, "transcription")
-	if cfg.strategy != "greedy" {
-		t.Fatalf("expected short transcription to force greedy, got %q", cfg.strategy)
+func TestEffectiveDecodeConfig_PreservesTranscriptionMode(t *testing.T) {
+	cfg := effectiveDecodeConfig("beam", "transcription")
+	if cfg.strategy != "beam" {
+		t.Fatalf("expected transcription to preserve configured beam mode, got %q", cfg.strategy)
 	}
 }
 
-func TestEffectiveDecodeConfig_PreservesLongTranscriptionMode(t *testing.T) {
-	cfg := effectiveDecodeConfig("beam", true, "transcription")
+func TestEffectiveDecodeConfig_PreservesTranslationMode(t *testing.T) {
+	cfg := effectiveDecodeConfig("beam", "translation")
 	if cfg.strategy != "beam" {
-		t.Fatalf("expected long transcription to preserve beam, got %q", cfg.strategy)
+		t.Fatalf("expected translation to preserve configured beam mode, got %q", cfg.strategy)
 	}
 }
 
 func TestShortFormTokenLimit_UsesFullDuration(t *testing.T) {
-	if got := shortFormTokenLimit(0.9); got != 5 {
-		t.Fatalf("expected 0.9s clip to allow 5 tokens, got %d", got)
+	if got := shortFormTokenLimit(0.9); got != 16 {
+		t.Fatalf("expected 0.9s clip to allow 16 tokens, got %d", got)
 	}
-	if got := shortFormTokenLimit(1.3); got != 6 {
-		t.Fatalf("expected 1.3s clip to allow 6 tokens, got %d", got)
+	if got := shortFormTokenLimit(1.3); got != 16 {
+		t.Fatalf("expected 1.3s clip to allow 16 tokens, got %d", got)
 	}
-	if got := shortFormTokenLimit(4); got != shortFormMaxTokens {
-		t.Fatalf("expected token limit to cap at %d, got %d", shortFormMaxTokens, got)
+	if got := shortFormTokenLimit(10); got != shortFormMaxTokens {
+		t.Fatalf("expected 10s clip to cap at %d, got %d", shortFormMaxTokens, got)
+	}
+}
+
+func TestTranscriptPreview_DisabledByDefault(t *testing.T) {
+	t.Setenv("JOICETYPER_LOG_TRANSCRIPT_PREVIEW", "")
+	if got := transcriptPreview("secret dictated text"); got != "" {
+		t.Fatalf("expected transcript preview to be disabled by default, got %q", got)
+	}
+}
+
+func TestTranscriptPreview_EnabledByEnv(t *testing.T) {
+	t.Setenv("JOICETYPER_LOG_TRANSCRIPT_PREVIEW", "1")
+	if got := transcriptPreview("secret\ndictated text"); got != "secret dictated text" {
+		t.Fatalf("expected transcript preview when enabled, got %q", got)
 	}
 }
 

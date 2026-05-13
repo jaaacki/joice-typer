@@ -48,7 +48,9 @@ type Recorder interface {
 	Close() error
 }
 
-// Transcriber converts audio samples to text using whisper.cpp.
+// Transcriber converts one independent push-to-talk audio session to text.
+// Transcribe must not carry decoded text/state from prior calls unless a future
+// explicit continuous mode contract opts into shared context.
 type Transcriber interface {
 	Transcribe(ctx context.Context, audio []float32) (string, error)
 	SetVocabulary(vocab string)

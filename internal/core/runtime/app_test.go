@@ -358,7 +358,7 @@ func TestApp_TranscribeDrop_ResetsStateToReady(t *testing.T) {
 	app.emitState(StateTranscribing)
 	atomic.StoreInt32(&app.busy, 1)
 	app.wg.Add(1)
-	app.transcribeAndPaste([]float32{0.1})
+	app.transcribeAndPaste(1, []float32{0.1})
 
 	statesMu.Lock()
 	defer statesMu.Unlock()
@@ -508,6 +508,17 @@ func TestApp_IsIdle_FalseWhileBusy(t *testing.T) {
 
 	close(events)
 	app.Shutdown()
+}
+
+func TestApp_IsIdle_FalseAfterReleaseBeforeBusy(t *testing.T) {
+	app := NewApp(&mockRecorder{}, &mockTranscriber{}, &mockPaster{}, NewSound(false, slog.Default()), slog.Default())
+	atomic.StoreInt32(&app.recording, 0)
+	atomic.StoreInt32(&app.busy, 0)
+	atomic.StoreUint64(&app.activeSessionID, 42)
+
+	if app.IsIdle() {
+		t.Fatal("expected not idle while a released session is pending transcription")
+	}
 }
 
 func TestApp_SetRecorder_WhileIdle(t *testing.T) {

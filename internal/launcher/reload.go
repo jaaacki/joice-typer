@@ -56,6 +56,12 @@ func applyReloadedConfig(runtime *runtimeConfigState, app *apppkg.App, newCfg co
 
 	stagedTranscriber := runtime.transcriber
 	if transcriberChanged {
+		logger.Info("staging transcriber reload", "component", "main", "operation", "applyReloadedConfig",
+			"old_model_size", oldCfg.ModelSize, "new_model_size", newCfg.ModelSize,
+			"old_language", oldCfg.Language, "new_language", newCfg.Language,
+			"old_decode_mode", oldCfg.DecodeMode, "new_decode_mode", newCfg.DecodeMode,
+			"old_punctuation_mode", oldCfg.PunctuationMode, "new_punctuation_mode", newCfg.PunctuationMode,
+			"old_output_mode", oldCfg.OutputMode, "new_output_mode", newCfg.OutputMode)
 		modelPath, err := deps.defaultModelPath(newCfg.ModelSize)
 		if err != nil {
 			return err
@@ -94,7 +100,7 @@ func applyReloadedConfig(runtime *runtimeConfigState, app *apppkg.App, newCfg co
 		runtime.transcriber = stagedTranscriber
 		app.SetTranscriber(stagedTranscriber)
 		logger.Info("transcriber updated", "component", "main", "operation", "applyReloadedConfig",
-			"language", newCfg.Language, "decode_mode", newCfg.DecodeMode, "punctuation_mode", newCfg.PunctuationMode)
+			"model_size", newCfg.ModelSize, "language", newCfg.Language, "decode_mode", newCfg.DecodeMode, "punctuation_mode", newCfg.PunctuationMode, "output_mode", newCfg.OutputMode)
 		if closeErr := oldTranscriber.Close(); closeErr != nil {
 			logger.Error("failed to close old transcriber", "component", "main", "operation", "applyReloadedConfig", "error", closeErr)
 		}

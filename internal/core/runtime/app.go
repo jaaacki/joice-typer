@@ -17,18 +17,20 @@ const clipboardTranscribeTimeout = 90 * time.Second
 // App is the orchestrator that wires hotkey events to the
 // record -> transcribe -> paste pipeline.
 type App struct {
-	recorder      Recorder
-	transcriber   Transcriber
-	paster        Paster
-	componentMu   sync.RWMutex // guards recorder, transcriber, and paster
-	sound         *Sound
-	logger        *slog.Logger
-	baseLogger    *slog.Logger
-	busy          int32 // atomic flag: 1 = transcribing/finalizing
-	recording     int32 // atomic flag: 1 = recording in progress
-	stateMu       sync.RWMutex
-	onStateChange func(AppState)
-	wg            sync.WaitGroup
+	recorder        Recorder
+	transcriber     Transcriber
+	paster          Paster
+	componentMu     sync.RWMutex // guards recorder, transcriber, and paster
+	sound           *Sound
+	logger          *slog.Logger
+	baseLogger      *slog.Logger
+	busy            int32 // atomic flag: 1 = transcribing/finalizing
+	recording       int32 // atomic flag: 1 = recording in progress
+	stateMu         sync.RWMutex
+	onStateChange   func(AppState)
+	wg              sync.WaitGroup
+	nextSessionID   uint64
+	activeSessionID uint64
 }
 
 // NewApp creates an App with all components pre-constructed.
@@ -89,7 +91,9 @@ func (a *App) handlePress() {
 		a.sound.PlayError()
 		return
 	}
-	a.logger.Debug("trigger pressed", "operation", "handlePress")
+	sessionID := atomic.AddUint64(&a.nextSessionID, 1)
+	atomic.StoreUint64(&a.activeSessionID, sessionID)
+	a.logger.Debug("trigger pressed", "operation", "handlePress", "session_id", sessionID)
 
 	a.componentMu.RLock()
 	rec := a.recorder
@@ -107,11 +111,13 @@ func (a *App) handlePress() {
 			"operation", "handlePress", "error", startErr)
 		a.sound.PlayError()
 		a.emitState(a.failureState(startErr))
+		atomic.StoreUint64(&a.activeSessionID, 0)
 		return
 	}
 
 	a.logger.Debug("recording started after press",
 		"operation", "handlePress",
+		"session_id", sessionID,
 		"press_to_record_ms", time.Since(pressTime).Milliseconds())
 
 	a.sound.PlayStart()
@@ -159,11 +165,12 @@ func (a *App) handleRelease() {
 		a.logger.Debug("not recording, ignoring release", "operation", "handleRelease")
 		return
 	}
-	a.logger.Debug("trigger released", "operation", "handleRelease")
-	a.handleReleaseClipboard()
+	sessionID := atomic.LoadUint64(&a.activeSessionID)
+	a.logger.Debug("trigger released", "operation", "handleRelease", "session_id", sessionID)
+	a.handleReleaseClipboard(sessionID)
 }
 
-func (a *App) handleReleaseClipboard() {
+func (a *App) handleReleaseClipboard(sessionID uint64) {
 	releaseTime := time.Now()
 	a.componentMu.RLock()
 	rec := a.recorder
@@ -174,30 +181,33 @@ func (a *App) handleReleaseClipboard() {
 	atomic.StoreInt32(&a.recording, 0)
 	if err != nil {
 		a.logger.Error("failed to stop recording",
-			"operation", "handleReleaseClipboard", "error", err, "stop_ms", stopMs)
+			"operation", "handleReleaseClipboard", "session_id", sessionID, "error", err, "stop_ms", stopMs)
 		a.sound.PlayError()
 		a.emitState(a.failureState(err))
+		atomic.StoreUint64(&a.activeSessionID, 0)
 		return
 	}
 
-	a.logger.Info("recording stopped for transcription", "operation", "handleReleaseClipboard", "stop_ms", stopMs, "samples", len(audio))
+	a.logger.Info("recording stopped for transcription", "operation", "handleReleaseClipboard", "session_id", sessionID, "stop_ms", stopMs, "samples", len(audio))
 
 	a.sound.PlayStop()
 	a.emitState(StateTranscribing)
 
 	if len(audio) == 0 {
-		a.logger.Warn("no audio captured", "operation", "handleReleaseClipboard")
+		a.logger.Warn("no audio captured", "operation", "handleReleaseClipboard", "session_id", sessionID)
 		a.emitState(StateReady)
+		atomic.StoreUint64(&a.activeSessionID, 0)
 		return
 	}
 
 	// Process transcription async so event loop stays responsive
 	a.wg.Add(1)
-	go a.transcribeAndPaste(audio)
+	go a.transcribeAndPaste(sessionID, audio)
 }
 
-func (a *App) transcribeAndPaste(audio []float32) {
+func (a *App) transcribeAndPaste(sessionID uint64, audio []float32) {
 	defer a.wg.Done()
+	defer atomic.StoreUint64(&a.activeSessionID, 0)
 	transcribeStart := time.Now()
 
 	a.componentMu.RLock()
@@ -207,7 +217,7 @@ func (a *App) transcribeAndPaste(audio []float32) {
 
 	if !atomic.CompareAndSwapInt32(&a.busy, 0, 1) {
 		a.logger.Warn("transcription already in progress — audio from this session discarded",
-			"component", "app", "operation", "transcribeAndPaste")
+			"component", "app", "operation", "transcribeAndPaste", "session_id", sessionID)
 		a.sound.PlayError()
 		a.emitState(StateReady)
 		return
@@ -222,13 +232,13 @@ func (a *App) transcribeAndPaste(audio []float32) {
 		var timeoutErr *ErrDependencyTimeout
 		if errors.As(err, &timeoutErr) {
 			a.logger.Error("transcription timed out — speech engine may be stuck",
-				"component", "app", "operation", "transcribeAndPaste", "error", err)
+				"component", "app", "operation", "transcribeAndPaste", "session_id", sessionID, "error", err)
 			// Show dependency-stuck state — distinct from permission issues
 			a.emitState(StateDependencyStuck)
 			time.Sleep(2 * time.Second)
 		} else {
 			a.logger.Error("transcription failed",
-				"operation", "transcribeAndPaste", "error", err)
+				"operation", "transcribeAndPaste", "session_id", sessionID, "error", err)
 		}
 		a.sound.PlayError()
 		a.emitState(StateReady)
@@ -236,7 +246,7 @@ func (a *App) transcribeAndPaste(audio []float32) {
 	}
 
 	if text == "" {
-		a.logger.Warn("no speech detected", "operation", "transcribeAndPaste")
+		a.logger.Warn("no speech detected", "operation", "transcribeAndPaste", "session_id", sessionID)
 		a.emitState(StateReady)
 		return
 	}
@@ -245,14 +255,14 @@ func (a *App) transcribeAndPaste(audio []float32) {
 	pasteStart := time.Now()
 	if err := pst.Paste(formatPasteText(text)); err != nil {
 		a.logger.Error("paste failed",
-			"operation", "transcribeAndPaste", "error", err, "transcribe_ms", transcribeMs)
+			"operation", "transcribeAndPaste", "session_id", sessionID, "error", err, "transcribe_ms", transcribeMs)
 		a.sound.PlayError()
 		a.emitState(StateReady)
 		return
 	}
 
 	a.logger.Info("text pasted", "operation", "transcribeAndPaste",
-		"text_length", len(text), "transcribe_ms", transcribeMs, "paste_ms", time.Since(pasteStart).Milliseconds(), "total_ms", time.Since(transcribeStart).Milliseconds())
+		"session_id", sessionID, "text_length", len(text), "transcribe_ms", transcribeMs, "paste_ms", time.Since(pasteStart).Milliseconds(), "total_ms", time.Since(transcribeStart).Milliseconds())
 	a.emitState(StateReady)
 }
 
@@ -281,7 +291,7 @@ func hasTerminalPunctuation(text string) bool {
 // IsIdle returns true if no recording, transcription, or native CGO work is in flight.
 // Checks both the app-level busy flag AND the transcriber's bulkhead semaphore.
 func (a *App) IsIdle() bool {
-	if atomic.LoadInt32(&a.recording) != 0 || atomic.LoadInt32(&a.busy) != 0 {
+	if atomic.LoadInt32(&a.recording) != 0 || atomic.LoadInt32(&a.busy) != 0 || atomic.LoadUint64(&a.activeSessionID) != 0 {
 		return false
 	}
 	a.componentMu.RLock()

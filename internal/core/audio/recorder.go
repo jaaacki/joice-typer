@@ -621,16 +621,52 @@ func (r *portaudioRecorder) Stop() ([]float32, error) {
 
 func (r *portaudioRecorder) Close() error {
 	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.logger.Info("closing", "operation", "Close")
-	if r.warmStream != nil {
-		if err := r.warmStream.Close(); err != nil {
+	r.logger.Info("closing", "operation", "Close", "recording", r.recording, "has_active_stream", r.activeStream != nil, "has_warm_stream", r.warmStream != nil)
+	if r.recording {
+		r.recording = false
+	}
+	activeStream := r.activeStream
+	done := r.done
+	warmStream := r.warmStream
+	r.warmStream = nil
+	r.mu.Unlock()
+
+	if activeStream != nil {
+		if err := activeStream.Abort(); err != nil {
+			r.logger.Warn("failed to abort active stream while closing", "operation", "Close", "error", err)
+		}
+	}
+	activeClosed := true
+	if done != nil {
+		select {
+		case <-done:
+		case <-time.After(1 * time.Second):
+			activeClosed = false
+			r.logger.Error("active readLoop did not exit during close", "operation", "Close")
+		}
+	}
+	if warmStream != nil {
+		if err := warmStream.Close(); err != nil {
 			r.logger.Warn("failed to close warm stream",
 				"operation", "Close", "error", err)
 		}
-		r.warmStream = nil
 	}
-	// Active stream cleanup is handled by readLoop's defer.
-	// Each readLoop owns its stream by value and closes it on exit.
+
+	r.mu.Lock()
+	if activeClosed && r.activeStream == activeStream {
+		r.activeStream = nil
+	}
+	if activeClosed && r.done == done {
+		r.done = nil
+	}
+	r.mu.Unlock()
+	if !activeClosed {
+		return &apppkg.ErrDependencyTimeout{
+			Component: "recorder",
+			Operation: "Close",
+			Wrapped:   fmt.Errorf("active readLoop did not exit"),
+		}
+	}
+	r.logger.Info("closed", "operation", "Close")
 	return nil
 }

@@ -5,17 +5,60 @@ package transcription
 /*
 #include <whisper.h>
 #include <stdlib.h>
+#include <stdbool.h>
+#include <stdatomic.h>
+
+typedef struct whisper_abort_flag {
+	atomic_bool cancelled;
+} whisper_abort_flag;
+
+static whisper_abort_flag * whisper_abort_flag_new(void) {
+	whisper_abort_flag *flag = (whisper_abort_flag *)calloc(1, sizeof(whisper_abort_flag));
+	if (flag != NULL) {
+		atomic_init(&flag->cancelled, false);
+	}
+	return flag;
+}
+
+static void whisper_abort_flag_cancel(whisper_abort_flag *flag) {
+	if (flag != NULL) {
+		atomic_store_explicit(&flag->cancelled, true, memory_order_release);
+	}
+}
+
+static bool whisper_abort_flag_is_cancelled(whisper_abort_flag *flag) {
+	if (flag == NULL) {
+		return false;
+	}
+	return atomic_load_explicit(&flag->cancelled, memory_order_acquire);
+}
+
+static bool whisper_abort_callback_bridge(void *data) {
+	if (data == NULL) {
+		return false;
+	}
+	whisper_abort_flag *flag = (whisper_abort_flag *)data;
+	return atomic_load_explicit(&flag->cancelled, memory_order_acquire);
+}
+
+static ggml_abort_callback whisper_abort_callback_ptr(void) {
+	return whisper_abort_callback_bridge;
+}
 */
 import "C"
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"log/slog"
 	"math"
+	"os"
 	"runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 	"unicode"
 	"unicode/utf8"
@@ -30,9 +73,8 @@ const (
 	maxTranscribeBytes    = 50000            // cap output text to ~50KB
 	transcribeTimeout     = 90 * time.Second // hard deadline for whisper_full
 	whisperBeamSize       = 5
-	longFormSeconds       = 8 // medium utterances should preserve more context than short push-to-talk clips
-	shortFormMaxTokens    = 8
-	shortFormMaxLen       = 32
+	shortFormMaxTokens    = 64
+	shortFormMaxLen       = 256
 	minTranscribeRMS      = 0.001
 )
 
@@ -47,6 +89,8 @@ type whisperTranscriber struct {
 	sampleRate int
 	logger     *slog.Logger
 	inflight   chan struct{} // semaphore: capacity 1
+	generation uint64
+	nextRunID  uint64
 }
 
 type decodeConfig struct {
@@ -58,6 +102,8 @@ type runtimeDecodeMode struct {
 	applySilenceGate bool
 	logAudioRMS      bool
 }
+
+var nextTranscriberGeneration uint64
 
 func audioRMS(audio []float32) float64 {
 	if len(audio) == 0 {
@@ -71,7 +117,25 @@ func audioRMS(audio []float32) float64 {
 }
 
 func shortFormTokenLimit(durationSeconds float64) int {
-	return min(shortFormMaxTokens, max(4, int(math.Ceil(durationSeconds*2.5))+2))
+	return min(shortFormMaxTokens, max(16, int(math.Ceil(durationSeconds*6))+8))
+}
+
+func transcriptHash(text string) string {
+	sum := sha256.Sum256([]byte(text))
+	return hex.EncodeToString(sum[:8])
+}
+
+func transcriptPreview(text string) string {
+	if os.Getenv("JOICETYPER_LOG_TRANSCRIPT_PREVIEW") != "1" {
+		return ""
+	}
+	const maxRunes = 80
+	text = strings.ReplaceAll(text, "\n", " ")
+	runes := []rune(text)
+	if len(runes) <= maxRunes {
+		return text
+	}
+	return string(runes[:maxRunes])
 }
 
 func decodeConfigForMode(mode string) decodeConfig {
@@ -81,18 +145,12 @@ func decodeConfigForMode(mode string) decodeConfig {
 	return decodeConfig{strategy: "beam", beamSize: whisperBeamSize}
 }
 
-func effectiveDecodeConfig(mode string, longForm bool, outputMode string) decodeConfig {
-	if outputMode != "translation" && !longForm {
-		return decodeConfigForMode("greedy")
-	}
+func effectiveDecodeConfig(mode string, outputMode string) decodeConfig {
 	return decodeConfigForMode(mode)
 }
 
-func whisperThreadCount(longForm bool) int {
+func whisperThreadCount() int {
 	n := max(1, runtime.NumCPU())
-	if longForm {
-		return min(n, 4)
-	}
 	return min(n, 2)
 }
 
@@ -166,7 +224,8 @@ func NewTranscriber(ctx context.Context, modelPath string, modelSize string, lan
 		}
 	}
 
-	l.Info("model loaded", "operation", "NewTranscriber")
+	generation := atomic.AddUint64(&nextTranscriberGeneration, 1)
+	l.Info("model loaded", "operation", "NewTranscriber", "generation", generation, "model_size", modelSize, "language", language, "decode_mode", decodeMode, "punctuation_mode", punctuationMode, "output_mode", outputMode)
 
 	// Pre-warm the GPU pipeline with two dummy inferences. On Windows this
 	// allocates Vulkan compute scratch buffers; on macOS it compiles and caches
@@ -220,13 +279,42 @@ func NewTranscriber(ctx context.Context, modelPath string, modelSize string, lan
 	return &whisperTranscriber{
 		ctx: wctx, lang: language, sampleRate: sampleRate, logger: l,
 		decodeMode: decodeMode, punctMode: punctuationMode, outputMode: outputMode,
-		inflight: make(chan struct{}, 1), vocab: "",
+		inflight: make(chan struct{}, 1), vocab: "", generation: generation,
 	}, nil
 }
 
 type transcribeResult struct {
 	text string
 	err  error
+}
+
+type whisperAbortFlag struct {
+	ptr *C.whisper_abort_flag
+}
+
+func newWhisperAbortFlag() (*whisperAbortFlag, error) {
+	ptr := C.whisper_abort_flag_new()
+	if ptr == nil {
+		return nil, fmt.Errorf("transcriber.NewAbortFlag: allocate abort flag")
+	}
+	return &whisperAbortFlag{ptr: ptr}, nil
+}
+
+func (f *whisperAbortFlag) cancel() {
+	if f != nil && f.ptr != nil {
+		C.whisper_abort_flag_cancel(f.ptr)
+	}
+}
+
+func (f *whisperAbortFlag) cancelled() bool {
+	return f != nil && f.ptr != nil && bool(C.whisper_abort_flag_is_cancelled(f.ptr))
+}
+
+func (f *whisperAbortFlag) free() {
+	if f != nil && f.ptr != nil {
+		C.free(unsafe.Pointer(f.ptr))
+		f.ptr = nil
+	}
 }
 
 func (t *whisperTranscriber) Transcribe(ctx context.Context, audio []float32) (string, error) {
@@ -269,16 +357,35 @@ func (t *whisperTranscriber) Transcribe(ctx context.Context, audio []float32) (s
 		}
 	}
 
+	abortFlag, err := newWhisperAbortFlag()
+	if err != nil {
+		<-t.inflight
+		return "", err
+	}
+
 	ch := make(chan transcribeResult, 1)
 	go func() {
-		defer func() { <-t.inflight }() // release semaphore when done
-		text, err := t.transcribeBlocking(audio)
+		defer func() {
+			abortFlag.free()
+			<-t.inflight
+		}()
+		text, err := t.transcribeBlocking(audio, abortFlag)
 		ch <- transcribeResult{text, err}
 	}()
 
 	select {
 	case <-ctx.Done():
-		// Don't release semaphore here — goroutine still running
+		abortFlag.cancel()
+		select {
+		case result := <-ch:
+			if result.err != nil {
+				t.logger.Warn("whisper aborted after context cancellation",
+					"operation", "Transcribe", "generation", t.generation, "error", result.err)
+			}
+		case <-time.After(5 * time.Second):
+			t.logger.Error("whisper did not return after abort callback was signalled",
+				"operation", "Transcribe", "generation", t.generation)
+		}
 		return "", &apppkg.ErrDependencyTimeout{
 			Component: "transcriber",
 			Operation: "Transcribe",
@@ -289,7 +396,8 @@ func (t *whisperTranscriber) Transcribe(ctx context.Context, audio []float32) (s
 	}
 }
 
-func (t *whisperTranscriber) transcribeBlocking(audio []float32) (string, error) {
+func (t *whisperTranscriber) transcribeBlocking(audio []float32, abortFlag *whisperAbortFlag) (string, error) {
+	runID := atomic.AddUint64(&t.nextRunID, 1)
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
@@ -302,10 +410,9 @@ func (t *whisperTranscriber) transcribeBlocking(audio []float32) (string, error)
 	if t.sampleRate > 0 {
 		durationSeconds = float64(len(audio)) / float64(t.sampleRate)
 	}
-	longForm := durationSeconds >= longFormSeconds
 	mode := runtimeDecodeModeForOutputMode(t.outputMode)
 
-	decodeCfg := effectiveDecodeConfig(t.decodeMode, longForm, t.outputMode)
+	decodeCfg := effectiveDecodeConfig(t.decodeMode, t.outputMode)
 	params := C.whisper_full_default_params(C.WHISPER_SAMPLING_GREEDY)
 	if decodeCfg.strategy == "beam" {
 		params = C.whisper_full_default_params(C.WHISPER_SAMPLING_BEAM_SEARCH)
@@ -314,11 +421,29 @@ func (t *whisperTranscriber) transcribeBlocking(audio []float32) (string, error)
 	params.print_timestamps = C._Bool(false)
 	params.print_realtime = C._Bool(false)
 	params.print_special = C._Bool(false)
-	params.n_threads = C.int(whisperThreadCount(longForm))
+	params.abort_callback = C.whisper_abort_callback_ptr()
+	params.abort_callback_user_data = unsafe.Pointer(abortFlag.ptr)
+	params.n_threads = C.int(whisperThreadCount())
 	params.no_timestamps = C._Bool(true)
 
-	audioCtxFrames := 1500
-	t.logger.Info("transcribing", "operation", "Transcribe", "samples", len(audio), "audio_rms", rms, "duration_sec", durationSeconds, "long_form", longForm)
+	audioCtxFrames := int(durationSeconds*50) + 64
+	if audioCtxFrames > 1500 {
+		audioCtxFrames = 1500
+	}
+	if audioCtxFrames < 96 {
+		audioCtxFrames = 96
+	}
+	t.logger.Info("transcribing", "operation", "Transcribe",
+		"generation", t.generation,
+		"run_id", runID,
+		"samples", len(audio),
+		"audio_rms", rms,
+		"duration_sec", durationSeconds,
+		"profile", t.outputMode,
+		"configured_decode_mode", t.decodeMode,
+		"effective_decode_strategy", decodeCfg.strategy,
+		"punctuation_mode", t.punctMode,
+		"vocab_length", len(t.vocab))
 	if rms < minTranscribeRMS {
 		t.logger.Info("skipping transcription — audio below energy threshold", "operation", "Transcribe", "rms", rms)
 		return "", nil
@@ -327,34 +452,25 @@ func (t *whisperTranscriber) transcribeBlocking(audio []float32) (string, error)
 		params.no_context = C._Bool(true)
 		params.single_segment = C._Bool(false)
 		params.translate = C._Bool(true)
+		params.audio_ctx = C.int(audioCtxFrames)
 	} else {
 		params.no_context = C._Bool(true)
 		params.single_segment = C._Bool(true)
 		params.suppress_blank = C._Bool(true)
 		params.suppress_nst = C._Bool(true)
+		params.audio_ctx = C.int(audioCtxFrames)
+		params.max_tokens = C.int(shortFormTokenLimit(durationSeconds))
+		params.max_len = C.int(shortFormMaxLen)
+		params.split_on_word = C._Bool(true)
+		params.duration_ms = C.int(durationSeconds*1000) + C.int(250)
+		params.temperature_inc = C.float(0.0)
+		params.no_speech_thold = C.float(0.55)
+		params.entropy_thold = C.float(2.4)
+		params.logprob_thold = C.float(-1.0)
 		if decodeCfg.strategy == "greedy" {
 			params.greedy.best_of = C.int(1)
 			params.temperature = C.float(0.0)
 		}
-		if longForm {
-			params.no_context = C._Bool(false)
-			params.no_timestamps = C._Bool(false)
-			params.single_segment = C._Bool(false)
-		} else {
-			params.max_tokens = C.int(shortFormTokenLimit(durationSeconds))
-			params.max_len = C.int(shortFormMaxLen)
-			params.split_on_word = C._Bool(true)
-			params.duration_ms = C.int(durationSeconds*1000) + C.int(250)
-			params.temperature_inc = C.float(0.0)
-			params.no_speech_thold = C.float(0.55)
-			params.entropy_thold = C.float(2.4)
-			params.logprob_thold = C.float(-1.0)
-		}
-		audioCtxFrames = int(durationSeconds*50) + 64
-		if audioCtxFrames > 1500 {
-			audioCtxFrames = 1500
-		}
-		params.audio_ctx = C.int(audioCtxFrames)
 	}
 
 	if decodeCfg.strategy == "beam" {
@@ -387,11 +503,13 @@ func (t *whisperTranscriber) transcribeBlocking(audio []float32) (string, error)
 	}
 
 	var sb strings.Builder
+	segmentsKept := 0
 	for i := 0; i < n; i++ {
 		cText := C.whisper_full_get_segment_text(t.ctx, C.int(i))
 		if cText == nil {
 			continue
 		}
+		segmentsKept++
 		sb.WriteString(C.GoString(cText))
 		if sb.Len() > maxTranscribeBytes {
 			t.logger.Warn("output size capped", "operation", "Transcribe", "bytes", sb.Len(), "max", maxTranscribeBytes)
@@ -402,7 +520,24 @@ func (t *whisperTranscriber) transcribeBlocking(audio []float32) (string, error)
 	text := sanitizeTranscript(strings.TrimSpace(sb.String()))
 	text = applyPunctuationMode(t.punctMode, text)
 	t.logger.Info("transcribed", "operation", "Transcribe",
-		"segments", n, "text_length", len(text), "decode_ms", decodeMs, "threads", int(params.n_threads), "audio_ctx", audioCtxFrames, "decode_strategy", decodeCfg.strategy, "max_tokens", int(params.max_tokens), "max_len", int(params.max_len))
+		"generation", t.generation,
+		"run_id", runID,
+		"segments", n,
+		"segments_kept", segmentsKept,
+		"text_length", len(text),
+		"text_hash", transcriptHash(text),
+		"text_preview", transcriptPreview(text),
+		"decode_ms", decodeMs,
+		"threads", int(params.n_threads),
+		"audio_ctx", audioCtxFrames,
+		"decode_strategy", decodeCfg.strategy,
+		"configured_decode_mode", t.decodeMode,
+		"no_context", bool(params.no_context),
+		"single_segment", bool(params.single_segment),
+		"max_tokens", int(params.max_tokens),
+		"max_len", int(params.max_len),
+		"duration_ms", int(params.duration_ms),
+		"temperature_inc", float32(params.temperature_inc))
 	return text, nil
 }
 
@@ -533,7 +668,7 @@ func (t *whisperTranscriber) SetVocabulary(vocab string) {
 }
 
 func (t *whisperTranscriber) Close() error {
-	t.logger.Info("closing", "operation", "Close")
+	t.logger.Info("closing", "operation", "Close", "generation", t.generation, "inflight", t.IsInflight())
 
 	// Poll TryLock with a hard deadline. No helper goroutine, no race.
 	// TryLock is non-blocking — if the mutex is held by a hung CGO call,
@@ -546,6 +681,7 @@ func (t *whisperTranscriber) Close() error {
 				t.ctx = nil
 			}
 			t.mu.Unlock()
+			t.logger.Info("closed", "operation", "Close", "generation", t.generation)
 			return nil
 		}
 		if time.Now().After(deadline) {
